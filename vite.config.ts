@@ -32,6 +32,7 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    open: process.env.DIFIT_VITE_OPEN_PATH ?? false,
     proxy: {
       '/api': {
         target: apiTarget,

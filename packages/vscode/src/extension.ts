@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 import { type DiffSelection } from '../../../src/types/diff.js';
 import { DiffMode } from '../../../src/types/watch.js';
 import { createDiffSelection, getDiffSelectionKey } from '../../../src/utils/diffSelection.js';
+import { resolveExtensionEditorEnvironment } from '../../../src/utils/extensionEditor.js';
 
 const OPEN_REVIEW_COMMAND = 'difit.openReview';
 const STOP_REVIEW_COMMAND = 'difit.stopReview';
@@ -195,7 +196,7 @@ function forkBundled(repoRoot: string, target: ReviewTarget): ChildProcess {
     // Never inherit the extension host's execArgv (e.g. --inspect), which
     // would make the child fight over the debug port.
     execArgv: [],
-    env: { ...process.env, NODE_ENV: 'production' },
+    env: { ...getEditorEnvironment(), NODE_ENV: 'production' },
   });
 }
 
@@ -212,6 +213,7 @@ function spawnExternal(
   return spawn(executablePath, args, {
     cwd: repoRoot,
     stdio: ['ignore', 'pipe', 'pipe'],
+    env: getEditorEnvironment(),
   });
 }
 
@@ -327,6 +329,11 @@ function resolveTargetWorkspaceFolder(): vscode.WorkspaceFolder | undefined {
 
 function getConfiguredExecutablePath(): string {
   return vscode.workspace.getConfiguration('difit').get<string>('executablePath', '').trim();
+}
+
+function getEditorEnvironment(): NodeJS.ProcessEnv {
+  const selectedEditor = vscode.workspace.getConfiguration('difit').get<string>('editor', 'auto');
+  return resolveExtensionEditorEnvironment(process.env, selectedEditor, vscode.env.uriScheme);
 }
 
 async function runGit(cwd: string, args: readonly string[]): Promise<string> {

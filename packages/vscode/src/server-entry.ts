@@ -22,7 +22,7 @@ async function main(): Promise<void> {
 
   const request = JSON.parse(raw) as LaunchRequest;
 
-  const { url, port, isEmpty } = await startServer({
+  const { launchUrl, port, isEmpty } = await startServer({
     selection: request.selection,
     diffMode: request.diffMode,
     repoPath: request.repoPath,
@@ -30,7 +30,7 @@ async function main(): Promise<void> {
     keepAlive: true,
   });
 
-  process.send?.({ type: 'ready', url, port, isEmpty });
+  process.send?.({ type: 'ready', url: launchUrl, port, isEmpty });
 }
 
 main().catch((error: unknown) => {

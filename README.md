@@ -211,6 +211,29 @@ Stdin mode is selected with intent-first rules:
 | `--background`            | false           | Keep the server running in the background and output JSON connection info                               |
 | `--context <lines>`       | git default (3) | Limit surrounding context lines per change (`0` shows changes only; not available with `--pr` or stdin) |
 
+### Open in editor
+
+Set the editor before starting difit. The server chooses the executable and
+arguments; the browser sends the selected file, line, and a session credential. `DIFIT_EDITOR`
+accepts `vscode` (default), `cursor`, `zed`, `textmate`, `bbedit`, `emacs`,
+`macvim`, `sublime`, `nova`, `custom`, or `none`. If `DIFIT_EDITOR` is unset,
+difit checks `EDITOR` for one of these preset names. Use `none` to hide the
+button. Open in editor is unavailable for stdin diffs.
+
+```sh
+DIFIT_EDITOR=cursor difit .
+DIFIT_EDITOR=custom DIFIT_EDITOR_COMMAND=emacsclient \
+  DIFIT_EDITOR_ARGS='--no-wait +%line %file' difit .
+```
+
+For `custom`, set both `DIFIT_EDITOR_COMMAND` and `DIFIT_EDITOR_ARGS`. The
+template must pass `%file` or `%file:%line` as a separate argument; `%line` is replaced with the
+selected line. `%file` becomes the absolute repository file path. Arguments are
+passed directly to the executable without a shell. Restart difit to change the
+editor.
+Use the full URL printed by difit when opening a review manually; its fragment
+authorizes editor launches for that server session.
+
 ## 💬 Comment System
 
 difit includes a review comment system that makes it easy to provide feedback to AI coding agents:

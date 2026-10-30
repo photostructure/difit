@@ -61,6 +61,24 @@
           "type": "string",
           "default": "",
           "description": "Optional path to an external difit executable. Leave empty to use the difit version bundled with this extension."
+        },
+        "difit.editor": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "vscode",
+            "cursor",
+            "zed",
+            "textmate",
+            "bbedit",
+            "emacs",
+            "macvim",
+            "sublime",
+            "nova",
+            "none"
+          ],
+          "description": "Editor preset for Open in editor. Auto preserves inherited DIFIT_EDITOR; otherwise it selects Cursor in Cursor, or uses a recognized EDITOR preset in VS Code, falling back to VS Code. A selected preset overrides inherited DIFIT_EDITOR. Restart the review after changing this setting."
         }
       }
     }

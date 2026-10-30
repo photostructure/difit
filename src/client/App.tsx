@@ -15,6 +15,7 @@ import {
 import { DEFAULT_DIFF_VIEW_MODE, normalizeDiffViewMode } from '../utils/diffMode';
 import { mergeCommentThreads } from '../utils/commentImports';
 import { toCommentThread } from '../utils/commentThreads';
+import { EDITOR_SESSION_FRAGMENT_KEY, EDITOR_SESSION_HEADER } from '../utils/editorOptions';
 import {
   createDiffSelection,
   diffSelectionsEqual,
@@ -132,7 +133,19 @@ const getStoredSidebarOpen = (): boolean | null => {
 
 const getInitialFileTreeOpen = () => getStoredSidebarOpen() ?? true;
 
+const readEditorSessionToken = (): string | null =>
+  new URLSearchParams(window.location.hash.slice(1)).get(EDITOR_SESSION_FRAGMENT_KEY);
+
 function App() {
+  const [editorSessionToken, setEditorSessionToken] = useState(readEditorSessionToken);
+  useEffect(() => {
+    const captureLaunchToken = () => {
+      const nextToken = readEditorSessionToken();
+      if (nextToken) setEditorSessionToken(nextToken);
+    };
+    window.addEventListener('hashchange', captureLaunchToken);
+    return () => window.removeEventListener('hashchange', captureLaunchToken);
+  }, []);
   const [diffData, setDiffData] = useState<DiffResponse | null>(null);
   const [diffDataVersion, setDiffDataVersion] = useState(0);
   const [diffMode, setDiffMode] = useState<DiffViewMode>(getInitialDiffViewMode);
@@ -1153,11 +1166,13 @@ function App() {
       try {
         const response = await fetch('/api/open-in-editor', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(editorSessionToken ? { [EDITOR_SESSION_HEADER]: editorSessionToken } : {}),
+          },
           body: JSON.stringify({
             filePath,
             line: lineNumber,
-            editor: settings.editor,
           }),
         });
 
@@ -1178,7 +1193,7 @@ function App() {
         console.error('Failed to open file in editor:', error);
       }
     },
-    [settings.editor],
+    [editorSessionToken],
   );
 
   const handleGlobalClick = (e: React.MouseEvent) => {
@@ -1235,11 +1250,7 @@ function App() {
     );
   }
 
-  const canOpenInEditor =
-    diffData.openInEditorAvailable !== false &&
-    settings.editor.id !== 'none' &&
-    settings.editor.command.trim() !== '' &&
-    settings.editor.argsTemplate.trim() !== '';
+  const canOpenInEditor = diffData.openInEditorAvailable !== false && Boolean(editorSessionToken);
 
   return (
     <WordHighlightProvider>

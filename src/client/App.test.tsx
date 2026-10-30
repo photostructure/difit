@@ -570,6 +570,65 @@ describe('App Component - Heartbeat Connection', () => {
   });
 });
 
+describe('App Component - Editor launch', () => {
+  it.each([
+    { name: 'from the launch URL', navigateToAnchor: false },
+    { name: 'after in-page fragment navigation', navigateToAnchor: true },
+  ])('sends only the file and line $name', async ({ navigateToAnchor }) => {
+    vi.clearAllMocks();
+    mockComments = [];
+    window.history.replaceState({}, '', '/#difit-editor-token=test-capability');
+    mockFetch({
+      ...mockDiffResponse,
+      files: [
+        {
+          ...mockDiffResponse.files[0]!,
+          chunks: [
+            {
+              header: '@@ -1 +1 @@',
+              oldStart: 1,
+              oldLines: 0,
+              newStart: 1,
+              newLines: 1,
+              lines: [{ type: 'add', content: 'const value = 1;', newLineNumber: 1 }],
+            },
+          ],
+        },
+      ],
+    });
+
+    const { container, rerender } = renderApp();
+    await waitFor(() => {
+      expect(container.querySelector('[data-diff-line-row="true"]')).not.toBeNull();
+    });
+    if (navigateToAnchor) {
+      window.history.replaceState({}, '', '/#guide');
+      rerender(
+        <HotkeysProvider initiallyActiveScopes={['navigation']}>
+          <App />
+        </HotkeysProvider>,
+      );
+    }
+    fireEvent.mouseEnter(container.querySelector('[data-diff-line-row="true"]')!.children[2]!);
+    await waitFor(() => {
+      expect(container.querySelector('button[title="Open in editor"]')).not.toBeNull();
+    });
+    fireEvent.click(container.querySelector('button[title="Open in editor"]')!);
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        '/api/open-in-editor',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({ 'X-Difit-Editor-Token': 'test-capability' }),
+          body: JSON.stringify({ filePath: mockDiffResponse.files[0]!.path, line: 1 }),
+        }),
+      );
+    });
+    window.history.replaceState({}, '', '/');
+  });
+});
+
 describe('App Component - Ship it', () => {
   beforeEach(() => {
     vi.clearAllMocks();

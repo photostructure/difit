@@ -143,6 +143,17 @@ program
     '--merge-base',
     'resolve the base revision with git merge-base before diffing (Git revision mode only)',
   )
+  .addHelpText(
+    'after',
+    `
+Editor configuration (set before starting difit):
+  DIFIT_EDITOR          Editor preset: vscode (default), cursor, zed, textmate,
+                        bbedit, emacs, macvim, sublime, nova, custom, or none.
+                        Falls back to EDITOR when unset.
+  DIFIT_EDITOR_COMMAND  Executable for DIFIT_EDITOR=custom.
+  DIFIT_EDITOR_ARGS     Custom arguments; pass %file or %file:%line separately.
+`,
+  )
   .action(async (commitish: string, compareWith: string | undefined, options: CliOptions) => {
     try {
       const isBackgroundChild = process.env[BACKGROUND_CHILD_ENV] === '1';
@@ -242,7 +253,7 @@ program
 
       if (stdinDiff) {
         // Start server with stdin diff (including --pr patch)
-        const { url, port } = await startServer({
+        const { launchUrl, port } = await startServer({
           stdinDiff,
           preferredPort: options.port,
           host: options.host,
@@ -257,14 +268,14 @@ program
         });
 
         if (backgroundMode) {
-          emitBackgroundHandshake({ port, url, pid: process.pid });
+          emitBackgroundHandshake({ port, url: launchUrl, pid: process.pid });
           if (isBackgroundChild) {
             ignoreStdioErrorsForBackgroundDaemon();
           }
           return;
         }
 
-        console.log(`\n🚀 difit server started on ${url}`);
+        console.log(`\n🚀 difit server started on ${launchUrl}`);
         console.log(`📋 Reviewing: ${stdinReviewLabel}`);
         if (options.keepAlive) {
           console.log('🔒 Keep-alive mode: server will stay running after browser disconnects');
@@ -306,7 +317,7 @@ program
         process.exit(1);
       }
 
-      const { url, port, isEmpty } = await startServer({
+      const { launchUrl, port, isEmpty } = await startServer({
         selection,
         preferredPort: options.port,
         host: options.host,
@@ -324,14 +335,14 @@ program
       });
 
       if (backgroundMode) {
-        emitBackgroundHandshake({ port, url, pid: process.pid });
+        emitBackgroundHandshake({ port, url: launchUrl, pid: process.pid });
         if (isBackgroundChild) {
           ignoreStdioErrorsForBackgroundDaemon();
         }
         return;
       }
 
-      console.log(`\n🚀 difit server started on ${url}`);
+      console.log(`\n🚀 difit server started on ${launchUrl}`);
       console.log(`📋 Reviewing: ${selection.targetCommitish}`);
 
       if (options.keepAlive) {
@@ -346,7 +357,7 @@ program
         console.log(
           '\n! \x1b[33mNo differences found. Browser will not open automatically.\x1b[0m',
         );
-        console.log(`   Server is running at ${url} if you want to check manually.\n`);
+        console.log(`   Server is running at ${launchUrl} if you want to check manually.\n`);
       } else if (options.open) {
         console.log('🌐 Opening browser...\n');
       } else {

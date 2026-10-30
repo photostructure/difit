@@ -1,10 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
-import {
-  DEFAULT_EDITOR_OPTION,
-  type EditorOptionId,
-  resolveEditorOption,
-} from '../../utils/editorOptions';
 import type { AppearanceSettings } from '../components/SettingsModal';
 import { fetchClientSettings, saveClientSettings } from '../services/userSettings';
 import { normalizeAutoViewedPatterns } from '../utils/autoViewedPatterns';
@@ -23,51 +18,8 @@ const DEFAULT_SETTINGS: AppearanceSettings = {
     '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif',
   theme: 'dark',
   syntaxTheme: 'vsDark',
-  editor: {
-    id: DEFAULT_EDITOR_OPTION.id,
-    command: DEFAULT_EDITOR_OPTION.command,
-    argsTemplate: DEFAULT_EDITOR_OPTION.argsTemplate,
-  },
   colorVision: 'normal',
   autoViewedPatterns: [],
-};
-
-/**
- * Normalise whatever we find under `editor` in localStorage into the current
- * `{id, command, argsTemplate}` shape. Handles three legacy / partial cases so
- * that users upgrading from an older build don't crash on `.trim()` of an
- * undefined field:
- *   - missing / null / unknown type                → default editor preset
- *   - legacy string id (e.g. `'vscode'`, `'none'`) → resolve via preset table
- *   - partial object (e.g. `{ id: 'vscode' }`)     → backfill command/args
- *     from the matching preset; for `custom` keep user-supplied strings but
- *     coerce missing fields to `''`.
- */
-const normalizeEditorSettings = (raw: unknown): AppearanceSettings['editor'] => {
-  if (typeof raw === 'string') {
-    const preset = resolveEditorOption(raw);
-    return {
-      id: preset.id,
-      command: preset.command,
-      argsTemplate: preset.argsTemplate,
-    };
-  }
-
-  if (raw && typeof raw === 'object') {
-    const candidate = raw as {
-      id?: unknown;
-      command?: unknown;
-      argsTemplate?: unknown;
-    };
-    const preset = resolveEditorOption(typeof candidate.id === 'string' ? candidate.id : undefined);
-    const id: EditorOptionId = preset.id;
-    const command = typeof candidate.command === 'string' ? candidate.command : preset.command;
-    const argsTemplate =
-      typeof candidate.argsTemplate === 'string' ? candidate.argsTemplate : preset.argsTemplate;
-    return { id, command, argsTemplate };
-  }
-
-  return DEFAULT_SETTINGS.editor;
 };
 
 // Key for appearance settings inside the server-persisted client settings object.
@@ -82,11 +34,12 @@ const normalizeStoredSettings = (raw: unknown): AppearanceSettings | null => {
     autoViewedPatterns?: unknown;
     editor?: unknown;
   };
+  const sanitized = { ...parsed };
+  delete sanitized.editor;
 
   return {
     ...DEFAULT_SETTINGS,
-    ...parsed,
-    editor: normalizeEditorSettings(parsed.editor),
+    ...sanitized,
     autoViewedPatterns: normalizeAutoViewedPatterns(parsed.autoViewedPatterns),
   };
 };

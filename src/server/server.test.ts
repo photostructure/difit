@@ -452,6 +452,7 @@ describe('Server Integration Tests', () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     // Restore process.exit
     process.exit = originalProcessExit;
 
@@ -534,6 +535,7 @@ describe('Server Integration Tests', () => {
 
   describe('API endpoints', () => {
     let port: number;
+    let editorToken: string;
 
     beforeEach(async () => {
       const result = await startServer({
@@ -542,6 +544,138 @@ describe('Server Integration Tests', () => {
       });
       servers.push(result.server);
       port = result.port;
+      editorToken =
+        new URLSearchParams(new URL(result.launchUrl).hash.slice(1)).get('difit-editor-token') ??
+        '';
+    });
+
+    it('requires the session credential before launching an editor', async () => {
+      const response = await fetch(`http://localhost:${port}/api/open-in-editor`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath: 'test.js', line: 1 }),
+      });
+      expect(response.status).toBe(403);
+      expect(editorToken).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    });
+
+    it('rejects a different session credential of the expected length', async () => {
+      const wrongToken = `${editorToken[0] === 'A' ? 'B' : 'A'}${editorToken.slice(1)}`;
+      const response = await fetch(`http://localhost:${port}/api/open-in-editor`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Difit-Editor-Token': wrongToken,
+        },
+        body: JSON.stringify({ filePath: 'test.js', line: 1 }),
+      });
+      expect(response.status).toBe(403);
+    });
+
+    it('rejects client-selected editor commands and arguments', async () => {
+      const response = await fetch(`http://localhost:${port}/api/open-in-editor`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Difit-Editor-Token': editorToken,
+        },
+        body: JSON.stringify({
+          filePath: 'test.js',
+          line: 1,
+          editor: { id: 'custom', command: process.execPath, argsTemplate: '--version' },
+        }),
+      });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('uses the custom editor configured at server startup', async () => {
+      vi.stubEnv('DIFIT_EDITOR', 'custom');
+      vi.stubEnv('DIFIT_EDITOR_COMMAND', process.execPath);
+      vi.stubEnv('DIFIT_EDITOR_ARGS', '--version %file');
+      const configured = await startServer({ preferredPort: 9031 });
+      servers.push(configured.server);
+      vi.unstubAllEnvs();
+
+      const response = await fetch(`http://localhost:${configured.port}/api/open-in-editor`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Difit-Editor-Token':
+            new URLSearchParams(new URL(configured.launchUrl).hash.slice(1)).get(
+              'difit-editor-token',
+            ) ?? '',
+        },
+        body: JSON.stringify({ filePath: 'test.js', line: 1 }),
+      });
+      expect(response.status).toBe(200);
+      const diffResponse = await fetch(`http://localhost:${configured.port}/api/diff`);
+      const diffData = (await diffResponse.json()) as { openInEditorAvailable: boolean };
+      expect(diffData.openInEditorAvailable).toBe(true);
+    });
+
+    it('accepts a custom file-and-line argument', async () => {
+      vi.stubEnv('DIFIT_EDITOR', 'custom');
+      vi.stubEnv('DIFIT_EDITOR_COMMAND', process.execPath);
+      vi.stubEnv('DIFIT_EDITOR_ARGS', '--version %file:%line');
+      const configured = await startServer({ preferredPort: 9033 });
+      servers.push(configured.server);
+      vi.unstubAllEnvs();
+
+      const response = await fetch(`http://localhost:${configured.port}/api/diff`);
+      const diffData = (await response.json()) as { openInEditorAvailable: boolean };
+      expect(diffData.openInEditorAvailable).toBe(true);
+    });
+
+    it('warns when a custom editor has no command', async () => {
+      vi.stubEnv('DIFIT_EDITOR', 'custom');
+      vi.stubEnv('DIFIT_EDITOR_COMMAND', '');
+      vi.stubEnv('DIFIT_EDITOR_ARGS', '%file');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const configured = await startServer({ preferredPort: 9034 });
+        servers.push(configured.server);
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('DIFIT_EDITOR_COMMAND'));
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('warns when DIFIT_EDITOR names an unknown preset', async () => {
+      vi.stubEnv('DIFIT_EDITOR', 'cusor');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const configured = await startServer({ preferredPort: 9035 });
+        servers.push(configured.server);
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('DIFIT_EDITOR'));
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('disables a custom template that embeds the file in evaluated code', async () => {
+      vi.stubEnv('DIFIT_EDITOR', 'custom');
+      vi.stubEnv('DIFIT_EDITOR_COMMAND', 'emacsclient');
+      vi.stubEnv('DIFIT_EDITOR_ARGS', '--eval "(find-file \\"%file\\")"');
+      const configured = await startServer({ preferredPort: 9032 });
+      servers.push(configured.server);
+      vi.unstubAllEnvs();
+
+      const diffResponse = await fetch(`http://localhost:${configured.port}/api/diff`);
+      const diffData = (await diffResponse.json()) as { openInEditorAvailable: boolean };
+      expect(diffData.openInEditorAvailable).toBe(false);
+      const response = await fetch(`http://localhost:${configured.port}/api/open-in-editor`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Difit-Editor-Token':
+            new URLSearchParams(new URL(configured.launchUrl).hash.slice(1)).get(
+              'difit-editor-token',
+            ) ?? '',
+        },
+        body: JSON.stringify({ filePath: 'test.js', line: 1 }),
+      });
+      expect(response.status).toBe(400);
     });
 
     it('GET /api/diff returns diff data', async () => {

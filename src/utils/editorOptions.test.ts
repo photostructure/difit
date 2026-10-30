@@ -17,7 +17,6 @@ describe('editorOptions', () => {
     expect(zed).toBeDefined();
     expect(zed).toMatchObject({
       id: 'zed',
-      label: 'Zed',
       command: 'zed',
       argsTemplate: '%file:%line',
     });
@@ -32,7 +31,7 @@ describe('editorOptions', () => {
     expect(resolveEditorOption('unknown-editor').id).toBe(DEFAULT_EDITOR_ID);
   });
 
-  it('keeps the "none" option with empty command/args so the UI can hide inputs', () => {
+  it('keeps the "none" option with empty command/args to disable editor launches', () => {
     const none = EDITOR_OPTIONS.find((option) => option.id === NONE_EDITOR_ID);
     expect(none).toBeDefined();
     expect(none?.command).toBe('');
@@ -42,7 +41,6 @@ describe('editorOptions', () => {
   it('exposes a "custom" placeholder entry with empty command/args', () => {
     const custom = EDITOR_OPTIONS.find((option) => option.id === CUSTOM_EDITOR_ID);
     expect(custom).toBeDefined();
-    expect(custom?.label).toBe('Custom…');
     expect(custom?.command).toBe('');
     expect(custom?.argsTemplate).toBe('');
   });

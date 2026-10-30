@@ -1,6 +1,6 @@
 import { toCommentThread } from '../utils/commentThreads.js';
 import { spawn } from 'child_process';
-import { createHash } from 'crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { type Server } from 'http';
 import { hostname } from 'os';
 import { join, dirname, isAbsolute, resolve, sep } from 'path';
@@ -24,7 +24,11 @@ import {
 import {
   buildEditorSpawnSpec,
   CUSTOM_EDITOR_ID,
+  EDITOR_OPTIONS,
+  EDITOR_SESSION_FRAGMENT_KEY,
+  EDITOR_SESSION_HEADER,
   NONE_EDITOR_ID,
+  parseEditorArgsTemplate,
   resolveEditorOption,
 } from '../utils/editorOptions.js';
 import { getFileExtension } from '../utils/fileUtils.js';
@@ -134,10 +138,54 @@ function createCommentSessionKey(selection: DiffSelection): string {
 
 export async function startServer(
   options: ServerOptions,
-): Promise<{ port: number; url: string; isEmpty?: boolean; server?: Server }> {
+): Promise<{ port: number; url: string; launchUrl: string; isEmpty?: boolean; server?: Server }> {
   const app = express();
   const repositoryPath = resolve(options.repoPath ?? process.cwd());
   const repositoryId = createHash('sha256').update(repositoryPath).digest('hex');
+  const editorSessionToken = randomBytes(16).toString('base64url');
+  const editorSessionTokenBytes = Buffer.from(editorSessionToken);
+  const editorSelection = process.env.DIFIT_EDITOR ?? process.env.EDITOR;
+  const editorOption = resolveEditorOption(editorSelection);
+  if (
+    process.env.DIFIT_EDITOR &&
+    !EDITOR_OPTIONS.some((option) => option.id === process.env.DIFIT_EDITOR?.toLowerCase())
+  ) {
+    console.warn(`Unknown DIFIT_EDITOR preset: ${process.env.DIFIT_EDITOR}; using vscode`);
+  }
+  const editorCommand =
+    editorOption.id === CUSTOM_EDITOR_ID
+      ? (process.env.DIFIT_EDITOR_COMMAND ?? '').trim()
+      : editorOption.command;
+  const editorArgsTemplate =
+    editorOption.id === CUSTOM_EDITOR_ID
+      ? (process.env.DIFIT_EDITOR_ARGS ?? '').trim()
+      : editorOption.argsTemplate;
+  const customEditorArgsSafe =
+    editorOption.id !== CUSTOM_EDITOR_ID ||
+    (() => {
+      const tokens = parseEditorArgsTemplate(editorArgsTemplate);
+      return (
+        tokens.some((token) => token === '%file' || token === '%file:%line') &&
+        tokens.every(
+          (token) => !token.includes('%file') || token === '%file' || token === '%file:%line',
+        )
+      );
+    })();
+  if (editorOption.id === CUSTOM_EDITOR_ID) {
+    if (!editorCommand) {
+      console.warn('DIFIT_EDITOR=custom requires DIFIT_EDITOR_COMMAND');
+    } else if (!editorArgsTemplate) {
+      console.warn('DIFIT_EDITOR=custom requires DIFIT_EDITOR_ARGS');
+    } else if (!customEditorArgsSafe) {
+      console.warn('DIFIT_EDITOR_ARGS must pass %file or %file:%line as a separate argument');
+    }
+  }
+  const editorAvailable =
+    !options.stdinDiff &&
+    editorOption.id !== NONE_EDITOR_ID &&
+    editorCommand !== '' &&
+    editorArgsTemplate !== '' &&
+    customEditorArgsSafe;
   const initialCommentImports = options.commentImports || [];
   const initialSelection = options.selection ?? createDiffSelection('', '');
   const commentImportId =
@@ -266,28 +314,6 @@ export async function startServer(
     return { ok: true, path: normalizedFilepath };
   }
 
-  interface EditorRequest {
-    readonly id: string | undefined;
-    readonly command: string | undefined;
-    readonly argsTemplate: string | undefined;
-  }
-
-  function parseEditorRequest(value: unknown): EditorRequest {
-    if (!value || typeof value !== 'object') {
-      return { id: undefined, command: undefined, argsTemplate: undefined };
-    }
-    const candidate = value as {
-      id?: unknown;
-      command?: unknown;
-      argsTemplate?: unknown;
-    };
-    return {
-      id: typeof candidate.id === 'string' ? candidate.id : undefined,
-      command: typeof candidate.command === 'string' ? candidate.command : undefined,
-      argsTemplate: typeof candidate.argsTemplate === 'string' ? candidate.argsTemplate : undefined,
-    };
-  }
-
   const commentSessions = new Map<string, CommentSessionState>();
   const initialCommentThreads = mergeCommentImports([], initialCommentImports).threads;
   if (initialCommentThreads.length > 0) {
@@ -399,7 +425,7 @@ export async function startServer(
     res.json({
       ...responseDiffData,
       ignoreWhitespace,
-      openInEditorAvailable: !options.stdinDiff,
+      openInEditorAvailable: editorAvailable,
       baseCommitish,
       targetCommitish,
       requestedBaseCommitish,
@@ -1058,13 +1084,23 @@ export async function startServer(
       return;
     }
 
+    const suppliedTokenBytes = Buffer.from(req.get(EDITOR_SESSION_HEADER) ?? '');
+    if (
+      suppliedTokenBytes.length !== editorSessionTokenBytes.length ||
+      !timingSafeEqual(suppliedTokenBytes, editorSessionTokenBytes)
+    ) {
+      res.status(403).json({ error: 'Open in editor is not authorized' });
+      return;
+    }
+
     const { filePath, line, editor } = (req.body ?? {}) as {
       filePath?: unknown;
       line?: unknown;
       editor?: unknown;
     };
 
-    if (typeof filePath !== 'string') {
+    // The HTTP client can select a file and line, but never a process or argv.
+    if (typeof filePath !== 'string' || editor !== undefined) {
       res.status(400).json({ error: 'Invalid request payload' });
       return;
     }
@@ -1076,35 +1112,11 @@ export async function startServer(
     }
     const resolvedPath = resolve(repositoryPath, filepathResult.path);
 
-    const editorRequest = parseEditorRequest(editor);
-    const editorId =
-      editorRequest.id ?? process.env.DIFIT_EDITOR ?? process.env.EDITOR ?? undefined;
-
-    if (editorId?.toLowerCase() === NONE_EDITOR_ID) {
-      res.status(400).json({ error: 'Open in editor is disabled' });
-      return;
-    }
-
-    // The browser always sends command + argsTemplate in the body, so we use
-    // those directly. We only fall back to the preset table when neither is
-    // provided (for example, when DIFIT_EDITOR is set and there's no body).
-    let command: string;
-    let argsTemplate: string;
-    if (editorRequest.command !== undefined || editorRequest.argsTemplate !== undefined) {
-      command = (editorRequest.command ?? '').trim();
-      argsTemplate = (editorRequest.argsTemplate ?? '').trim();
-    } else {
-      const preset = resolveEditorOption(editorId);
-      command = preset.command;
-      argsTemplate = preset.argsTemplate;
-    }
-
-    if (!command || !argsTemplate) {
-      const isCustom = editorId?.toLowerCase() === CUSTOM_EDITOR_ID;
+    if (!editorAvailable) {
       res.status(400).json({
-        error: isCustom
-          ? 'Custom editor is not configured. Set a command and arguments in Settings > System.'
-          : 'Open in editor is not configured',
+        error: customEditorArgsSafe
+          ? 'Open in editor is disabled'
+          : 'Custom editor arguments must pass %file or %file:%line as a separate argument',
       });
       return;
     }
@@ -1115,8 +1127,8 @@ export async function startServer(
     })();
 
     const spawnSpec = buildEditorSpawnSpec({
-      command,
-      argsTemplate,
+      command: editorCommand,
+      argsTemplate: editorArgsTemplate,
       filePath: resolvedPath,
       lineNumber,
     });
@@ -1325,6 +1337,7 @@ export async function startServer(
     options.preferredPort || 4966,
     options.host || 'localhost',
   );
+  const launchUrl = `${url}#${EDITOR_SESSION_FRAGMENT_KEY}=${editorSessionToken}`;
 
   // Security warning for non-localhost binding
   if (options.host && options.host !== '127.0.0.1' && options.host !== 'localhost') {
@@ -1348,13 +1361,13 @@ export async function startServer(
     // Don't open browser if no differences found
   } else if (options.openBrowser) {
     try {
-      await open(url);
+      await open(launchUrl);
     } catch {
       console.warn('Failed to open browser automatically');
     }
   }
 
-  return { port, url, isEmpty: initialDiffData.isEmpty || false, server };
+  return { port, url, launchUrl, isEmpty: initialDiffData.isEmpty || false, server };
 }
 
 async function startServerWithFallback(

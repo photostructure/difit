@@ -21,11 +21,13 @@ const cliStdoutProxy = createCliStdoutProxy({
     }
 
     console.log('🚀 Starting Vite dev server...');
-    viteProcess = spawn('pnpm', ['exec', 'vite', '--open', '--clearScreen=false'], {
+    const serverUrl = new URL(cliServerUrl);
+    viteProcess = spawn('pnpm', ['exec', 'vite', '--clearScreen=false'], {
       stdio: 'inherit',
       env: {
         ...process.env,
-        VITE_DIFIT_API_URL: cliServerUrl,
+        VITE_DIFIT_API_URL: serverUrl.origin,
+        DIFIT_VITE_OPEN_PATH: `/${serverUrl.hash}`,
       },
     });
   },

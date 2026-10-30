@@ -13,9 +13,14 @@ Review your Git changes in a GitHub-like diff viewer, right inside VS Code.
 
 ## Settings
 
-| Setting                | Description                                                                                                                                                             |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `difit.executablePath` | Optional path to an external `difit` executable. Leave empty (default) to use the bundled difit. Set this if you want to run a newer or local build of the CLI instead. |
+| Setting                | Description                                                                                                                                                                                                                                                                                        |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `difit.executablePath` | Optional path to an external `difit` executable. Leave empty (default) to use the bundled difit. Set this if you want to run a newer or local build of the CLI instead.                                                                                                                            |
+| `difit.editor`         | Editor used by Open in editor. `auto` (default) preserves inherited `DIFIT_EDITOR`; otherwise it chooses Cursor in Cursor, or uses a recognized `EDITOR` preset in VS Code before falling back to VS Code. Choose a preset to override the inherited editor. Restart the review after changing it. |
+
+For a custom editor, set `DIFIT_EDITOR=custom`, `DIFIT_EDITOR_COMMAND`, and
+`DIFIT_EDITOR_ARGS` in the environment that launches VS Code or Cursor. The
+browser's Settings panel no longer selects the editor.
 
 ## How it works
 

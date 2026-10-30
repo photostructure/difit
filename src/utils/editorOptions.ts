@@ -13,10 +13,9 @@ export type EditorOptionId =
 
 interface EditorOption {
   readonly id: EditorOptionId;
-  readonly label: string;
   /**
    * Executable to run. Empty string for the `custom` placeholder (filled in by
-   * the user) and for `none` (open-in-editor disabled).
+   * server environment settings) and for `none` (open-in-editor disabled).
    */
   readonly command: string;
   /**
@@ -30,83 +29,73 @@ interface EditorOption {
 export const CUSTOM_EDITOR_ID: EditorOptionId = 'custom';
 export const NONE_EDITOR_ID: EditorOptionId = 'none';
 export const DEFAULT_EDITOR_ID: EditorOptionId = 'vscode';
+export const EDITOR_SESSION_FRAGMENT_KEY = 'difit-editor-token';
+export const EDITOR_SESSION_HEADER = 'X-Difit-Editor-Token';
 
 export const EDITOR_OPTIONS: readonly [EditorOption, ...EditorOption[]] = [
   {
     id: 'vscode',
-    label: 'VS Code',
     command: 'code',
     argsTemplate: '-g %file:%line',
   },
   {
     id: 'cursor',
-    label: 'Cursor',
     command: 'cursor',
     argsTemplate: '-g %file:%line',
   },
   {
     id: 'zed',
-    label: 'Zed',
     command: 'zed',
     argsTemplate: '%file:%line',
   },
   {
     id: 'textmate',
-    label: 'TextMate',
     command: 'mate',
     argsTemplate: '-l %line %file',
   },
   {
     id: 'bbedit',
-    label: 'BBEdit',
     command: 'bbedit',
     argsTemplate: '+%line %file',
   },
   {
     id: 'emacs',
-    label: 'Emacs',
     command: 'emacsclient',
     argsTemplate: '--no-wait +%line %file',
   },
   {
     id: 'macvim',
-    label: 'MacVim',
     command: 'mvim',
     argsTemplate: '--remote-silent +%line %file',
   },
   {
     id: 'sublime',
-    label: 'Sublime Text',
     command: 'subl',
     argsTemplate: '%file:%line',
   },
   {
     id: 'nova',
-    label: 'Nova',
     command: 'nova',
     argsTemplate: 'open %file -l %line',
   },
   {
     id: 'custom',
-    label: 'Custom…',
     command: '',
     argsTemplate: '',
   },
   {
     id: 'none',
-    label: 'Hide “Open in editor” button',
     command: '',
     argsTemplate: '',
   },
 ];
 
-export const DEFAULT_EDITOR_OPTION: EditorOption =
+const DEFAULT_EDITOR_OPTION: EditorOption =
   EDITOR_OPTIONS.find((option) => option.id === DEFAULT_EDITOR_ID) ?? EDITOR_OPTIONS[0];
 
 /**
  * Case-insensitive lookup by id. Used mostly for the `DIFIT_EDITOR` / `EDITOR`
- * environment-variable fallback on the server; the browser UI passes the full
- * `{id, command, argsTemplate}` shape so it does not rely on this helper.
+ * environment-variable selection on the server.
  */
 export const resolveEditorOption = (input?: string): EditorOption => {
   const normalized = (input ?? DEFAULT_EDITOR_ID).toLowerCase();
