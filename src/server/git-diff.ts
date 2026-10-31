@@ -406,7 +406,9 @@ export class GitDiffParser {
         continue;
       }
 
-      bytes.push(...Buffer.from(char, 'utf8'));
+      const character = String.fromCodePoint(withoutPrefix.codePointAt(i) ?? 0);
+      bytes.push(...Buffer.from(character, 'utf8'));
+      i += character.length - 1;
     }
 
     return Buffer.from(bytes).toString('utf8');
@@ -462,6 +464,16 @@ export class GitDiffParser {
     }
 
     if (segments.length !== 2) {
+      // Git leaves spaces unquoted. Metadata-only changes have no ---/+++
+      // paths, so locate the boundary whose decoded paths agree instead of
+      // treating every space as an argument separator. Testing every candidate
+      // also preserves literal " b/" within a filename.
+      for (let index = 0; index < raw.length; index++) {
+        if (raw[index] !== ' ' || !/^[abciw]\//.test(raw.slice(index + 1))) continue;
+        const oldPath = this.decodeGitPath(raw.slice(0, index));
+        const newPath = this.decodeGitPath(raw.slice(index + 1));
+        if (oldPath === newPath) return { oldPath, newPath };
+      }
       return null;
     }
 
@@ -472,6 +484,18 @@ export class GitDiffParser {
     };
   }
 
+  private extractMetadataPath(
+    line: string | undefined,
+    prefix: string,
+    headerPath: string | undefined,
+  ): string | undefined {
+    const literalPath = this.extractPathFromLine(line, prefix, false);
+    // Native rename/copy metadata has no diff prefix. Retain compatibility with
+    // prefixed metadata only when the diff header confirms that interpretation.
+    const prefixedPath = this.extractPathFromLine(line, prefix);
+    return prefixedPath === headerPath ? prefixedPath : literalPath;
+  }
+
   private parseFileBlock(block: string, format: 'git' | 'plain' | null = 'git'): DiffFile | null {
     const lines = block.split('\n');
     const headerLine = lines[0];
@@ -479,14 +503,26 @@ export class GitDiffParser {
 
     const minusLine = lines.find((line) => line.startsWith('--- '));
     const plusLine = lines.find((line) => line.startsWith('+++ '));
-    const renameFromLine = lines.find((line) => line.startsWith('rename from '));
-    const renameToLine = lines.find((line) => line.startsWith('rename to '));
+    const renameFromLine = lines.find(
+      (line) => line.startsWith('rename from ') || line.startsWith('copy from '),
+    );
+    const renameToLine = lines.find(
+      (line) => line.startsWith('rename to ') || line.startsWith('copy to '),
+    );
 
     const stripGitPrefix = format !== 'plain';
     const plusPath = this.extractPathFromLine(plusLine, '+++ ', stripGitPrefix);
     const minusPath = this.extractPathFromLine(minusLine, '--- ', stripGitPrefix);
-    const renameFromPath = this.extractPathFromLine(renameFromLine, 'rename from ');
-    const renameToPath = this.extractPathFromLine(renameToLine, 'rename to ');
+    const renameFromPath = this.extractMetadataPath(
+      renameFromLine,
+      renameFromLine?.startsWith('copy ') ? 'copy from ' : 'rename from ',
+      headerPaths?.oldPath,
+    );
+    const renameToPath = this.extractMetadataPath(
+      renameToLine,
+      renameToLine?.startsWith('copy ') ? 'copy to ' : 'rename to ',
+      headerPaths?.newPath,
+    );
     const parsedNewPath = renameToPath ?? plusPath ?? headerPaths?.newPath;
     const parsedOldPath = renameFromPath ?? minusPath ?? headerPaths?.oldPath;
     const newPath = parsedNewPath ?? parsedOldPath;
