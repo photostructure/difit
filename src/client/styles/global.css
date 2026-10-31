@@ -23,6 +23,15 @@
   --color-comment-bg: #1c2128;
   --color-comment-border: #373e47;
   --color-comment-text: #e6edf3;
+
+  /* The root font size is the user's code font size (14px by default), so
+     Tailwind's stock 0.75rem/0.875rem steps land at 10.5px/12.25px. These
+     steps give UI chrome 12px meta text and 13px controls at the default,
+     one and two pixels under the 14px code text, and still scale with it. */
+  --text-xs: 0.8571rem;
+  --text-xs--line-height: 1.34;
+  --text-sm: 0.9286rem;
+  --text-sm--line-height: 1.4;
 }
 
 /* CSS Custom Properties for dynamic theming */

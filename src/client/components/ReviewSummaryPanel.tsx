@@ -23,7 +23,9 @@ export function ReviewSummaryPanel({ summary }: Props) {
       >
         {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         <FilePenLine size={14} className="shrink-0" />
-        <span className="shrink-0 font-medium text-github-text-primary">Change summary</span>
+        <span className="shrink-0 text-sm font-medium text-github-text-primary">
+          Change summary
+        </span>
         {subject && <span className="min-w-0 truncate font-mono">{subject}</span>}
         {summary.dirty && <span className="ml-auto shrink-0">Unsaved</span>}
       </button>

@@ -1256,7 +1256,7 @@ function App() {
     <WordHighlightProvider>
       <div className="h-screen flex flex-col" onClickCapture={handleGlobalClick}>
         <header
-          className={`bg-github-bg-secondary border-b border-github-border flex ${
+          className={`bg-github-bg-secondary border-b border-github-border flex text-sm text-github-text-primary ${
             isMobile ? 'flex-col' : 'flex-row items-center'
           }`}
         >
@@ -1319,7 +1319,7 @@ function App() {
                 <div className="flex bg-github-bg-tertiary border border-github-border rounded-md p-1">
                   <button
                     onClick={() => handleDiffModeChange('split')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded transition-all duration-200 flex items-center gap-1.5 cursor-pointer ${
+                    className={`px-3 py-1.5 font-medium rounded transition-all duration-200 flex items-center gap-1.5 cursor-pointer ${
                       diffMode === 'split'
                         ? 'bg-github-bg-primary text-github-text-primary shadow-sm'
                         : 'text-github-text-secondary hover:text-github-text-primary'
@@ -1330,7 +1330,7 @@ function App() {
                   </button>
                   <button
                     onClick={() => handleDiffModeChange('unified')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded transition-all duration-200 flex items-center gap-1.5 cursor-pointer ${
+                    className={`px-3 py-1.5 font-medium rounded transition-all duration-200 flex items-center gap-1.5 cursor-pointer ${
                       diffMode === 'unified'
                         ? 'bg-github-bg-primary text-github-text-primary shadow-sm'
                         : 'text-github-text-secondary hover:text-github-text-primary'
@@ -1345,6 +1345,7 @@ function App() {
                 checked={ignoreWhitespace}
                 onChange={setIgnoreWhitespace}
                 label="Ignore Whitespace"
+                className="text-sm!"
                 title={ignoreWhitespace ? 'Show whitespace changes' : 'Ignore whitespace changes'}
               />
               {/* File Watch Reload Button */}
@@ -1364,7 +1365,7 @@ function App() {
               <button
                 type="button"
                 onClick={() => setIsCommentsListOpen(true)}
-                className="rounded border border-github-border px-3 py-1.5 text-xs text-github-text-primary hover:bg-github-bg-tertiary"
+                className="rounded-md border border-github-border px-3 py-1.5 font-medium text-github-text-primary hover:bg-github-bg-tertiary"
               >
                 Conversation
               </button>
