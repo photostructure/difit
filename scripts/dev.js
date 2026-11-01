@@ -1,11 +1,20 @@
 #!/usr/bin/env node
 import { spawn } from 'child_process';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 
 import { getCompileCloseExitCode } from '../dev/dev-lifecycle.js';
 import { createCliStdoutProxy } from '../dev/dev-stdout.js';
+import { createOutputWriter } from '../dev/dev-output.js';
+import { getManagedSpawnOptions, stopProcessTree } from '../dev/dev-process.js';
 
+const require = createRequire(import.meta.url);
+const compilerCli = join(dirname(require.resolve('typescript/package.json')), 'bin', 'tsc');
+const viteCli = join(dirname(require.resolve('vite/package.json')), 'bin', 'vite.js');
 const rawArgs = process.argv.slice(2);
 const cliArgs = [...rawArgs, '--no-open'];
+const writeStdout = createOutputWriter(process.stdout);
+const writeStderr = createOutputWriter(process.stderr);
 
 // Wait for CLI server to be ready, then start Vite
 let cliProcess = null;
@@ -15,30 +24,34 @@ let isShuttingDown = false;
 
 function startVite(cliServerUrl) {
   if (viteProcess) return;
-  console.error('🚀 Starting Vite dev server...');
+  writeStderr('🚀 Starting Vite dev server...\n');
   const serverUrl = new URL(cliServerUrl);
-  viteProcess = spawn('pnpm', ['exec', 'vite', '--clearScreen=false'], {
-    stdio: ['inherit', 2, 'inherit'],
+  viteProcess = spawn(process.execPath, [viteCli, '--clearScreen=false'], {
+    ...getManagedSpawnOptions(),
+    stdio: ['inherit', 'pipe', 'pipe'],
     env: {
       ...process.env,
       VITE_DIFIT_API_URL: serverUrl.origin,
       DIFIT_VITE_OPEN_PATH: `/${serverUrl.search}${serverUrl.hash}`,
     },
   });
+  viteProcess.stdout.on('data', writeStderr);
+  viteProcess.stderr.on('data', writeStderr);
 }
 
 const cliStdoutProxy = createCliStdoutProxy({
   onServerUrl: startVite,
-  onOutput: (output) => process.stdout.write(output),
+  onOutput: writeStdout,
 });
 const cliStderrProxy = createCliStdoutProxy({
   onServerUrl: startVite,
-  onOutput: (output) => process.stderr.write(output),
+  onOutput: writeStderr,
 });
 
 function startCliProcess() {
   cliProcess = spawn(process.execPath, ['dist/cli/index.js', ...cliArgs], {
     // Keep stdin attached so CLI can decide stdin mode by itself.
+    ...getManagedSpawnOptions(),
     stdio: ['inherit', 'pipe', 'pipe'],
     env: {
       ...process.env,
@@ -50,7 +63,7 @@ function startCliProcess() {
   cliProcess.stderr.setEncoding('utf8');
   cliProcess.stdout.on('data', (data) => {
     // Wait for CLI server before starting Vite to prevent proxy connection errors.
-    // Forward protocol records intact while readiness starts the development UI.
+    // Forward JSONL intact while readiness starts the Vite UI.
     cliStdoutProxy.push(data);
   });
 
@@ -61,21 +74,24 @@ function startCliProcess() {
     cliStderrProxy.flush();
 
     if (code !== 0 && code !== null && !isShuttingDown) {
-      console.error(`CLI server exited with code ${code}`);
+      writeStderr(`CLI server exited with code ${code}\n`);
     }
 
-    if (viteProcess && !viteProcess.killed) {
-      viteProcess.kill('SIGINT');
-    }
+    stopProcessTree(viteProcess, 'SIGINT');
 
+    // Let queued stdout/stderr writes drain, including the final shutdown event.
     process.exitCode = code || 0;
   });
 }
 
 function startCompileProcess() {
-  compileProcess = spawn('pnpm', ['exec', 'tsc', '--project', 'tsconfig.cli.json'], {
-    stdio: ['inherit', 2, 'inherit'],
+  compileProcess = spawn(process.execPath, [compilerCli, '--project', 'tsconfig.cli.json'], {
+    ...getManagedSpawnOptions(),
+    stdio: ['inherit', 'pipe', 'pipe'],
   });
+
+  compileProcess.stdout.on('data', writeStderr);
+  compileProcess.stderr.on('data', writeStderr);
 
   compileProcess.on('close', (code) => {
     compileProcess = null;
@@ -83,7 +99,7 @@ function startCompileProcess() {
     const exitCode = getCompileCloseExitCode(code, isShuttingDown);
 
     if (exitCode !== null) {
-      process.exit(exitCode);
+      process.exitCode = exitCode;
       return;
     }
 
@@ -97,9 +113,9 @@ function shutdown(signal) {
   }
 
   isShuttingDown = true;
-  compileProcess?.kill(signal);
-  cliProcess?.kill(signal);
-  viteProcess?.kill(signal);
+  stopProcessTree(compileProcess, signal);
+  stopProcessTree(cliProcess, signal);
+  stopProcessTree(viteProcess, signal);
 }
 
 process.on('SIGINT', () => {
@@ -107,6 +123,10 @@ process.on('SIGINT', () => {
 });
 
 process.on('SIGTERM', () => {
+  shutdown('SIGTERM');
+});
+
+process.on('SIGHUP', () => {
   shutdown('SIGTERM');
 });
 
