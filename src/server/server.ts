@@ -414,14 +414,23 @@ export async function startServer(options: ServerOptions): Promise<{
 
     let responseDiffData = initialDiffData;
     if (!options.stdinDiff) {
-      const cacheKey = createDiffCacheKey(requestedSelection, ignoreWhitespace);
+      // Retained reviews already have a resolved base. Keep their original
+      // mode for comment identity while calculating the saved comparison directly.
+      const calculationSelection =
+        req.query.retainedReview === '1'
+          ? createDiffSelection(
+              requestedSelection.baseCommitish,
+              requestedSelection.targetCommitish,
+            )
+          : requestedSelection;
+      const cacheKey = createDiffCacheKey(calculationSelection, ignoreWhitespace);
       const cached = getCachedDiffResponse(diffDataCache, cacheKey);
       if (cached) {
         responseDiffData = cached;
       } else {
         try {
           responseDiffData = await parser.parseDiff(
-            requestedSelection,
+            calculationSelection,
             ignoreWhitespace,
             options.contextLines,
           );

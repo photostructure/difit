@@ -316,3 +316,53 @@ describe('DiffQuickMenu', () => {
     ).toBeInTheDocument();
   });
 });
+
+describe('retained review navigation', () => {
+  it('offers earlier review contexts separately from quick-diff presets', async () => {
+    const onSelectDiff = vi.fn();
+    const onSelectReview = vi.fn();
+    const selection = { baseCommitish: 'old-base', targetCommitish: 'old-tip' };
+    render(
+      createElement(DiffQuickMenu, {
+        options,
+        selection: { baseCommitish: 'HEAD', targetCommitish: '.' },
+        recentReviews: [{ selection, title: 'Original review', threadCount: 2 }],
+        onSelectDiff,
+        onSelectReview,
+        onOpenAdvanced: vi.fn(),
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Revision menu:/ }));
+    expect(await screen.findByText('Recent reviews')).toBeInTheDocument();
+    expect(screen.getByText('2 conversations')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Return to Original review/ }));
+    expect(onSelectReview).toHaveBeenCalledWith(selection);
+    expect(onSelectDiff).not.toHaveBeenCalled();
+  });
+
+  it('reopens a retained context when search is submitted with Enter', async () => {
+    const onSelectDiff = vi.fn();
+    const onSelectReview = vi.fn();
+    const selection = {
+      baseCommitish: 'saved-base',
+      targetCommitish: '.',
+      baseMode: 'merge-base' as const,
+    };
+    render(
+      createElement(DiffQuickMenu, {
+        options,
+        selection: { baseCommitish: 'HEAD', targetCommitish: '.' },
+        recentReviews: [{ selection, title: 'Archived review', threadCount: 1 }],
+        onSelectDiff,
+        onSelectReview,
+        onOpenAdvanced: vi.fn(),
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Revision menu:/ }));
+    const search = screen.getByPlaceholderText(/Filter branches and commits/);
+    fireEvent.change(search, { target: { value: 'Archived' } });
+    fireEvent.keyDown(search, { key: 'Enter' });
+    expect(onSelectReview).toHaveBeenCalledWith(selection);
+    expect(onSelectDiff).not.toHaveBeenCalled();
+  });
+});

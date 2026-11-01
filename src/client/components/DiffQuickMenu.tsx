@@ -20,7 +20,15 @@ import {
   createDiffSelection,
   diffSelectionsEqual,
   normalizeBaseMode,
+  getDiffSelectionKey,
 } from '../../utils/diffSelection';
+
+export interface RecentReview {
+  selection: DiffSelection;
+  title: string;
+  threadCount: number;
+}
+const EMPTY_RECENT_REVIEWS: RecentReview[] = [];
 
 interface DiffQuickMenuProps {
   options: RevisionsResponse;
@@ -28,7 +36,10 @@ interface DiffQuickMenuProps {
   resolvedBaseRevision?: string;
   resolvedTargetRevision?: string;
   onSelectDiff: (selection: DiffSelection) => void;
+  onSelectReview?: (selection: DiffSelection) => void;
   onOpenAdvanced: () => void;
+  onOpen?: () => void;
+  recentReviews?: RecentReview[];
   compact?: boolean;
 }
 
@@ -108,12 +119,18 @@ export function DiffQuickMenu({
   resolvedBaseRevision,
   resolvedTargetRevision,
   onSelectDiff,
+  onSelectReview = onSelectDiff,
   onOpenAdvanced,
+  onOpen,
+  recentReviews = EMPTY_RECENT_REVIEWS,
   compact = false,
 }: DiffQuickMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isCommitMenuOpen, setIsCommitMenuOpen] = useState(false);
   const [query, setQuery] = useState('');
+  useEffect(() => {
+    if (isOpen) onOpen?.();
+  }, [isOpen, onOpen]);
   const isCompact = compact;
 
   const { refs, floatingStyles, context } = useFloating({
@@ -219,8 +236,9 @@ export function DiffQuickMenu({
     [selection.targetCommitish],
   );
 
-  const handleSelect = (nextSelection: DiffSelection) => {
-    onSelectDiff(nextSelection);
+  const handleSelect = (nextSelection: DiffSelection, retained = false) => {
+    if (retained) onSelectReview(nextSelection);
+    else onSelectDiff(nextSelection);
     setIsCommitMenuOpen(false);
     setIsOpen(false);
     setQuery('');
@@ -284,6 +302,11 @@ export function DiffQuickMenu({
   const filteredPresets = isFiltering
     ? presetItems.filter((item) => matchesQuery(item.label))
     : presetItems;
+  const filteredReviews = recentReviews.filter(
+    (review) =>
+      !isFiltering ||
+      matchesQuery(review.title, review.selection.baseCommitish, review.selection.targetCommitish),
+  );
   const filteredCommits = isFiltering
     ? options.commits.filter((commit) =>
         matchesQuery(commit.shortHash, commit.hash, commit.message),
@@ -295,6 +318,7 @@ export function DiffQuickMenu({
 
   const hasNoMatches =
     isFiltering &&
+    filteredReviews.length === 0 &&
     filteredPresets.length === 0 &&
     filteredCommits.length === 0 &&
     filteredBranches.length === 0;
@@ -308,13 +332,14 @@ export function DiffQuickMenu({
     event.preventDefault();
 
     const firstMatch =
+      filteredReviews[0]?.selection ??
       filteredPresets[0]?.selection ??
       (filteredCommits[0]
         ? createDiffSelection(`${filteredCommits[0].shortHash}^`, filteredCommits[0].shortHash)
         : undefined) ??
       (filteredBranches[0] ? branchSelection(filteredBranches[0].name) : undefined);
     if (firstMatch) {
-      handleSelect(firstMatch);
+      handleSelect(firstMatch, filteredReviews.length > 0);
     }
   };
 
@@ -401,6 +426,35 @@ export function DiffQuickMenu({
                 />
               </div>
             </div>
+
+            {filteredReviews.length > 0 && (
+              <div className="border-b border-github-border">
+                <div className="px-3 py-2 text-xs font-semibold text-github-text-secondary bg-github-bg-tertiary">
+                  Recent reviews
+                </div>
+                {filteredReviews.map((review) => {
+                  const label = `${review.selection.baseCommitish}...${SPECIAL_LABEL_OVERRIDES[review.selection.targetCommitish] ?? review.selection.targetCommitish}${review.selection.baseMode === 'merge-base' ? ' (merge-base)' : ''}`;
+                  return (
+                    <button
+                      key={getDiffSelectionKey(review.selection)}
+                      type="button"
+                      aria-label={`Return to ${review.title ? `${review.title}: ` : ''}${label}`}
+                      onClick={() => handleSelect(review.selection, true)}
+                      className={getItemClasses(false, false)}
+                    >
+                      {review.title && <div className="truncate font-medium">{review.title}</div>}
+                      <code className="block break-all text-github-text-secondary">{label}</code>
+                      {review.threadCount > 0 && (
+                        <span className="text-github-text-muted">
+                          {review.threadCount}{' '}
+                          {review.threadCount === 1 ? 'conversation' : 'conversations'}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             {isFiltering ? (
               <>

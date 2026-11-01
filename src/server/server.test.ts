@@ -1128,6 +1128,58 @@ describe('Server Integration Tests', () => {
       expect(data.requestedBaseCommitish).toBe('origin/main');
     });
 
+    it('reopens a resolved merge-base review for both browser and unscoped companion commands', async () => {
+      const parser = parserInstances.at(-1);
+      parser.parseDiff.mockImplementation(
+        async (selection: import('../types/diff.js').DiffSelection) => ({
+          baseCommitish: selection.baseMode === 'merge-base' ? 'older-ancestor' : 'saved-base',
+          targetCommitish: '.',
+          requestedBaseCommitish: selection.baseCommitish,
+          requestedTargetCommitish: '.',
+          requestedBaseMode: selection.baseMode,
+          files: [],
+          isEmpty: true,
+        }),
+      );
+      const origin = `http://localhost:${port}`;
+      const selected = '?base=saved-base&target=.&baseMode=merge-base';
+      await fetch(`${origin}/api/comments${selected}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          comments: [
+            { id: 'retained-thread', file: 'test.ts', line: 1, body: 'Saved branch conversation' },
+          ],
+        }),
+      });
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const response = await fetch(`${origin}/api/diff${selected}&retainedReview=1`);
+        const data = (await response.json()) as import('../types/diff.js').DiffResponse;
+        expect(data.baseCommitish).toBe('saved-base');
+        expect(data.requestedBaseMode).toBe('merge-base');
+        expect(parser.parseDiff).toHaveBeenLastCalledWith(
+          { baseCommitish: 'saved-base', targetCommitish: '.' },
+          false,
+          undefined,
+        );
+        const current = (await (await fetch(`${origin}/api/comments-json`)).json()) as {
+          threads: DiffCommentThread[];
+        };
+        expect(current.threads[0]?.id).toBe('retained-thread');
+      }
+      const ordinary = (await (
+        await fetch(`${origin}/api/diff${selected}`)
+      ).json()) as import('../types/diff.js').DiffResponse;
+      expect(ordinary.baseCommitish).toBe('older-ancestor');
+      await fetch(`${origin}/api/diff${selected}&retainedReview=1`);
+      const deleted = await fetch(`${origin}/api/comments/retained-thread`, { method: 'DELETE' });
+      expect(deleted.status).toBe(200);
+      const current = (await (await fetch(`${origin}/api/comments-json`)).json()) as {
+        threads: DiffCommentThread[];
+      };
+      expect(current.threads).toEqual([]);
+    });
+
     it('GET /api/diff caches results per revision pair instead of reusing the last request', async () => {
       const result = await startServer({
         selection: { targetCommitish: 'HEAD', baseCommitish: 'HEAD^' },

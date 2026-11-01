@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 import {
   type BaseMode,
@@ -18,6 +18,7 @@ import { toCommentThread as normalizeThread } from '../../utils/commentThreads';
 import { createId } from '../../utils/createId';
 import { mergeCommentImports } from '../../utils/commentImports';
 import { storageService } from '../services/StorageService';
+import { normalizeBaseMode } from '../../utils/diffSelection';
 import { getLanguageFromPath } from '../utils/diffUtils';
 
 interface AddThreadParams {
@@ -108,7 +109,19 @@ export function useDiffComments(
   baseMode?: BaseMode,
 ): UseDiffCommentsReturn {
   const [threads, setThreads] = useState<DiffCommentThread[]>([]);
-  const [hasLoadedComments, setHasLoadedComments] = useState(false);
+  const contextKey = JSON.stringify([
+    baseCommitish,
+    targetCommitish,
+    currentCommitHash,
+    repositoryId,
+    normalizeBaseMode(baseMode),
+    branchToHash ? [...branchToHash].sort(([left], [right]) => left.localeCompare(right)) : null,
+  ]);
+  const activeContext = useRef(contextKey);
+  activeContext.current = contextKey;
+  const [loadedContextKey, setLoadedContextKey] = useState<string | null>(null);
+  const hasLoadedComments =
+    Boolean(baseCommitish && targetCommitish) && loadedContextKey === contextKey;
 
   const loadDiffContextData = useCallback(() => {
     if (!baseCommitish || !targetCommitish) {
@@ -147,7 +160,7 @@ export function useDiffComments(
   useEffect(() => {
     if (!baseCommitish || !targetCommitish) {
       setThreads([]);
-      setHasLoadedComments(false);
+      setLoadedContextKey(null);
       return;
     }
 
@@ -175,7 +188,7 @@ export function useDiffComments(
     }
     // Persisted activity belongs to an earlier connection, never the current agent.
     setThreads(withoutProgress(normalizedThreads));
-    setHasLoadedComments(true);
+    setLoadedContextKey(contextKey);
   }, [
     baseCommitish,
     targetCommitish,
@@ -184,11 +197,12 @@ export function useDiffComments(
     repositoryId,
     baseMode,
     loadDiffContextData,
+    contextKey,
   ]);
 
   const saveThreads = useCallback(
     (newThreads: DiffCommentThread[]) => {
-      if (!baseCommitish || !targetCommitish) return;
+      if (!baseCommitish || !targetCommitish || activeContext.current !== contextKey) return;
 
       const normalizedThreads = normalizeQuestionFlags(newThreads);
       storageService.saveCommentThreads(
@@ -201,9 +215,17 @@ export function useDiffComments(
         baseMode,
       );
       setThreads(normalizedThreads);
-      setHasLoadedComments(true);
+      setLoadedContextKey(contextKey);
     },
-    [baseCommitish, targetCommitish, currentCommitHash, branchToHash, repositoryId, baseMode],
+    [
+      baseCommitish,
+      targetCommitish,
+      currentCommitHash,
+      branchToHash,
+      repositoryId,
+      baseMode,
+      contextKey,
+    ],
   );
 
   const replaceThreads = useCallback(
@@ -577,14 +599,15 @@ export function useDiffComments(
     [threads],
   );
 
-  const comments = threads
+  const visibleThreads = hasLoadedComments ? threads : [];
+  const comments = visibleThreads
     .map((thread) => normalizeRootComment(thread))
     .filter((comment): comment is LegacyDiffComment => comment !== null);
 
   return {
     hasLoadedComments,
     comments,
-    threads,
+    threads: visibleThreads,
     replaceThreads,
     addComment,
     addThread,

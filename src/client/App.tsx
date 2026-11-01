@@ -1,6 +1,7 @@
 import { Columns, AlignLeft, Settings, PanelLeftClose, PanelLeft, Keyboard } from 'lucide-react';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
+import type { ConversationSnapshot } from '../types/conversation';
 import {
   type DiffCommentThread,
   type DiffResponse,
@@ -27,7 +28,7 @@ import { Checkbox } from './components/Checkbox';
 import type { CommentSubmitOptions } from './components/CommentForm';
 import { CommentsDropdown } from './components/CommentsDropdown';
 import { CommentsListModal } from './components/CommentsListModal';
-import { DiffQuickMenu } from './components/DiffQuickMenu';
+import { DiffQuickMenu, type RecentReview } from './components/DiffQuickMenu';
 import { DiffViewer } from './components/DiffViewer';
 import { FileList } from './components/FileList';
 import { GitHubIcon } from './components/GitHubIcon';
@@ -55,6 +56,12 @@ import { copyTextToClipboard } from './utils/clipboard';
 import { getFileElementId } from './utils/domUtils';
 import { findCommentPosition } from './utils/navigation/positionHelpers';
 import { resolveEventSourceUrl } from './utils/eventSourceUrl';
+import {
+  readReviewLocation,
+  readReviewHistoryLocation,
+  writeReviewLocation,
+  type ReviewSelection,
+} from './utils/reviewNavigation';
 import {
   EMPTY_MERGED_CHUNKS_STATE,
   buildMergedChunksState,
@@ -169,16 +176,19 @@ function App() {
 
   // Revision selector state
   const [revisionOptions, setRevisionOptions] = useState<RevisionsResponse | null>(null);
-  const [selectedRevision, setSelectedRevision] = useState<DiffSelection>(
-    createDiffSelection('', ''),
+  const [recentReviews, setRecentReviews] = useState<RecentReview[]>([]);
+  const recentReviewsRequestRef = useRef(0);
+  const [selectedRevision, setSelectedRevision] = useState<ReviewSelection>(
+    () => readReviewLocation() ?? createDiffSelection('', ''),
   );
   const [resolvedBaseRevision, setResolvedBaseRevision] = useState<string>('');
   const [resolvedTargetRevision, setResolvedTargetRevision] = useState<string>('');
-  const hasUserSelectedRevisionRef = useRef(false);
+  const hasRequestedSelectionRef = useRef(Boolean(selectedRevision.targetCommitish));
   const currentRequestedBaseModeRef = useRef(selectedRevision.baseMode);
   currentRequestedBaseModeRef.current = diffData?.requestedBaseMode ?? selectedRevision.baseMode;
   const selectedRevisionRef = useRef(selectedRevision);
   selectedRevisionRef.current = selectedRevision;
+  const preserveReviewLocationRef = useRef(false);
   const diffRequestIdRef = useRef(0);
   const activeDiffAbortControllerRef = useRef<AbortController | null>(null);
   const resolvedSelection = useMemo<DiffSelection | null>(() => {
@@ -233,8 +243,12 @@ function App() {
       return null;
     }
 
-    return `${diffData?.repositoryId ?? 'default'}:${resolvedSelectionKey}`;
-  }, [diffData?.repositoryId, resolvedSelectionKey]);
+    return JSON.stringify([
+      diffData?.repositoryId ?? 'default',
+      resolvedSelectionKey,
+      diffData?.commit,
+    ]);
+  }, [diffData?.repositoryId, diffData?.commit, resolvedSelectionKey]);
   const commentSessionQueryString = useMemo(() => {
     if (!resolvedSelection) {
       return null;
@@ -260,20 +274,36 @@ function App() {
     [commentSessionQueryString],
   );
   const [bootstrappedCommentsKey, setBootstrappedCommentsKey] = useState<string | null>(null);
-  const approval = useReviewApproval(
-    diffData?.shipIt && commentSessionQueryString ? getCommentApiUrl('/api/approval') : null,
-  );
-  const refreshApproval = approval.refresh;
+  const [bootstrappedCommentsGeneration, setBootstrappedCommentsGeneration] = useState(-1);
   const summary = useReviewSummary(
     commentSessionQueryString ? getCommentApiUrl('/api/review-summary') : null,
   );
   const refreshSummary = summary.refresh;
-  const hasBootstrappedComments =
-    commentsContextKey !== null && commentsContextKey === bootstrappedCommentsKey;
-  const bootstrappingCommentsKeyRef = useRef<string | null>(null);
+  const approval = useReviewApproval(
+    diffData?.shipIt && commentSessionQueryString ? getCommentApiUrl('/api/approval') : null,
+  );
+  const refreshApproval = approval.refresh;
+  const bootstrappingCommentsGenerationRef = useRef<number | null>(null);
   const skipNextCommentSyncRef = useRef(false);
   // Last server comment version seen; echoed back as baseVersion so the server can detect concurrent writes.
   const serverCommentVersionRef = useRef<number | null>(null);
+  const activeCommentsContextRef = useRef({
+    key: commentsContextKey,
+    generation: 0,
+  });
+  if (activeCommentsContextRef.current.key !== commentsContextKey) {
+    activeCommentsContextRef.current = {
+      key: commentsContextKey,
+      generation: activeCommentsContextRef.current.generation + 1,
+    };
+    serverCommentVersionRef.current = null;
+  }
+  const commentsGeneration = activeCommentsContextRef.current.generation;
+  const hasBootstrappedComments =
+    hasLoadedComments &&
+    commentsContextKey !== null &&
+    commentsContextKey === bootstrappedCommentsKey &&
+    commentsGeneration === bootstrappedCommentsGeneration;
   const pendingBootstrapAfterLocalResetRef = useRef(false);
 
   useEffect(() => {
@@ -282,7 +312,7 @@ function App() {
     }
   }, [bootstrappedCommentsKey, commentsContextKey]);
 
-  const fetchServerThreads = useCallback(async (): Promise<DiffCommentThread[]> => {
+  const fetchServerThreads = useCallback(async (): Promise<DiffCommentThread[] | null> => {
     const response = await fetch(getCommentApiUrl('/api/comments-json'));
     if (!response.ok) {
       throw new Error(`Failed to fetch comments: ${response.status} ${response.statusText}`);
@@ -292,11 +322,12 @@ function App() {
       version?: number;
       threads?: DiffCommentThread[];
     };
+    if (activeCommentsContextRef.current.generation !== commentsGeneration) return null;
     if (typeof payload.version === 'number') {
       serverCommentVersionRef.current = payload.version;
     }
     return Array.isArray(payload.threads) ? payload.threads : [];
-  }, [getCommentApiUrl]);
+  }, [getCommentApiUrl, commentsGeneration]);
 
   const syncThreadsToServer = useCallback(
     async (nextThreads: DiffCommentThread[]) => {
@@ -317,6 +348,7 @@ function App() {
         merged?: boolean;
         threads?: DiffCommentThread[];
       };
+      if (activeCommentsContextRef.current.generation !== commentsGeneration) return;
       if (typeof result.version === 'number') {
         serverCommentVersionRef.current = result.version;
       }
@@ -326,7 +358,7 @@ function App() {
         replaceThreads(result.threads);
       }
     },
-    [getCommentApiUrl, replaceThreads],
+    [getCommentApiUrl, replaceThreads, commentsGeneration],
   );
 
   const handleShipIt = async () => {
@@ -601,7 +633,7 @@ function App() {
     chunkIndex: number;
     lineIndex: number;
   } | null>(null);
-  const fetchDiffDataRef = useRef<((selection?: DiffSelection) => Promise<void>) | null>(null);
+  const fetchDiffDataRef = useRef<((selection?: ReviewSelection) => Promise<void>) | null>(null);
   const handleWatchReload = useCallback(async () => {
     await fetchDiffDataRef.current?.();
     await refreshApproval();
@@ -610,15 +642,17 @@ function App() {
   const handleCommentsChanged = useCallback(async () => {
     try {
       const serverThreads = await fetchServerThreads();
+      if (serverThreads === null) return;
       skipNextCommentSyncRef.current = true;
       replaceThreads(serverThreads);
       if (commentsContextKey) {
         setBootstrappedCommentsKey(commentsContextKey);
+        setBootstrappedCommentsGeneration(commentsGeneration);
       }
     } catch (commentsError) {
       console.error('Failed to refresh comments from server:', commentsError);
     }
-  }, [commentsContextKey, fetchServerThreads, replaceThreads]);
+  }, [commentsContextKey, commentsGeneration, fetchServerThreads, replaceThreads]);
 
   // File watch for reload functionality - initialize with callback
   const { shouldReload, reload, watchState } = useFileWatch(
@@ -741,7 +775,7 @@ function App() {
   };
 
   const fetchDiffData = useCallback(
-    async (selection?: DiffSelection) => {
+    async (selection?: ReviewSelection, preserveLocation = preserveReviewLocationRef.current) => {
       const requestId = diffRequestIdRef.current + 1;
       diffRequestIdRef.current = requestId;
       activeDiffAbortControllerRef.current?.abort();
@@ -749,8 +783,7 @@ function App() {
       activeDiffAbortControllerRef.current = controller;
       try {
         const requestedSelection =
-          selection ??
-          (hasUserSelectedRevisionRef.current ? selectedRevisionRef.current : undefined);
+          selection ?? (hasRequestedSelectionRef.current ? selectedRevisionRef.current : undefined);
         const params = new URLSearchParams({
           ignoreWhitespace: String(ignoreWhitespace),
         });
@@ -759,6 +792,7 @@ function App() {
           params.set('target', requestedSelection.targetCommitish);
         if (requestedSelection?.baseMode === 'merge-base')
           params.set('baseMode', requestedSelection.baseMode);
+        if (requestedSelection?.retained) params.set('retainedReview', '1');
 
         const response = await fetch(`/api/diff?${params}`, {
           signal: controller.signal,
@@ -770,6 +804,22 @@ function App() {
         }
         setDiffData(data);
         setDiffDataVersion((prev) => prev + 1);
+        const requestedBase = data.requestedBaseCommitish ?? data.baseCommitish;
+        const requestedTarget = data.requestedTargetCommitish ?? data.targetCommitish;
+        if (requestedBase && requestedTarget && !preserveLocation) {
+          writeReviewLocation(
+            {
+              ...createDiffSelection(requestedBase, requestedTarget, data.requestedBaseMode),
+              ...(requestedSelection?.retained ? { retained: true as const } : {}),
+            },
+            'replace',
+            createDiffSelection(
+              data.baseCommitish ?? requestedBase,
+              data.targetCommitish ?? requestedTarget,
+              data.requestedBaseMode,
+            ),
+          );
+        }
 
         // Update resolved revision state from server response
         setResolvedBaseRevision(
@@ -777,13 +827,16 @@ function App() {
         );
         if (data.targetCommitish) setResolvedTargetRevision(data.targetCommitish);
 
-        if (!hasUserSelectedRevisionRef.current) {
-          const requestedBase = data.requestedBaseCommitish ?? data.baseCommitish;
-          const requestedTarget = data.requestedTargetCommitish ?? data.targetCommitish;
+        if (!hasRequestedSelectionRef.current) {
           if (requestedBase && requestedTarget) {
-            setSelectedRevision(
-              createDiffSelection(requestedBase, requestedTarget, data.requestedBaseMode),
+            const launchSelection = createDiffSelection(
+              requestedBase,
+              requestedTarget,
+              data.requestedBaseMode,
             );
+            hasRequestedSelectionRef.current = true;
+            selectedRevisionRef.current = launchSelection;
+            setSelectedRevision(launchSelection);
           }
         }
 
@@ -924,21 +977,65 @@ function App() {
       .catch(() => setRevisionOptions(null));
   }, []);
 
-  // Handle revision change
-  const handleRevisionChange = useCallback(
-    async (nextSelection: DiffSelection) => {
-      // Skip if no actual change
-      if (diffSelectionsEqual(nextSelection, selectedRevision)) return;
+  const loadRecentReviews = useCallback(async () => {
+    const requestId = ++recentReviewsRequestRef.current;
+    try {
+      const response = await fetch('/api/conversation/snapshot');
+      if (!response.ok) return;
+      const snapshot = (await response.json()) as ConversationSnapshot;
+      if (requestId !== recentReviewsRequestRef.current) return;
+      setRecentReviews(
+        snapshot.reviews
+          .filter(
+            (review) =>
+              review.threads.length > 0 ||
+              Boolean(review.summary.commitMessage.trim() || review.summary.rationale.trim()),
+          )
+          .map((review) => ({
+            selection: review.selection,
+            title:
+              (review.summary.commitMessage.trim() || review.summary.rationale.trim()).split(
+                '\n',
+              )[0] ?? '',
+            threadCount: review.threads.length,
+          }))
+          .reverse(),
+      );
+    } catch (historyError) {
+      console.error('Could not load recent reviews:', historyError);
+    }
+  }, []);
 
-      hasUserSelectedRevisionRef.current = true;
+  const handleRevisionChange = useCallback(
+    async (nextSelection: ReviewSelection, addHistory = true) => {
+      // Skip if no actual change
+      if (
+        diffSelectionsEqual(nextSelection, selectedRevisionRef.current) &&
+        nextSelection.retained === selectedRevisionRef.current.retained
+      )
+        return;
+
+      if (addHistory) writeReviewLocation(nextSelection, 'push');
+      preserveReviewLocationRef.current = !addHistory;
+
+      hasRequestedSelectionRef.current = true;
       selectedRevisionRef.current = nextSelection;
       setSelectedRevision(nextSelection);
       setLoading(true);
       setError(null);
-      await fetchDiffData(nextSelection);
+      await fetchDiffData(nextSelection, !addHistory);
     },
-    [fetchDiffData, selectedRevision],
+    [fetchDiffData],
   );
+
+  useEffect(() => {
+    const restoreReview = () => {
+      const selection = readReviewHistoryLocation();
+      if (selection) void handleRevisionChange(selection, false);
+    };
+    window.addEventListener('popstate', restoreReview);
+    return () => window.removeEventListener('popstate', restoreReview);
+  }, [handleRevisionChange]);
 
   // Clear comments and viewed files on initial load if requested via CLI flag
   const hasCleanedRef = useRef(false);
@@ -959,23 +1056,24 @@ function App() {
       return;
     }
 
-    if (bootstrappedCommentsKey === commentsContextKey) {
+    if (hasBootstrappedComments) {
       return;
     }
 
-    if (bootstrappingCommentsKeyRef.current === commentsContextKey) {
+    if (bootstrappingCommentsGenerationRef.current === commentsGeneration) {
       return;
     }
 
     const shouldReplaceFromServer = pendingBootstrapAfterLocalResetRef.current;
     pendingBootstrapAfterLocalResetRef.current = false;
 
-    bootstrappingCommentsKeyRef.current = commentsContextKey;
+    bootstrappingCommentsGenerationRef.current = commentsGeneration;
     let cancelled = false;
 
     const bootstrapComments = async () => {
       try {
         const serverThreads = await fetchServerThreads();
+        if (serverThreads === null) return;
         const nextThreads = shouldReplaceFromServer
           ? serverThreads
           : mergeCommentThreads(serverThreads, threads).threads;
@@ -999,9 +1097,10 @@ function App() {
       } finally {
         if (!cancelled) {
           setBootstrappedCommentsKey(commentsContextKey);
+          setBootstrappedCommentsGeneration(commentsGeneration);
         }
-        if (bootstrappingCommentsKeyRef.current === commentsContextKey) {
-          bootstrappingCommentsKeyRef.current = null;
+        if (bootstrappingCommentsGenerationRef.current === commentsGeneration) {
+          bootstrappingCommentsGenerationRef.current = null;
         }
       }
     };
@@ -1010,14 +1109,15 @@ function App() {
 
     return () => {
       cancelled = true;
-      if (bootstrappingCommentsKeyRef.current === commentsContextKey) {
-        bootstrappingCommentsKeyRef.current = null;
+      if (bootstrappingCommentsGenerationRef.current === commentsGeneration) {
+        bootstrappingCommentsGenerationRef.current = null;
       }
     };
   }, [
-    bootstrappedCommentsKey,
     commentsContextKey,
+    commentsGeneration,
     fetchServerThreads,
+    hasBootstrappedComments,
     hasLoadedComments,
     replaceThreads,
     syncThreadsToServer,
@@ -1415,6 +1515,13 @@ function App() {
                   resolvedBaseRevision={resolvedBaseRevision}
                   resolvedTargetRevision={resolvedTargetRevision}
                   onSelectDiff={(selection) => void handleRevisionChange(selection)}
+                  onSelectReview={(selection) =>
+                    void handleRevisionChange({ ...selection, retained: true })
+                  }
+                  onOpen={loadRecentReviews}
+                  recentReviews={recentReviews.filter(
+                    (review) => !diffSelectionsEqual(review.selection, resolvedSelection),
+                  )}
                   onOpenAdvanced={() => setIsRevisionModalOpen(true)}
                   compact={!isDesktop}
                 />

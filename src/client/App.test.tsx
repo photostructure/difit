@@ -10,6 +10,7 @@ import { DiffMode } from '../types/watch';
 
 import App from './App';
 import { useDiffComments } from './hooks/useDiffComments';
+import { useFileWatch } from './hooks/useFileWatch';
 import { useViewedFiles } from './hooks/useViewedFiles';
 import { useViewport } from './hooks/useViewport';
 
@@ -171,6 +172,7 @@ const renderApp = () => {
 };
 
 beforeEach(() => {
+  window.history.replaceState(null, '', '/');
   window.localStorage.clear();
   vi.unstubAllEnvs();
   MockEventSource.clearInstances();
@@ -1390,4 +1392,647 @@ describe('App Component - Mobile sidebar auto-close', () => {
       expect(toggleButton).toHaveAttribute('aria-expanded', 'false');
     });
   });
+});
+
+describe('App Component - Review navigation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockComments = [];
+    mockConfirm.mockReturnValue(false);
+  });
+
+  it('loads a bookmarked comparison and preserves other query parameters and fragments', async () => {
+    window.history.replaceState(
+      { retained: true },
+      '',
+      '/?base=chosen-base&target=chosen-tip&baseMode=merge-base&retained=yes#difit-editor-token=fixture',
+    );
+    mockFetch({
+      ...mockDiffResponse,
+      baseCommitish: 'resolved-base',
+      targetCommitish: 'resolved-tip',
+      requestedBaseCommitish: 'chosen-base',
+      requestedTargetCommitish: 'chosen-tip',
+      requestedBaseMode: 'merge-base',
+    });
+    renderApp();
+    await waitFor(() => {
+      const first = vi
+        .mocked(global.fetch)
+        .mock.calls.find(([url]) => String(url).startsWith('/api/diff'));
+      const params = new URL(String(first?.[0]), window.location.origin).searchParams;
+      expect(params.get('base')).toBe('chosen-base');
+      expect(params.get('target')).toBe('chosen-tip');
+      expect(params.get('baseMode')).toBe('merge-base');
+    });
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get('base')).toBe('chosen-base'),
+    );
+    expect(new URLSearchParams(window.location.search).get('retained')).toBe('yes');
+    expect(window.location.hash).toBe('#difit-editor-token=fixture');
+    expect(window.history.state).toMatchObject({ retained: true });
+  });
+
+  it('records the launch comparison without adding an extra Back step', async () => {
+    mockFetch({
+      ...mockDiffResponse,
+      baseCommitish: 'base-a',
+      targetCommitish: '.',
+      requestedBaseCommitish: 'HEAD',
+      requestedTargetCommitish: '.',
+    });
+    const length = window.history.length;
+    renderApp();
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get('base')).toBe('HEAD'),
+    );
+    expect(new URLSearchParams(window.location.search).get('target')).toBe('.');
+    expect(window.history.length).toBe(length);
+  });
+
+  it.each([
+    { base: 'HEAD', mode: undefined },
+    { base: 'main', mode: 'merge-base' as const },
+  ])('continues following $base after reload and a ref update', async ({ base, mode }) => {
+    let resolvedBase = 'before-commit';
+    vi.mocked(global.fetch).mockImplementation((input) => {
+      const url = new URL(String(input), window.location.origin);
+      let payload: unknown = {};
+      if (url.pathname === '/api/diff') {
+        payload = {
+          ...mockDiffResponse,
+          baseCommitish:
+            url.searchParams.get('base') === 'before-commit' ? 'before-commit' : resolvedBase,
+          targetCommitish: '.',
+          requestedBaseCommitish: url.searchParams.get('base') ?? base,
+          requestedTargetCommitish: '.',
+          requestedBaseMode: mode,
+        };
+      } else if (url.pathname === '/api/revisions') {
+        payload = { specialOptions: [], branches: [], commits: [] };
+      } else if (url.pathname === '/api/comments-json') {
+        payload = { version: 1, threads: [] };
+      }
+      return Promise.resolve({ ok: true, json: async () => payload } as Response);
+    });
+    const firstVisit = renderApp();
+    await waitFor(() =>
+      expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.slice(0, 2)).toEqual([
+        'before-commit',
+        '.',
+      ]),
+    );
+    firstVisit.unmount();
+    resolvedBase = 'after-commit';
+    renderApp();
+    await waitFor(() =>
+      expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.slice(0, 2)).toEqual([
+        'after-commit',
+        '.',
+      ]),
+    );
+    expect(new URLSearchParams(window.location.search).get('base')).toBe(base);
+    expect(new URLSearchParams(window.location.search).get('baseMode')).toBe(mode ?? null);
+  });
+
+  it('keeps the launch comparison on refresh after another client changes the server selection', async () => {
+    let defaultTarget = '.';
+    vi.mocked(global.fetch).mockImplementation((input) => {
+      const url = new URL(String(input), window.location.origin);
+      let payload: unknown = {};
+      if (url.pathname === '/api/diff') {
+        const target = url.searchParams.get('target') ?? defaultTarget;
+        payload = {
+          ...mockDiffResponse,
+          baseCommitish: target === '.' ? 'base-a' : 'base-b',
+          targetCommitish: target,
+          requestedBaseCommitish: 'HEAD',
+          requestedTargetCommitish: target,
+        };
+      } else if (url.pathname === '/api/revisions') {
+        payload = { specialOptions: [], branches: [], commits: [] };
+      } else if (url.pathname === '/api/comments-json') {
+        payload = { version: 1, threads: [] };
+      }
+      return Promise.resolve({ ok: true, json: async () => payload } as Response);
+    });
+    renderApp();
+    await waitFor(() =>
+      expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.slice(0, 2)).toEqual(['base-a', '.']),
+    );
+    defaultTarget = 'other-client-tip';
+    const refresh = vi.mocked(useFileWatch).mock.calls.at(-1)?.[0];
+    await act(async () => refresh?.());
+    expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.slice(0, 2)).toEqual(['base-a', '.']);
+  });
+
+  it('restores the earlier comment context with browser Back and Forward', async () => {
+    const reviewA = {
+      ...mockDiffResponse,
+      baseCommitish: 'base-a',
+      targetCommitish: '.',
+      requestedBaseCommitish: 'HEAD',
+      requestedTargetCommitish: '.',
+    };
+    const reviewB = {
+      ...mockDiffResponse,
+      baseCommitish: 'base-b',
+      targetCommitish: 'tip-b',
+      requestedBaseCommitish: 'HEAD^',
+      requestedTargetCommitish: 'HEAD',
+    };
+    vi.mocked(global.fetch).mockImplementation((input) => {
+      const url = new URL(String(input), window.location.origin);
+      let payload: unknown = {};
+      if (url.pathname === '/api/diff') {
+        payload = ['HEAD', 'tip-b'].includes(url.searchParams.get('target') ?? '')
+          ? reviewB
+          : reviewA;
+      } else if (url.pathname === '/api/revisions') {
+        payload = { specialOptions: [], branches: [], commits: [] };
+      } else if (url.pathname === '/api/comments-json') {
+        payload = { version: 0, threads: [] };
+      }
+      return Promise.resolve({ ok: true, json: async () => payload } as Response);
+    });
+    renderApp();
+    fireEvent.click(await screen.findByRole('button', { name: /Revision menu:/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'HEAD' }));
+    await waitFor(() =>
+      expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.slice(0, 2)).toEqual([
+        'base-b',
+        'tip-b',
+      ]),
+    );
+    await act(async () => window.history.back());
+    await waitFor(() =>
+      expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.slice(0, 2)).toEqual(['base-a', '.']),
+    );
+    await act(async () => window.history.forward());
+    await waitFor(() =>
+      expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.slice(0, 2)).toEqual([
+        'base-b',
+        'tip-b',
+      ]),
+    );
+  });
+
+  it.each([undefined, 'merge-base'] as const)(
+    'restores resolved history after refs advance (mode=%s)',
+    async (baseMode) => {
+      let refsMoved = false;
+      const reviewA = {
+        ...mockDiffResponse,
+        baseCommitish: 'base-a',
+        targetCommitish: '.',
+        requestedBaseCommitish: 'HEAD',
+        requestedTargetCommitish: '.',
+        requestedBaseMode: baseMode,
+      };
+      const reviewB = {
+        ...mockDiffResponse,
+        baseCommitish: 'base-b',
+        targetCommitish: 'tip-b',
+        requestedBaseCommitish: 'HEAD^',
+        requestedTargetCommitish: 'HEAD',
+      };
+      vi.mocked(global.fetch).mockImplementation((input) => {
+        const url = new URL(String(input), window.location.origin);
+        let payload: unknown = {};
+        if (url.pathname === '/api/diff') {
+          payload = ['HEAD', 'tip-b'].includes(url.searchParams.get('target') ?? '')
+            ? {
+                ...reviewB,
+                targetCommitish:
+                  refsMoved && url.searchParams.get('target') === 'HEAD' ? 'moved-tip' : 'tip-b',
+              }
+            : {
+                ...reviewA,
+                requestedBaseCommitish: url.searchParams.get('base') ?? 'HEAD',
+                baseCommitish:
+                  refsMoved &&
+                  (url.searchParams.get('base') !== 'base-a' ||
+                    (baseMode === 'merge-base' && url.searchParams.get('retainedReview') !== '1'))
+                    ? 'moved-base'
+                    : 'base-a',
+              };
+        } else if (url.pathname === '/api/revisions') {
+          payload = { specialOptions: [], branches: [], commits: [] };
+        } else if (url.pathname === '/api/comments-json') {
+          payload = { version: 0, threads: [] };
+        }
+        return Promise.resolve({ ok: true, json: async () => payload } as Response);
+      });
+      renderApp();
+      fireEvent.click(await screen.findByRole('button', { name: /Revision menu:/ }));
+      fireEvent.click(await screen.findByRole('button', { name: 'HEAD' }));
+      await waitFor(() =>
+        expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.slice(0, 2)).toEqual([
+          'base-b',
+          'tip-b',
+        ]),
+      );
+      refsMoved = true;
+      await act(async () => window.history.back());
+      await waitFor(() =>
+        expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.slice(0, 2)).toEqual(['base-a', '.']),
+      );
+      expect(new URLSearchParams(window.location.search).get('base')).toBe('HEAD');
+      await act(async () => window.history.forward());
+      await waitFor(() =>
+        expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.slice(0, 2)).toEqual([
+          'base-b',
+          'tip-b',
+        ]),
+      );
+    },
+  );
+
+  it.each([undefined, 'merge-base'] as const)(
+    'preserves symbolic refs on refresh after history restoration (mode=%s)',
+    async (baseMode) => {
+      let refsMoved = false;
+      const reviewA = {
+        ...mockDiffResponse,
+        baseCommitish: 'base-a',
+        targetCommitish: '.',
+        requestedBaseCommitish: 'HEAD',
+        requestedTargetCommitish: '.',
+        requestedBaseMode: baseMode,
+      };
+      const reviewB = {
+        ...mockDiffResponse,
+        baseCommitish: 'base-b',
+        targetCommitish: 'tip-b',
+        requestedBaseCommitish: 'HEAD^',
+        requestedTargetCommitish: 'HEAD',
+      };
+      vi.mocked(global.fetch).mockImplementation((input) => {
+        const url = new URL(String(input), window.location.origin);
+        let payload: unknown = {};
+        if (url.pathname === '/api/diff') {
+          payload = ['HEAD', 'tip-b'].includes(url.searchParams.get('target') ?? '')
+            ? {
+                ...reviewB,
+                targetCommitish:
+                  refsMoved && url.searchParams.get('target') === 'HEAD' ? 'moved-tip' : 'tip-b',
+              }
+            : {
+                ...reviewA,
+                requestedBaseCommitish: url.searchParams.get('base') ?? 'HEAD',
+                baseCommitish:
+                  refsMoved &&
+                  (url.searchParams.get('base') !== 'base-a' ||
+                    (baseMode === 'merge-base' && url.searchParams.get('retainedReview') !== '1'))
+                    ? 'moved-base'
+                    : 'base-a',
+              };
+        } else if (url.pathname === '/api/revisions') {
+          payload = { specialOptions: [], branches: [], commits: [] };
+        } else if (url.pathname === '/api/comments-json') {
+          payload = { version: 0, threads: [] };
+        }
+        return Promise.resolve({ ok: true, json: async () => payload } as Response);
+      });
+      const view = renderApp();
+      fireEvent.click(await screen.findByRole('button', { name: /Revision menu:/ }));
+      fireEvent.click(await screen.findByRole('button', { name: 'HEAD' }));
+      await waitFor(() =>
+        expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.slice(0, 2)).toEqual([
+          'base-b',
+          'tip-b',
+        ]),
+      );
+      refsMoved = true;
+      await act(async () => window.history.back());
+      await waitFor(() =>
+        expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.slice(0, 2)).toEqual(['base-a', '.']),
+      );
+      expect(new URLSearchParams(window.location.search).get('base')).toBe('HEAD');
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Ignore Whitespace' }));
+      await waitFor(() => {
+        const calls = vi
+          .mocked(global.fetch)
+          .mock.calls.filter(([url]) => String(url).startsWith('/api/diff'));
+        expect(
+          new URL(String(calls.at(-1)?.[0]), window.location.origin).searchParams.get(
+            'ignoreWhitespace',
+          ),
+        ).toBe('false');
+      });
+      await waitFor(() =>
+        expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.slice(0, 2)).toEqual(['base-a', '.']),
+      );
+      expect(new URLSearchParams(window.location.search).get('base')).toBe('HEAD');
+      view.unmount();
+      renderApp();
+      await waitFor(() =>
+        expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.slice(0, 2)).toEqual([
+          'moved-base',
+          '.',
+        ]),
+      );
+    },
+  );
+});
+
+describe('App Component - Retained conversation contexts', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockComments = [];
+  });
+
+  it('reopens the saved resolved merge-base context after HEAD moves to another branch', async () => {
+    const archived = [
+      createMockThread({
+        id: 'archived',
+        filePath: 'test.ts',
+        line: 1,
+        body: 'Earlier branch conversation',
+      }),
+    ];
+    vi.mocked(global.fetch).mockImplementation((input) => {
+      const url = new URL(String(input), window.location.origin);
+      let payload: unknown = {};
+      if (url.pathname === '/api/diff') {
+        const saved = url.searchParams.get('base') === 'saved-base';
+        const mode = url.searchParams.get('baseMode') === 'merge-base' ? 'merge-base' : undefined;
+        payload = {
+          ...mockDiffResponse,
+          baseCommitish: saved
+            ? mode && url.searchParams.get('retainedReview') !== '1'
+              ? 'recomputed-ancestor'
+              : 'saved-base'
+            : 'current-base',
+          targetCommitish: url.searchParams.get('target') ?? '.',
+          requestedBaseCommitish: url.searchParams.get('base') ?? 'HEAD',
+          requestedTargetCommitish: url.searchParams.get('target') ?? '.',
+          requestedBaseMode: mode,
+        };
+      } else if (url.pathname === '/api/revisions') {
+        payload = { specialOptions: [], branches: [], commits: [] };
+      } else if (url.pathname === '/api/conversation/snapshot') {
+        payload = {
+          reviews: [
+            {
+              selection: {
+                baseCommitish: 'saved-base',
+                targetCommitish: '.',
+                baseMode: 'merge-base',
+              },
+              summary: { commitMessage: 'Archived branch review', rationale: '' },
+              threads: archived,
+            },
+          ],
+        };
+      } else if (url.pathname === '/api/comments-json') {
+        payload = {
+          version: 1,
+          threads:
+            url.searchParams.get('base') === 'saved-base' &&
+            url.searchParams.get('baseMode') === 'merge-base'
+              ? archived
+              : [],
+        };
+      }
+      return Promise.resolve({ ok: true, json: async () => payload } as Response);
+    });
+    const firstVisit = renderApp();
+    fireEvent.click(await screen.findByRole('button', { name: /Revision menu:/ }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Return to Archived branch review/ }),
+    );
+    await waitFor(() =>
+      expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.slice(0, 2)).toEqual([
+        'saved-base',
+        '.',
+      ]),
+    );
+    expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.[5]).toBe('merge-base');
+    await waitFor(() => expect(mockReplaceThreads).toHaveBeenCalledWith(archived));
+    expect(new URLSearchParams(window.location.search).get('retainedReview')).toBe('1');
+    firstVisit.unmount();
+    renderApp();
+    await waitFor(() =>
+      expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.slice(0, 2)).toEqual([
+        'saved-base',
+        '.',
+      ]),
+    );
+    expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.[5]).toBe('merge-base');
+    const request = vi
+      .mocked(global.fetch)
+      .mock.calls.filter(([url]) => String(url).startsWith('/api/diff'))
+      .at(-1);
+    expect(new URL(String(request?.[0]), window.location.origin).searchParams.get('baseMode')).toBe(
+      'merge-base',
+    );
+    expect(
+      new URL(String(request?.[0]), window.location.origin).searchParams.get('retainedReview'),
+    ).toBe('1');
+    fireEvent.click(screen.getByRole('button', { name: /Revision menu:/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'HEAD' }));
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get('retainedReview')).toBeNull(),
+    );
+  });
+
+  it('can reopen a server-retained review that predates browser history', async () => {
+    vi.mocked(global.fetch).mockImplementation((input) => {
+      const url = new URL(String(input), window.location.origin);
+      let payload: unknown = {};
+      if (url.pathname === '/api/diff') {
+        payload = { ...mockDiffResponse, baseCommitish: 'base-b', targetCommitish: 'tip-b' };
+      } else if (url.pathname === '/api/revisions') {
+        payload = { specialOptions: [], branches: [], commits: [] };
+      } else if (url.pathname === '/api/conversation/snapshot') {
+        payload = {
+          reviews: [
+            {
+              selection: { baseCommitish: 'base-a', targetCommitish: 'tip-a' },
+              summary: { commitMessage: 'Earlier review', rationale: '' },
+              threads: [{}],
+            },
+            {
+              selection: { baseCommitish: 'empty-base', targetCommitish: 'empty-tip' },
+              summary: { commitMessage: '', rationale: '' },
+              threads: [],
+            },
+            {
+              selection: { baseCommitish: 'why-base', targetCommitish: 'why-tip' },
+              summary: { commitMessage: '', rationale: 'Retained rationale' },
+              threads: [],
+            },
+          ],
+        };
+      }
+      return Promise.resolve({ ok: true, json: async () => payload } as Response);
+    });
+    renderApp();
+    fireEvent.click(await screen.findByRole('button', { name: /Revision menu:/ }));
+    expect(
+      await screen.findByRole('button', { name: /Return to Retained rationale/ }),
+    ).toBeVisible();
+    expect(screen.queryByRole('button', { name: /Return to empty-base/ })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: /Return to Earlier review/ }));
+    await waitFor(() => {
+      const calls = vi
+        .mocked(global.fetch)
+        .mock.calls.filter(([url]) => String(url).startsWith('/api/diff'));
+      const params = new URL(String(calls.at(-1)?.[0]), window.location.origin).searchParams;
+      expect(params.get('base')).toBe('base-a');
+      expect(params.get('target')).toBe('tip-a');
+    });
+  });
+
+  it.each([false, true])(
+    'ignores a delayed comment refresh after switching reviews (return=%s)',
+    async (returnToOriginal) => {
+      let delayRefresh = false;
+      let completeRefresh: ((response: Response) => void) | undefined;
+      const oldThreads = [
+        createMockThread({ id: 'old', filePath: 'test.ts', line: 1, body: 'Late old context' }),
+      ];
+      vi.mocked(global.fetch).mockImplementation((input) => {
+        const url = new URL(String(input), window.location.origin);
+        let payload: unknown = {};
+        if (url.pathname === '/api/diff') {
+          const other = ['HEAD', 'tip-b'].includes(url.searchParams.get('target') ?? '');
+          payload = {
+            ...mockDiffResponse,
+            baseCommitish: other ? 'base-b' : 'base-a',
+            targetCommitish: other ? 'tip-b' : '.',
+            requestedBaseCommitish: other ? 'HEAD^' : 'HEAD',
+            requestedTargetCommitish: other ? 'HEAD' : '.',
+          };
+        } else if (url.pathname === '/api/revisions') {
+          payload = { specialOptions: [], branches: [], commits: [] };
+        } else if (url.pathname === '/api/comments-json') {
+          if (delayRefresh && url.searchParams.get('target') === '.') {
+            delayRefresh = false;
+            return new Promise<Response>((resolve) => {
+              completeRefresh = resolve;
+            });
+          }
+          payload = { version: 1, threads: [] };
+        }
+        return Promise.resolve({ ok: true, json: async () => payload } as Response);
+      });
+      renderApp();
+      await waitFor(() => expect(mockReplaceThreads).toHaveBeenCalled());
+      const refresh = vi.mocked(useFileWatch).mock.calls.at(-1)?.[1];
+      if (!refresh) throw new Error('Missing comment refresh handler');
+      delayRefresh = true;
+      let pending: void | Promise<void>;
+      act(() => {
+        pending = refresh();
+      });
+      fireEvent.click(screen.getByRole('button', { name: /Revision menu:/ }));
+      fireEvent.click(await screen.findByRole('button', { name: 'HEAD' }));
+      await waitFor(() =>
+        expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.slice(0, 2)).toEqual([
+          'base-b',
+          'tip-b',
+        ]),
+      );
+      if (returnToOriginal) {
+        await act(async () => window.history.back());
+        await waitFor(() =>
+          expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.slice(0, 2)).toEqual([
+            'base-a',
+            '.',
+          ]),
+        );
+      }
+      mockReplaceThreads.mockClear();
+      await act(async () => {
+        completeRefresh?.({
+          ok: true,
+          json: async () => ({ version: 99, threads: oldThreads }),
+        } as Response);
+        await pending;
+      });
+      expect(mockReplaceThreads).not.toHaveBeenCalledWith(oldThreads);
+    },
+  );
+
+  it.each([false, true])(
+    'ignores a delayed comment save after switching reviews (return=%s)',
+    async (returnToOriginal) => {
+      const oldThreads = [
+        createMockThread({ id: 'old-save', filePath: 'test.ts', line: 1, body: 'Old save' }),
+      ];
+      mockComments = oldThreads;
+      let completeSave: ((response: Response) => void) | undefined;
+      const posts: Array<{ target: string | null; baseVersion?: number }> = [];
+      vi.mocked(global.fetch).mockImplementation((input, init) => {
+        const url = new URL(String(input), window.location.origin);
+        let payload: unknown = {};
+        if (url.pathname === '/api/diff') {
+          const other = ['HEAD', 'tip-b'].includes(url.searchParams.get('target') ?? '');
+          payload = {
+            ...mockDiffResponse,
+            baseCommitish: other ? 'base-b' : 'base-a',
+            targetCommitish: other ? 'tip-b' : '.',
+            requestedBaseCommitish: other ? 'HEAD^' : 'HEAD',
+            requestedTargetCommitish: other ? 'HEAD' : '.',
+          };
+        } else if (url.pathname === '/api/revisions') {
+          payload = { specialOptions: [], branches: [], commits: [] };
+        } else if (url.pathname === '/api/comments-json') {
+          payload = { version: 7, threads: [] };
+        } else if (url.pathname === '/api/comments' && init?.method === 'POST') {
+          const body = JSON.parse(String(init.body)) as { baseVersion?: number };
+          posts.push({ target: url.searchParams.get('target'), ...body });
+          if (!completeSave) {
+            return new Promise<Response>((resolve) => {
+              completeSave = resolve;
+            });
+          }
+          payload = { version: 8, threads: [] };
+        }
+        return Promise.resolve({ ok: true, json: async () => payload } as Response);
+      });
+      const view = renderApp();
+      await waitFor(() => expect(completeSave).toBeDefined());
+      mockComments = [];
+      fireEvent.click(screen.getByRole('button', { name: /Revision menu:/ }));
+      fireEvent.click(await screen.findByRole('button', { name: 'HEAD' }));
+      await waitFor(() =>
+        expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.slice(0, 2)).toEqual([
+          'base-b',
+          'tip-b',
+        ]),
+      );
+      if (returnToOriginal) {
+        await act(async () => window.history.back());
+        await waitFor(() =>
+          expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.slice(0, 2)).toEqual([
+            'base-a',
+            '.',
+          ]),
+        );
+      }
+      mockReplaceThreads.mockClear();
+      await act(async () => {
+        completeSave?.({
+          ok: true,
+          json: async () => ({ merged: true, version: 99, threads: oldThreads }),
+        } as Response);
+      });
+      expect(mockReplaceThreads).not.toHaveBeenCalledWith(oldThreads);
+      posts.length = 0;
+      mockComments = [
+        createMockThread({ id: 'new', filePath: 'test.ts', line: 2, body: 'Current review' }),
+      ];
+      view.rerender(
+        <HotkeysProvider initiallyActiveScopes={['navigation']}>
+          <App />
+        </HotkeysProvider>,
+      );
+      await waitFor(() => expect(posts.length).toBeGreaterThan(0));
+      expect(posts.at(-1)?.target).toBe(returnToOriginal ? '.' : 'tip-b');
+      expect(posts.at(-1)?.baseVersion).toBe(7);
+    },
+  );
 });
