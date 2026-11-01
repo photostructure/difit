@@ -2,6 +2,7 @@ import { toCommentThread } from '../utils/commentThreads.js';
 import { spawn } from 'child_process';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { type Server } from 'http';
+import type { AddressInfo } from 'net';
 import { hostname } from 'os';
 import { join, dirname, isAbsolute, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
@@ -9,7 +10,13 @@ import { fileURLToPath } from 'url';
 import express, { type Express } from 'express';
 import open from 'open';
 
-import type { ReviewApproval, ReviewSummary } from '../types/conversation.js';
+import type {
+  ReviewApproval,
+  ReviewSummary,
+  ConversationStreamEvent,
+} from '../types/conversation.js';
+import type { ServerEvent, ServerShutdownEvent } from '../types/events.js';
+import { writeJsonl } from './event-output.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -57,7 +64,7 @@ import {
   getDiffSelectionKey,
 } from '../utils/diffSelection.js';
 
-interface ServerOptions {
+export interface ServerOptions {
   selection?: DiffSelection;
   stdinDiff?: string;
   preferredPort?: number;
@@ -67,6 +74,12 @@ interface ServerOptions {
   clearComments?: boolean;
   shipIt?: boolean;
   conversation?: boolean;
+  jsonl?: boolean;
+  onEvent?: (event: ServerEvent) => void;
+  onReady?: (server: {
+    shutdown: (reason: ServerShutdownEvent['reason']) => Promise<void>;
+    port: number;
+  }) => void;
   commitMessage?: string;
   why?: string;
   commentImports?: CommentImport[];
@@ -136,9 +149,14 @@ function createCommentSessionKey(selection: DiffSelection): string {
   return getDiffSelectionKey(selection);
 }
 
-export async function startServer(
-  options: ServerOptions,
-): Promise<{ port: number; url: string; launchUrl: string; isEmpty?: boolean; server?: Server }> {
+export async function startServer(options: ServerOptions): Promise<{
+  port: number;
+  url: string;
+  launchUrl: string;
+  isEmpty?: boolean;
+  server?: Server;
+  shutdown: (reason: ServerShutdownEvent['reason']) => Promise<void>;
+}> {
   const app = express();
   const repositoryPath = resolve(options.repoPath ?? process.cwd());
   const repositoryId = createHash('sha256').update(repositoryPath).digest('hex');
@@ -202,7 +220,20 @@ export async function startServer(
     hostname: hostname(),
   };
   const fileWatcher = new FileWatcherService();
-  const conversation = options.conversation ? new Conversation() : undefined;
+  const pendingEvents: ConversationStreamEvent[] = [];
+  let ready = false;
+  const emit = (event: ServerEvent) => {
+    if (options.jsonl) writeJsonl(event);
+    options.onEvent?.(event);
+  };
+  const conversation =
+    options.conversation || options.jsonl || options.onEvent
+      ? new Conversation((event) => {
+          if (ready) emit(event);
+          else pendingEvents.push(event);
+        })
+      : undefined;
+  const humanLog = options.jsonl ? console.error : console.log;
   const approvals = new Map<string, ReviewApproval>();
   const summaries = new Map<string, ReviewSummary>();
   const initialSummary = parseReviewSummaryInput({
@@ -279,6 +310,10 @@ export async function startServer(
   );
   // Ensure agents can discover the initial review even before a comment is posted.
   conversation?.getSummary(currentCommentSelection);
+  // Capture the initial review before listening; requests during later startup can change selection.
+  const launchReview = conversation
+    ?.snapshot()
+    .reviews.find((entry) => diffSelectionsEqual(entry.selection, currentCommentSelection));
   if (initialSummary.commitMessage || initialSummary.rationale) {
     const summary = {
       commitMessage: initialSummary.commitMessage,
@@ -317,11 +352,11 @@ export async function startServer(
   const commentSessions = new Map<string, CommentSessionState>();
   const initialCommentThreads = mergeCommentImports([], initialCommentImports).threads;
   if (initialCommentThreads.length > 0) {
-    conversation?.update(currentCommentSelection, [], initialCommentThreads, 'agent');
     commentSessions.set(createCommentSessionKey(currentCommentSelection), {
       threads: initialCommentThreads,
       version: 1,
     });
+    conversation?.update(currentCommentSelection, [], initialCommentThreads, 'agent');
   }
 
   function getCommentSelectionFromQuery(query: Record<string, unknown>): DiffSelection {
@@ -899,7 +934,7 @@ export async function startServer(
         const approval =
           conversation?.getApproval(selection) ?? approvals.get(getDiffSelectionKey(selection));
         if (approval?.approved) {
-          const revoked = conversation?.setApproval(selection, false) ?? {
+          const revoked = conversation?.setApproval(selection, false, origin) ?? {
             approved: false,
             updatedAt: new Date().toISOString(),
           };
@@ -1004,6 +1039,7 @@ export async function startServer(
           ? { ...thread, updatedAt: resolution.updatedAt, resolution }
           : thread,
       ),
+      'agent',
     );
     res.json({ success: true });
   });
@@ -1019,7 +1055,7 @@ export async function startServer(
       return;
     }
 
-    updateCommentSession(selection, nextThreads);
+    updateCommentSession(selection, nextThreads, 'agent');
 
     res.json({
       success: true,
@@ -1169,7 +1205,7 @@ export async function startServer(
   // Function to output comments when server shuts down
   function outputFinalComments(selection = currentCommentSelection) {
     const session = getOrCreateCommentSession(selection);
-    if (session.threads.length > 0) {
+    if (!options.jsonl && session.threads.length > 0) {
       console.log(formatCommentsOutput(session.threads.map(toCommentThread)));
     }
   }
@@ -1223,7 +1259,7 @@ export async function startServer(
           : { approved: input.approved, updatedAt: new Date().toISOString() };
       approvals.set(key, approval);
       if (previous?.approved !== approval.approved) {
-        console.log(
+        humanLog(
           `LGTM ${approval.approved ? 'approved' : 'revoked'}: ${selection.targetCommitish}`,
         );
         fileWatcher.broadcast({ type: 'approvalChanged', timestamp: new Date().toISOString() });
@@ -1240,9 +1276,11 @@ export async function startServer(
       }
       const selection = getCommentSelectionFromQuery(req.query as Record<string, unknown>);
       res.on('finish', async () => {
+        conversation?.setApproval(selection, true);
         await fileWatcher.stop();
         outputFinalComments(selection);
-        console.log(`✅ Commit approved: ${selection.targetCommitish}`);
+        humanLog(`✅ Commit approved: ${selection.targetCommitish}`);
+        outputShutdown('approved');
         // The parent reads piped stdout; immediate exit can truncate comments and approval.
         process.stdout.write('', (error) => process.exit(error ? 1 : 0));
       });
@@ -1287,18 +1325,19 @@ export async function startServer(
     req.on('close', () => {
       clearInterval(heartbeatInterval);
       if (options.keepAlive) {
-        console.log('Client disconnected, but server is staying alive (--keep-alive)');
-        console.log('Press Ctrl+C to stop the server');
+        console.error('Client disconnected, but server is staying alive (--keep-alive)');
+        console.error('Press Ctrl+C to stop the server');
       } else {
         // Add a small delay to ensure any pending sendBeacon requests are processed
         setTimeout(async () => {
-          console.log('Client disconnected, shutting down server...');
+          console.error('Client disconnected, shutting down server...');
 
           // Stop file watcher
           await fileWatcher.stop();
 
           outputFinalComments();
-          process.exit(0);
+          outputShutdown('client-disconnected');
+          process.stdout.write('', () => process.exit(0));
         }, 100);
       }
     });
@@ -1334,11 +1373,38 @@ export async function startServer(
 
   const { port, url, server } = await startServerWithFallback(
     app,
-    options.preferredPort || 4966,
+    options.preferredPort ?? 4966,
     options.host || 'localhost',
   );
   const launchUrl = `${url}#${EDITOR_SESSION_FRAGMENT_KEY}=${editorSessionToken}`;
 
+  let shutdownEmitted = false;
+  function outputShutdown(reason: ServerShutdownEvent['reason']) {
+    if (shutdownEmitted) return;
+    shutdownEmitted = true;
+    emit({
+      type: 'server.shutdown',
+      reason,
+      pid: process.pid,
+      timestamp: new Date().toISOString(),
+    });
+  }
+  let shutdownPromise: Promise<void> | undefined;
+  function shutdown(reason: ServerShutdownEvent['reason']): Promise<void> {
+    shutdownPromise ??= (async () => {
+      await fileWatcher.stop();
+      outputShutdown(reason);
+      await new Promise<void>((resolveShutdown) => {
+        server.close(() => resolveShutdown());
+        server.closeAllConnections();
+      });
+    })();
+    return shutdownPromise;
+  }
+  server.once('close', () => {
+    outputShutdown('closed');
+    void fileWatcher.stop();
+  });
   // Security warning for non-localhost binding
   if (options.host && options.host !== '127.0.0.1' && options.host !== 'localhost') {
     console.warn('\n⚠️  WARNING: Server is accessible from external network!');
@@ -1367,7 +1433,27 @@ export async function startServer(
     }
   }
 
-  return { port, url, launchUrl, isEmpty: initialDiffData.isEmpty || false, server };
+  // Install caller-owned lifecycle handling only after slow startup, before readiness
+  // becomes observable. The CLI retains default signal cancellation during startup.
+  options.onReady?.({ shutdown, port });
+  if (launchReview) {
+    emit({
+      type: 'server.ready',
+      port,
+      url,
+      launchUrl,
+      pid: process.pid,
+      reviewContext,
+      selection: { ...launchReview.selection },
+      reviewId: launchReview.id,
+      timestamp: new Date().toISOString(),
+    });
+  }
+  ready = true;
+  for (const event of pendingEvents) emit(event);
+  pendingEvents.length = 0;
+
+  return { port, url, launchUrl, isEmpty: initialDiffData.isEmpty || false, server, shutdown };
 }
 
 async function startServerWithFallback(
@@ -1381,9 +1467,10 @@ async function startServerWithFallback(
     // so, an error will be an instance of NodeJS.ErrnoException
     const server = app.listen(preferredPort, host, (err: NodeJS.ErrnoException | undefined) => {
       const displayHost = host === '0.0.0.0' ? 'localhost' : host;
-      const url = `http://${displayHost}:${preferredPort}`;
       if (!err) {
-        resolve({ port: preferredPort, url, server });
+        const { port } = server.address() as AddressInfo;
+        const url = `http://${displayHost.includes(':') ? `[${displayHost}]` : displayHost}:${port}`;
+        resolve({ port, url, server });
         return;
       }
 
@@ -1391,7 +1478,7 @@ async function startServerWithFallback(
       switch (err.code) {
         // Try another port until it succeeds
         case 'EADDRINUSE': {
-          console.log(`Port ${preferredPort} is busy, trying ${preferredPort + 1}...`);
+          console.error(`Port ${preferredPort} is busy, trying ${preferredPort + 1}...`);
           return startServerWithFallback(app, preferredPort + 1, host)
             .then(({ port, url, server }) => {
               resolve({ port, url, server });

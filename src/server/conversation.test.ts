@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import type { ConversationStreamEvent } from '../types/conversation.js';
 import type { DiffCommentThread } from '../types/diff.js';
 
 import { Conversation } from './conversation.js';
@@ -23,43 +24,80 @@ const thread: DiffCommentThread = {
   ],
 };
 
-describe('Conversation journal', () => {
-  it('captures review summaries and wakes a waiting consumer', async () => {
+function observedConversation() {
+  const events: ConversationStreamEvent[] = [];
+  return { journal: new Conversation((event) => events.push(event)), events };
+}
+
+describe('Conversation state and events', () => {
+  it('does not retain a replay API or event history', () => {
     const journal = new Conversation();
+    expect(journal).not.toHaveProperty('read');
+    expect(journal).not.toHaveProperty('events');
+    expect(journal).not.toHaveProperty('capacity');
+  });
+
+  it('emits a comment deletion when a reply is removed from a surviving thread', () => {
+    const { journal, events } = observedConversation();
+    const replied = {
+      ...thread,
+      messages: [
+        ...thread.messages,
+        { ...thread.messages[0]!, id: 'reply', body: 'Answer', origin: 'agent' as const },
+      ],
+    };
+    journal.update(selection, [], [replied], 'user');
+    const created = events[0]!;
+    events.length = 0;
+    journal.update(selection, [replied], [thread], 'user');
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'comment.deleted',
+        reviewId: created.reviewId,
+        threadId: thread.id,
+        messageId: 'reply',
+        selection,
+        origin: 'user',
+        cursor: expect.any(String),
+        timestamp: expect.any(String),
+      }),
+    ]);
+    expect(events[0]).not.toHaveProperty('body');
+    expect(journal.snapshot().reviews[0]?.threads[0]?.messages).toHaveLength(1);
+  });
+
+  it('captures review summaries and notifies the event consumer', () => {
+    const { journal, events } = observedConversation();
     expect(journal.getSummary(selection)).toEqual({ commitMessage: '', rationale: '', version: 0 });
-    const waiting = journal.wait(journal.cursor, 25000, new AbortController().signal);
     const summary = { commitMessage: 'fix: preserve intent', rationale: 'Review why.', version: 1 };
     journal.setSummary(selection, summary, 'agent');
-    expect((await waiting).events).toEqual([
+    expect(events).toEqual([
       expect.objectContaining({ type: 'review.summary', origin: 'agent', summary }),
     ]);
-    summary.rationale = 'Changed outside the journal';
+    summary.rationale = 'Changed outside the state';
     expect(journal.snapshot().reviews[0]?.summary.rationale).toBe('Review why.');
   });
 
-  it('journals approval changes, wakes watchers, and treats repeated state as idempotent', async () => {
-    const journal = new Conversation();
-    const waiting = journal.wait(journal.cursor, 25000, new AbortController().signal);
-    const approval = journal.setApproval(selection, true);
-    expect((await waiting).events).toEqual([
-      expect.objectContaining({ type: 'review.approval', approved: true }),
-    ]);
+  it('emits approval changes and treats repeated state as idempotent', () => {
+    const { journal, events } = observedConversation();
     journal.setApproval(selection, true);
-    expect(journal.read(approval.cursor).events).toEqual([]);
+    expect(events).toEqual([expect.objectContaining({ type: 'review.approval', approved: true })]);
+    journal.setApproval(selection, true);
+    expect(events).toHaveLength(1);
     journal.setApproval(selection, false);
     expect(journal.snapshot().reviews[0]?.approval.approved).toBe(false);
-    expect(journal.read(approval.cursor).events).toEqual([
+    expect(events.slice(1)).toEqual([
       expect.objectContaining({ type: 'review.approval', approved: false }),
     ]);
     expect(new Conversation().getApproval(selection).approved).toBe(false);
   });
 
   it('captures review context, emits edits, and does not repeat unchanged messages', () => {
-    const journal = new Conversation();
+    const { journal, events } = observedConversation();
     journal.update(selection, [], [thread], 'user');
-    const first = journal.read();
-    expect(first.events).toHaveLength(1);
-    expect(first.events[0]).toMatchObject({
+    const first = events[0]!;
+    expect(events).toHaveLength(1);
+    expect(first).toMatchObject({
       type: 'comment.created',
       origin: 'user',
       selection,
@@ -72,25 +110,25 @@ describe('Conversation journal', () => {
       codeSnapshot: thread.codeSnapshot,
     });
     journal.update(selection, [thread], [thread], 'user');
-    expect(journal.read(first.cursor).events).toEqual([]);
+    expect(events).toHaveLength(1);
     const edited = structuredClone(thread);
     edited.messages[0]!.body = 'Why not 43?';
     journal.update(selection, [thread], [edited], 'user');
-    expect(journal.read(first.cursor).events).toEqual([
+    expect(events.slice(1)).toEqual([
       expect.objectContaining({
         type: 'comment.updated',
         body: 'Why not 43?',
-        reviewId: first.events[0]!.reviewId,
+        reviewId: first.reviewId,
       }),
     ]);
-    expect(first.events[0]).toMatchObject({ body: 'Why 42?\nPlease explain.' });
+    expect(first).toMatchObject({ body: 'Why 42?\nPlease explain.' });
   });
 
-  it('tracks progress per revision without emitting comment events or regressing on replay', () => {
-    const journal = new Conversation();
+  it('emits progress per revision without regressing on duplicate receipts', () => {
+    const { journal, events } = observedConversation();
     journal.update(selection, [], [thread], 'user');
-    const event = journal.read().events[0]!;
-    if (!('threadId' in event)) throw new Error('Expected comment event');
+    const event = events[0]!;
+    if (event.type !== 'comment.created') throw new Error('Expected comment event');
     const set = (status: 'delivered' | 'thinking' | 'read' | 'replied') =>
       journal.setProgress(event.reviewId, event.threadId, event.messageId, event.cursor, status);
     const progress = () => journal.snapshot().reviews[0]!.threads[0]!.messages[0]!.progress;
@@ -99,7 +137,16 @@ describe('Conversation journal', () => {
     set('thinking');
     set('read');
     expect(progress()?.status).toBe('thinking');
-    expect(journal.read(event.cursor).events).toEqual([]);
+    expect(events.slice(1)).toEqual([
+      expect.objectContaining({
+        type: 'comment.progress',
+        progress: expect.objectContaining({ status: 'delivered', cursor: event.cursor }),
+      }),
+      expect.objectContaining({
+        type: 'comment.progress',
+        progress: expect.objectContaining({ status: 'thinking', cursor: event.cursor }),
+      }),
+    ]);
     set('replied');
     set('delivered');
     expect(progress()?.status).toBe('replied');
@@ -112,42 +159,59 @@ describe('Conversation journal', () => {
     expect(() => set('thinking')).toThrow('no longer exists');
   });
 
-  it('delivers a submitted comment to an already waiting consumer', async () => {
-    const journal = new Conversation();
-    const waiting = journal.wait(journal.cursor, 25000, new AbortController().signal);
-    journal.update(selection, [], [thread], 'user');
-    expect((await waiting).events[0]).toMatchObject({ body: 'Why 42?\nPlease explain.' });
+  it('notifies consumers only after all messages and progress are saved', () => {
+    const observed: unknown[] = [];
+    const journal = new Conversation(() => observed.push(journal.snapshot()));
+    const second = { ...thread, id: 'second' };
+    journal.update(selection, [], [thread, second], 'user');
+    expect(observed).toHaveLength(2);
+    for (const snapshot of observed)
+      expect(snapshot).toMatchObject({
+        reviews: [
+          {
+            threads: [
+              { messages: [{ progress: { status: 'queued' } }] },
+              { messages: [{ progress: { status: 'queued' } }] },
+            ],
+          },
+        ],
+      });
   });
 
-  it('releases a cancelled wait without consuming another client’s events', async () => {
-    const journal = new Conversation();
-    const abort = new AbortController();
-    const waiting = journal.wait(journal.cursor, 25000, abort.signal);
-    abort.abort();
-    expect((await waiting).events).toEqual([]);
+  it('emits resolution, reopening, and thread deletion without repeating comments', () => {
+    const { journal, events } = observedConversation();
     journal.update(selection, [], [thread], 'user');
-    expect(journal.read().events).toHaveLength(1);
+    events.length = 0;
+    const resolved = {
+      ...thread,
+      resolution: { resolved: true, updatedAt: new Date().toISOString() },
+    };
+    journal.update(selection, [thread], [resolved], 'user');
+    journal.update(selection, [resolved], [thread], 'user');
+    journal.update(selection, [thread], [], 'agent');
+    expect(events.map((event) => event.type)).toEqual([
+      'thread.resolved',
+      'thread.reopened',
+      'thread.deleted',
+    ]);
+    expect(journal.snapshot().reviews[0]?.threads).toEqual([]);
   });
 
   it('separates reviews and labels agent responses', () => {
-    const journal = new Conversation();
+    const { journal, events } = observedConversation();
     journal.update(selection, [], [thread], 'user');
     journal.update({ ...selection, targetCommitish: 'another-sha' }, [], [thread], 'agent');
-    const events = journal.read().events;
     expect(events[0]!.reviewId).not.toBe(events[1]!.reviewId);
     expect(events[1]!.origin).toBe('agent');
     expect(journal.findReview(events[0]!.reviewId)?.selection).toEqual(selection);
   });
 
-  it('rejects expired, future, and restarted-server cursors instead of losing messages silently', () => {
-    const journal = new Conversation(1);
-    const initial = journal.cursor;
+  it('gives snapshots the latest state cursor and independent servers distinct revision tokens', () => {
+    const { journal, events } = observedConversation();
     journal.update(selection, [], [thread], 'user');
-    const cursor = journal.cursor;
-    journal.update(selection, [], [thread], 'agent');
-    expect(() => journal.read(initial)).toThrow('expired');
-    expect(journal.read(cursor).events).toHaveLength(1);
-    expect(() => journal.read(cursor.replace(/:\d+$/, ':999'))).toThrow('Invalid');
-    expect(() => new Conversation().read(cursor)).toThrow('restarted');
+    expect(journal.snapshot().cursor).toBe(events.at(-1)?.cursor);
+    const other = observedConversation();
+    other.journal.update(selection, [], [thread], 'user');
+    expect(other.events[0]?.cursor).not.toBe(events[0]?.cursor);
   });
 });

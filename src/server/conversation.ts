@@ -3,8 +3,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Express } from 'express';
 
 import type {
-  ConversationBatch,
   ConversationEvent,
+  ConversationStreamEvent,
   ConversationSnapshot,
   ReviewApproval,
   ReviewSummary,
@@ -21,15 +21,16 @@ interface Review {
   summary: ReviewSummary;
 }
 
-/** A bounded, process-local journal. Cursors cannot be reused after server restart. */
+/** Process-local review state and live events. Revision tokens change after server restart. */
 export class Conversation {
   private readonly streamId = randomUUID();
   private sequence = 0;
-  private readonly events: ConversationBatch['events'] = [];
   private readonly reviews = new Map<string, Review>();
-  private readonly listeners = new Set<() => void>();
+  constructor(private readonly onEvent?: (event: ConversationStreamEvent) => void) {}
 
-  constructor(private readonly capacity = 256) {}
+  private emit(event: ConversationStreamEvent): void {
+    this.onEvent?.(event);
+  }
 
   private getReview(selection: DiffSelection): Review {
     const key = getDiffSelectionKey(selection);
@@ -60,7 +61,7 @@ export class Conversation {
     const review = this.getReview(selection);
     review.summary = { ...summary };
     this.sequence += 1;
-    this.events.push({
+    this.emit({
       type: 'review.summary',
       origin,
       cursor: this.cursor,
@@ -69,27 +70,27 @@ export class Conversation {
       summary: { ...summary },
       timestamp: new Date().toISOString(),
     });
-    if (this.events.length > this.capacity) this.events.shift();
-    for (const listener of this.listeners) listener();
   }
 
-  setApproval(selection: DiffSelection, approved: boolean): ReviewApproval {
+  setApproval(
+    selection: DiffSelection,
+    approved: boolean,
+    origin: 'user' | 'agent' = 'user',
+  ): ReviewApproval {
     const review = this.getReview(selection);
     if (review.approval.approved === approved) return { ...review.approval };
     this.sequence += 1;
     const timestamp = new Date().toISOString();
     review.approval = { approved, cursor: this.cursor, updatedAt: timestamp };
-    this.events.push({
+    this.emit({
       type: 'review.approval',
-      origin: 'user',
+      origin,
       cursor: this.cursor,
       reviewId: review.id,
       selection: { ...selection },
       approved,
       timestamp,
     });
-    if (this.events.length > this.capacity) this.events.shift();
-    for (const listener of this.listeners) listener();
     return { ...review.approval };
   }
 
@@ -109,6 +110,7 @@ export class Conversation {
     for (const key of review.progress.keys()) {
       if (!liveKeys.has(key)) review.progress.delete(key);
     }
+    const pending: ConversationStreamEvent[] = [];
     for (const thread of next) {
       const oldThread = previous.find((candidate) => candidate.id === thread.id);
       for (const message of thread.messages) {
@@ -125,7 +127,7 @@ export class Conversation {
         } else {
           review.progress.delete(progressKey);
         }
-        this.events.push({
+        pending.push({
           type: oldMessage ? 'comment.updated' : 'comment.created',
           cursor: this.cursor,
           origin: message.origin ?? origin,
@@ -143,10 +145,55 @@ export class Conversation {
           codeSnapshot: thread.codeSnapshot ? { ...thread.codeSnapshot } : undefined,
           timestamp: new Date().toISOString(),
         });
-        if (this.events.length > this.capacity) this.events.shift();
       }
     }
-    for (const listener of this.listeners) listener();
+    for (const thread of next) {
+      const oldThread = previous.find((candidate) => candidate.id === thread.id);
+      for (const message of oldThread?.messages ?? []) {
+        if (thread.messages.some((candidate) => candidate.id === message.id)) continue;
+        this.sequence += 1;
+        pending.push({
+          type: 'comment.deleted',
+          cursor: this.cursor,
+          origin,
+          reviewId: review.id,
+          selection: { ...selection },
+          threadId: thread.id,
+          messageId: message.id,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+    for (const thread of next) {
+      const oldThread = previous.find((candidate) => candidate.id === thread.id);
+      if (Boolean(oldThread?.resolution?.resolved) === Boolean(thread.resolution?.resolved))
+        continue;
+      this.sequence += 1;
+      pending.push({
+        type: thread.resolution?.resolved ? 'thread.resolved' : 'thread.reopened',
+        origin,
+        cursor: this.cursor,
+        reviewId: review.id,
+        selection: { ...selection },
+        threadId: thread.id,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    for (const oldThread of previous) {
+      if (!next.some((thread) => thread.id === oldThread.id)) {
+        this.sequence += 1;
+        pending.push({
+          type: 'thread.deleted',
+          origin,
+          cursor: this.cursor,
+          reviewId: review.id,
+          selection: { ...selection },
+          threadId: oldThread.id,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+    for (const event of pending) this.emit(event);
   }
 
   get cursor(): string {
@@ -204,58 +251,21 @@ export class Conversation {
     ];
     // Replayed deliveries and delayed status requests must not move progress backwards.
     if (order.indexOf(status) <= order.indexOf(progress.status)) return undefined;
-    review.progress.set(JSON.stringify([threadId, messageId]), {
-      status,
-      cursor,
-      updatedAt: new Date().toISOString(),
+    const updated = { status, cursor, updatedAt: new Date().toISOString() };
+    review.progress.set(JSON.stringify([threadId, messageId]), updated);
+    this.sequence += 1;
+    this.emit({
+      type: 'comment.progress',
+      origin: 'agent',
+      cursor: this.cursor,
+      reviewId,
+      selection: { ...review.selection },
+      threadId,
+      messageId,
+      progress: { ...updated },
+      timestamp: updated.updatedAt,
     });
     return review.selection;
-  }
-
-  read(after?: string): ConversationBatch {
-    let sequence = 0;
-    if (after !== undefined) {
-      const [streamId, number, extra] = after.split(':');
-      sequence = Number(number);
-      if (
-        streamId !== this.streamId ||
-        extra !== undefined ||
-        !number ||
-        !/^\d+$/.test(number) ||
-        !Number.isSafeInteger(sequence) ||
-        sequence > this.sequence
-      ) {
-        throw new Error(
-          'Invalid conversation cursor or server restarted; run comment snapshot and resume with its cursor',
-        );
-      }
-    }
-    if (sequence < this.sequence - this.events.length) {
-      throw new Error(
-        'Conversation cursor expired; run comment snapshot and resume with its cursor',
-      );
-    }
-    return {
-      events: this.events.slice(sequence - (this.sequence - this.events.length)),
-      cursor: this.cursor,
-    };
-  }
-
-  async wait(after: string, milliseconds: number, signal: AbortSignal): Promise<ConversationBatch> {
-    const batch = this.read(after);
-    if (batch.events.length > 0 || milliseconds === 0 || signal.aborted) return batch;
-    await new Promise<void>((resolve) => {
-      const finish = () => {
-        clearTimeout(timer);
-        this.listeners.delete(finish);
-        signal.removeEventListener('abort', finish);
-        resolve();
-      };
-      const timer = setTimeout(finish, milliseconds);
-      this.listeners.add(finish);
-      signal.addEventListener('abort', finish, { once: true });
-    });
-    return this.read(after);
   }
 }
 
@@ -276,39 +286,6 @@ export function registerConversationRoutes(
 ): void {
   app.get('/api/conversation/snapshot', (_req, res) => {
     res.json(conversation.snapshot());
-  });
-
-  app.get('/api/conversation/events', async (req, res) => {
-    const after = req.query.after;
-    const wait = req.query.wait ?? '25000';
-    if (
-      (after !== undefined && typeof after !== 'string') ||
-      typeof wait !== 'string' ||
-      !/^\d+$/.test(wait) ||
-      Number(wait) > 25000
-    ) {
-      res
-        .status(400)
-        .json({ error: 'Expected a cursor and wait between 0 and 25000 milliseconds' });
-      return;
-    }
-    const abort = new AbortController();
-    const disconnect = () => abort.abort();
-    res.on('close', disconnect);
-    try {
-      const batch = conversation.read(after === 'latest' ? conversation.cursor : after);
-      const result =
-        batch.events.length > 0
-          ? batch
-          : await conversation.wait(batch.cursor, Number(wait), abort.signal);
-      if (!abort.signal.aborted) res.json(result);
-    } catch (error) {
-      if (!abort.signal.aborted) {
-        res.status(409).json({ error: error instanceof Error ? error.message : 'Invalid cursor' });
-      }
-    } finally {
-      res.off('close', disconnect);
-    }
   });
 
   app.post('/api/conversation/status', (req, res) => {

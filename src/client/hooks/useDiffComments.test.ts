@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import type { DiffContextStorage } from '../../types/diff';
 import { Conversation } from '../../server/conversation';
+import type { ConversationStreamEvent } from '../../types/conversation';
 import { useDiffComments } from './useDiffComments';
 
 // Mock StorageService
@@ -192,9 +193,10 @@ describe('useDiffComments', () => {
     };
     act(() => result.current.replaceThreads(importedThreads));
     const selection = { baseCommitish: 'main', targetCommitish: 'feature' };
-    const journal = new Conversation();
+    const events: ConversationStreamEvent[] = [];
+    const journal = new Conversation((event) => events.push(event));
     journal.update(selection, [], importedThreads, 'agent');
-    const cursor = journal.cursor;
+    events.length = 0;
 
     act(() => result.current.updateMessage('finding', message.id, message.body, 'question'));
     journal.update(selection, importedThreads, result.current.threads, 'user');
@@ -205,7 +207,7 @@ describe('useDiffComments', () => {
     expect(edited.progress).toBeUndefined();
     expect(result.current.threads[0]!.isQuestion).toBe(true);
     expect(mockDiffContextData!.threads[0]!.messages[0]).toEqual(edited);
-    expect(journal.read(cursor).events).toEqual([
+    expect(events).toEqual([
       expect.objectContaining({ type: 'comment.updated', origin: 'user', intent: 'question' }),
     ]);
     expect(journal.snapshot().reviews[0]!.threads[0]!.messages[0]!.progress?.status).toBe('queued');
@@ -321,14 +323,15 @@ describe('useDiffComments', () => {
     const importedThreads = result.current.threads;
     expect(importedThreads[0]!.messages[0]!.origin).toBe('agent');
     const selection = { baseCommitish: 'main', targetCommitish: 'feature' };
-    const journal = new Conversation();
+    const events: ConversationStreamEvent[] = [];
+    const journal = new Conversation((event) => events.push(event));
     journal.update(selection, [], importedThreads, 'agent');
-    const cursor = journal.cursor;
+    events.length = 0;
 
     act(() => result.current.setThreadQuestion('finding', true));
     journal.update(selection, importedThreads, result.current.threads, 'user');
 
-    expect(journal.read(cursor).events).toEqual([
+    expect(events).toEqual([
       expect.objectContaining({ type: 'comment.updated', origin: 'user', intent: 'question' }),
     ]);
     expect(journal.snapshot().reviews[0]!.threads[0]!.messages[0]!.progress?.status).toBe('queued');

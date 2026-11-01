@@ -21,6 +21,7 @@ import {
   readStdin,
 } from './utils.js';
 import { createCommentCommand } from './comment.js';
+import { createSchemaCommand } from './schema.js';
 import { getPrPatch, getPrCommentImports } from './github.js';
 import {
   BACKGROUND_CHILD_ENV,
@@ -88,6 +89,7 @@ interface CliOptions {
   clean?: boolean;
   shipIt?: boolean;
   conversation?: boolean;
+  jsonl: boolean;
   commitMessage?: string;
   why?: string;
   includeUntracked?: boolean;
@@ -131,8 +133,14 @@ program
     true,
   )
   .option('--no-lgtm, --no-ship-it', 'hide the LGTM approval toggle')
-  .option('--conversation', 'enable live comment events and exact-thread agent replies', true)
-  .option('--no-conversation', 'disable live comment events and agent replies')
+  .option(
+    '--conversation',
+    'enable conversation APIs (replies, progress, snapshots); required by --jsonl',
+    true,
+  )
+  .option('--no-conversation', 'disable agent conversations (requires --no-jsonl)')
+  .option('--jsonl', 'emit review events as JSON Lines on stdout (default)', true)
+  .option('--no-jsonl', 'use human-readable output instead of JSON Lines')
   .option('--commit-message <text>', 'seed the proposed commit message for the initial review')
   .option('--why <text>', 'seed a short rationale for the initial review')
   .option('--include-untracked', 'automatically include untracked files in diff')
@@ -158,6 +166,12 @@ Editor configuration (set before starting difit):
     try {
       const isBackgroundChild = process.env[BACKGROUND_CHILD_ENV] === '1';
       const backgroundMode = options.background || isBackgroundChild;
+      if (options.jsonl && !options.conversation) {
+        console.error(
+          'Error: --no-conversation requires --no-jsonl; JSONL events use the conversation protocol',
+        );
+        process.exit(1);
+      }
       let stdinDiff: string | undefined;
       let stdinReviewLabel = 'diff from stdin';
       let manualCommentImports: CommentImport[] = [];
@@ -253,6 +267,7 @@ Editor configuration (set before starting difit):
 
       if (stdinDiff) {
         // Start server with stdin diff (including --pr patch)
+
         const { launchUrl, port } = await startServer({
           stdinDiff,
           preferredPort: options.port,
@@ -261,6 +276,10 @@ Editor configuration (set before starting difit):
           clearComments: options.clean,
           shipIt: options.shipIt,
           conversation: options.conversation,
+          jsonl: options.jsonl && !backgroundMode,
+          onReady: backgroundMode
+            ? undefined
+            : ({ shutdown, port }) => registerShutdownHandlers(shutdown, port, options.jsonl),
           commitMessage: options.commitMessage,
           why: options.why,
           keepAlive: options.keepAlive,
@@ -274,13 +293,12 @@ Editor configuration (set before starting difit):
           }
           return;
         }
-
-        console.log(`\n🚀 difit server started on ${launchUrl}`);
-        console.log(`📋 Reviewing: ${stdinReviewLabel}`);
+        console.error(`\n🚀 difit server started on ${launchUrl}`);
+        console.error(`📋 Reviewing: ${stdinReviewLabel}`);
         if (options.keepAlive) {
-          console.log('🔒 Keep-alive mode: server will stay running after browser disconnects');
+          console.error('🔒 Keep-alive mode: server will stay running after browser disconnects');
         }
-        console.log('\nPress Ctrl+C to stop the server');
+        console.error('\nPress Ctrl+C to stop the server');
         return;
       }
 
@@ -325,6 +343,10 @@ Editor configuration (set before starting difit):
         clearComments: options.clean,
         shipIt: options.shipIt,
         conversation: options.conversation,
+        jsonl: options.jsonl && !backgroundMode,
+        onReady: backgroundMode
+          ? undefined
+          : ({ shutdown, port }) => registerShutdownHandlers(shutdown, port, options.jsonl),
         commitMessage: options.commitMessage,
         why: options.why,
         keepAlive: options.keepAlive,
@@ -342,53 +364,92 @@ Editor configuration (set before starting difit):
         return;
       }
 
-      console.log(`\n🚀 difit server started on ${launchUrl}`);
-      console.log(`📋 Reviewing: ${selection.targetCommitish}`);
+      console.error(`\n🚀 difit server started on ${launchUrl}`);
+      console.error(`📋 Reviewing: ${selection.targetCommitish}`);
 
       if (options.keepAlive) {
-        console.log('🔒 Keep-alive mode: server will stay running after browser disconnects');
+        console.error('🔒 Keep-alive mode: server will stay running after browser disconnects');
       }
 
       if (options.clean) {
-        console.log('🧹 Starting with a clean slate - all existing comments will be cleared');
+        console.error('🧹 Starting with a clean slate - all existing comments will be cleared');
       }
 
       if (isEmpty) {
-        console.log(
+        console.error(
           '\n! \x1b[33mNo differences found. Browser will not open automatically.\x1b[0m',
         );
-        console.log(`   Server is running at ${launchUrl} if you want to check manually.\n`);
+        console.error(`   Server is running at ${launchUrl} if you want to check manually.\n`);
       } else if (options.open) {
-        console.log('🌐 Opening browser...\n');
+        console.error('🌐 Opening browser...\n');
       } else {
-        console.log('💡 Use --open to automatically open browser\n');
+        console.error('💡 Use --open to automatically open browser\n');
       }
-
-      process.on('SIGINT', async () => {
-        console.log('\n👋 Shutting down difit server...');
-
-        // Try to fetch comments before shutting down
-        try {
-          const response = await fetch(`http://localhost:${port}/api/comments-output`);
-          if (response.ok) {
-            const data = await response.text();
-            if (data.trim()) {
-              console.log(data);
-            }
-          }
-        } catch {
-          // Silently ignore fetch errors during shutdown
-        }
-
-        process.exit(0);
-      });
     } catch (error) {
       console.error('Error:', error instanceof Error ? error.message : 'Unknown error');
       process.exit(1);
     }
   });
 
+program.addCommand(createSchemaCommand());
+program.addHelpText(
+  'after',
+  `
+Agent protocol:
+  A foreground server emits JSONL on stdout; diagnostics and prompts use stderr.
+  Read server.ready for the actual API port, then consume review events directly.
+  difit schema                  JSON Schema for events and all protocol definitions
+  difit schema summary          Commit-message/TLDR edit request schema
+  difit comment reply --help    Exact-thread reply payload
+  difit comment status --help   Explicit delivery and progress receipts
+  difit comment snapshot --port <port>  Recover the current review state
+
+Summary JSON: {"reviewId":"...","commitMessage":"fix: ...","rationale":"Short TLDR","baseVersion":0}
+Comment JSON events include type, reviewId, threadId, messageId, cursor, and body.
+`,
+);
+
 void program.parseAsync();
+
+function registerShutdownHandlers(
+  shutdown: (reason: 'SIGINT' | 'SIGTERM') => Promise<void>,
+  port: number,
+  jsonl: boolean,
+): void {
+  let closing = false;
+  const stop = async (signal: 'SIGINT' | 'SIGTERM') => {
+    if (closing) return;
+    closing = true;
+    console.error('\n👋 Shutting down difit server...');
+    let exitCode = 0;
+    if (!jsonl) {
+      try {
+        const response = await fetch(`http://localhost:${port}/api/comments-output`, {
+          signal: AbortSignal.timeout(3000),
+        });
+        if (response.ok) {
+          const comments = await response.text();
+          if (comments.trim()) console.log(comments);
+        }
+      } catch {
+        // Review state may already be unavailable during shutdown.
+      }
+    }
+    try {
+      await shutdown(signal);
+    } catch (error) {
+      console.error('Error shutting down difit:', error instanceof Error ? error.message : error);
+      exitCode = 1;
+    }
+    process.stdout.write('', () => process.exit(exitCode));
+  };
+  process.on('SIGINT', () => {
+    void stop('SIGINT');
+  });
+  process.on('SIGTERM', () => {
+    void stop('SIGTERM');
+  });
+}
 
 async function handleUntrackedFiles(git: SimpleGit, addAutomatically?: boolean): Promise<void> {
   const files = await findUntrackedFiles(git);
@@ -400,18 +461,18 @@ async function handleUntrackedFiles(git: SimpleGit, addAutomatically?: boolean):
 
   if (shouldAdd) {
     await markFilesIntentToAdd(git, files);
-    console.log('✅ Files added with --intent-to-add');
+    console.error('✅ Files added with --intent-to-add');
     const filesAsArgs = files.join(' ');
-    console.log(`   💡 To undo this, run \`git reset -- ${filesAsArgs}\``);
+    console.error(`   💡 To undo this, run \`git reset -- ${filesAsArgs}\``);
   } else {
-    console.log('i Untracked files will not be shown in diff');
+    console.error('i Untracked files will not be shown in diff');
   }
 }
 
 async function promptUserToIncludeUntracked(files: string[]): Promise<boolean> {
-  console.log(`\n📝 Found ${files.length} untracked file(s):`);
+  console.error(`\n📝 Found ${files.length} untracked file(s):`);
   for (const file of files) {
-    console.log(`    - ${file}`);
+    console.error(`    - ${file}`);
   }
 
   return await promptUser(

@@ -25,54 +25,101 @@ describe('conversation commands', () => {
     vi.resetAllMocks();
   });
 
-  it('writes one JSON value per line and exposes a resumable checkpoint', async () => {
-    const event = { type: 'comment.created', body: 'Question\nwith a newline', cursor: 'stream:1' };
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ events: [event], cursor: 'stream:1' })),
-    );
+  it('omits watch from the comment help and command surface', () => {
+    const command = createCommentCommand();
+    expect(command.commands.map((subcommand) => subcommand.name())).not.toContain('watch');
+    expect(command.helpInformation()).not.toContain('watch');
+    expect(
+      command.commands.find((subcommand) => subcommand.name() === 'status')?.description(),
+    ).toContain('delivered');
+  });
+
+  it.each([{ args: [] }, { args: ['--port', '4966', '--once'] }])(
+    'rejects the removed watch command with arguments %j',
+    async ({ args }) => {
+      const stderr = vi.fn();
+      const command = createCommentCommand().exitOverride().configureOutput({ writeErr: stderr });
+      await expect(command.parseAsync(['node', 'difit', 'watch', ...args])).rejects.toThrow(
+        "unknown command 'watch'",
+      );
+      expect(stderr).toHaveBeenCalledWith(expect.stringContaining("unknown command 'watch'"));
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(log).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['snapshot', 'reply', 'status', 'summary'])(
+    'requires a valid TCP port for %s',
+    async (action) => {
+      for (const port of ['0', '65536', '1.5', '4966suffix']) {
+        const command = createCommentCommand();
+        command.commands
+          .find((subcommand) => subcommand.name() === action)!
+          .exitOverride()
+          .configureOutput({ writeErr: vi.fn() });
+        await expect(command.parseAsync(['node', 'difit', action, '--port', port])).rejects.toThrow(
+          'Expected an integer from 1 to 65535',
+        );
+      }
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['reply', 'status', 'summary'])(
+    'requires JSON on an interactive terminal for %s',
+    async (action) => {
+      vi.mocked(detectStdinSource).mockReturnValue('tty');
+      await createCommentCommand().parseAsync(['node', 'difit', action, '--port', '4966']);
+      expect(error).toHaveBeenCalledWith(
+        `Error: Provide ${action === 'summary' ? 'review summary' : action} JSON as an argument or via stdin`,
+      );
+      expect(readStdin).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    },
+  );
+
+  it.each(['reply', 'status', 'summary'])(
+    'rejects malformed JSON before sending %s',
+    async (action) => {
+      await createCommentCommand().parseAsync([
+        'node',
+        'difit',
+        action,
+        '--port',
+        '4966',
+        'invalid-json',
+      ]);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(log).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('Error:'));
+      expect(process.exitCode).toBe(1);
+    },
+  );
+
+  it('sends an explicit delivered receipt using the event identity', async () => {
+    const status = {
+      reviewId: 'r',
+      threadId: 't',
+      messageId: 'm',
+      cursor: 's:1',
+      status: 'delivered',
+    };
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ success: true })));
     await createCommentCommand().parseAsync([
       'node',
       'difit',
-      'watch',
+      'status',
       '--port',
       '4966',
-      '--once',
-      '--after',
-      'stream:0',
+      JSON.stringify(status),
     ]);
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:4966/api/conversation/events?wait=25000&after=stream%3A0',
-      expect.anything(),
-    );
-    expect(log.mock.calls.map((call) => JSON.parse(String(call[0])) as unknown)).toEqual([
-      event,
-      { type: 'conversation.cursor', cursor: 'stream:1' },
-    ]);
-    expect(error).not.toHaveBeenCalled();
-  });
-
-  it('acknowledges received user events before printing the checkpoint', async () => {
-    const event = { origin: 'user', reviewId: 'r', threadId: 't', messageId: 'm', cursor: 's:1' };
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify({ events: [event], cursor: 's:1' })))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true })));
-    await createCommentCommand().parseAsync(['node', 'difit', 'watch', '--port', '4966', '--once']);
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
       'http://localhost:4966/api/conversation/status',
-      expect.objectContaining({
-        body: JSON.stringify({
-          reviewId: 'r',
-          threadId: 't',
-          messageId: 'm',
-          cursor: 's:1',
-          status: 'delivered',
-        }),
-      }),
+      expect.objectContaining({ method: 'POST', body: JSON.stringify(status) }),
     );
-    expect(log).toHaveBeenLastCalledWith(
-      JSON.stringify({ type: 'conversation.cursor', cursor: 's:1' }),
-    );
+    expect(log).toHaveBeenCalledWith('{"success":true}');
+    expect(error).not.toHaveBeenCalled();
   });
 
   it('sends an explicit thinking status from stdin', async () => {
@@ -94,22 +141,6 @@ describe('conversation commands', () => {
     expect(error).not.toHaveBeenCalled();
   });
 
-  it('prints approval and revocation events without sending comment receipts', async () => {
-    const events = [true, false].map((approved, index) => ({
-      type: 'review.approval',
-      origin: 'user',
-      reviewId: 'r',
-      approved,
-      cursor: `s:${index + 1}`,
-    }));
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ events, cursor: 's:2' })));
-    await createCommentCommand().parseAsync(['node', 'difit', 'watch', '--port', '4966', '--once']);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(
-      log.mock.calls.slice(0, 2).map((call) => JSON.parse(String(call[0])) as unknown),
-    ).toEqual(events);
-  });
-
   it('sends a review summary from stdin using the exact review and version', async () => {
     const input = {
       reviewId: 'review-a',
@@ -128,59 +159,7 @@ describe('conversation commands', () => {
     expect(error).not.toHaveBeenCalled();
   });
 
-  it('prints user summary events without sending comment receipts', async () => {
-    const event = {
-      type: 'review.summary',
-      origin: 'user',
-      reviewId: 'r',
-      cursor: 's:1',
-      summary: { commitMessage: 'fix: preserve intent', rationale: '', version: 1 },
-    };
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ events: [event], cursor: 's:1' })));
-    await createCommentCommand().parseAsync(['node', 'difit', 'watch', '--port', '4966', '--once']);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(log).toHaveBeenCalledWith(JSON.stringify(event));
-  });
-
-  it.each([404, 409])('keeps replaying when a receipt returns %s', async (status) => {
-    const event = { origin: 'user', reviewId: 'r', threadId: 't', messageId: 'm', cursor: 's:1' };
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify({ events: [event], cursor: 's:1' })))
-      .mockResolvedValueOnce(new Response('{}', { status }));
-    await createCommentCommand().parseAsync(['node', 'difit', 'watch', '--port', '4966', '--once']);
-    expect(log.mock.calls.map((call) => JSON.parse(String(call[0])) as unknown)).toEqual([
-      event,
-      { type: 'conversation.cursor', cursor: 's:1' },
-    ]);
-    expect(error).not.toHaveBeenCalled();
-    expect(process.exitCode ?? 0).toBe(0);
-  });
-
-  it('keeps cursor errors on stderr and exits unsuccessfully', async () => {
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ error: 'Conversation cursor expired' }), { status: 409 }),
-    );
-    await createCommentCommand().parseAsync(['node', 'difit', 'watch', '--port', '4966', '--once']);
-    expect(log).not.toHaveBeenCalled();
-    expect(error).toHaveBeenCalledWith('Error: Conversation cursor expired');
-    expect(process.exitCode).toBe(1);
-  });
-
-  it('rejects continuous zero-delay polling', async () => {
-    await createCommentCommand().parseAsync([
-      'node',
-      'difit',
-      'watch',
-      '--port',
-      '4966',
-      '--wait',
-      '0',
-    ]);
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(1);
-  });
-
-  it('prints a reconciliation snapshot with its resume cursor', async () => {
+  it('prints a reconciliation snapshot with its state checkpoint cursor', async () => {
     const snapshot = { reviews: [{ id: 'review-a', threads: [] }], cursor: 'stream:8' };
     fetchMock.mockResolvedValue(new Response(JSON.stringify(snapshot)));
     await createCommentCommand().parseAsync(['node', 'difit', 'snapshot', '--port', '4966']);
@@ -230,7 +209,21 @@ describe('conversation commands', () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it.each(['watch', 'snapshot', 'reply'])(
+  it.each([
+    [
+      404,
+      'Conversation endpoint or thread not found; start difit with --conversation and use IDs from its events',
+    ],
+    [500, 'Conversation request failed (500)'],
+  ])('reports HTTP %s when no JSON error is available', async (status, message) => {
+    fetchMock.mockResolvedValue(new Response('Not JSON', { status }));
+    await createCommentCommand().parseAsync(['node', 'difit', 'snapshot', '--port', '4966']);
+    expect(log).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(`Error: ${message}`);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it.each(['snapshot', 'reply', 'status', 'summary'])(
     'identifies the unreachable server for %s',
     async (command) => {
       fetchMock.mockRejectedValue(new TypeError('fetch failed'));
@@ -240,7 +233,7 @@ describe('conversation commands', () => {
         command,
         '--port',
         '4966',
-        ...(command === 'watch' ? ['--once'] : command === 'reply' ? ['{}'] : []),
+        ...(command === 'snapshot' ? [] : ['{}']),
       ]);
       expect(error).toHaveBeenCalledWith(
         'Error: Cannot connect to difit server on port 4966. Is the server running?',
@@ -248,20 +241,6 @@ describe('conversation commands', () => {
       expect(process.exitCode).toBe(1);
     },
   );
-
-  it('resumes continuous watch from each returned cursor', async () => {
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify({ events: [], cursor: 'stream:1' })))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ events: [], cursor: 'stream:2' })))
-      .mockRejectedValueOnce(new TypeError('fetch failed'));
-    await createCommentCommand().parseAsync(['node', 'difit', 'watch', '--port', '4966']);
-    expect(fetchMock.mock.calls[1]?.[0]).toContain('after=stream%3A1');
-    expect(fetchMock.mock.calls[2]?.[0]).toContain('after=stream%3A2');
-    expect(log.mock.calls.map((c) => JSON.parse(String(c[0])) as unknown)).toEqual([
-      { type: 'conversation.cursor', cursor: 'stream:1' },
-      { type: 'conversation.cursor', cursor: 'stream:2' },
-    ]);
-  });
 
   it('sends reply JSON read from stdin', async () => {
     const reply = {

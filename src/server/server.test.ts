@@ -1,15 +1,47 @@
 import { promises as fs } from 'fs';
 import { hostname, tmpdir } from 'os';
 import { join, resolve } from 'path';
+import express from 'express';
+import type { Server } from 'http';
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Set environment variable to skip fetch mocking
 process.env.VITEST_SERVER_TEST = 'true';
 
-import { startServer } from './server.js';
+import { startServer, type ServerOptions } from './server.js';
+import { createSchemaCommand } from '../cli/schema.js';
+import { createCommentCommand } from '../cli/comment.js';
+import type { ServerEvent } from '../types/events.js';
+import { DiffMode } from '../types/watch.js';
+import { FileWatcherService } from './file-watcher.js';
 import type { CommentImport, DiffCommentThread } from '../types/diff.js';
-import type { ConversationBatch, ConversationSnapshot } from '../types/conversation.js';
+import type {
+  ConversationStreamEvent,
+  ConversationSnapshot,
+  ConversationEvent,
+} from '../types/conversation.js';
+
+function isCommentEvent(event: ConversationStreamEvent): event is ConversationEvent {
+  return event.type === 'comment.created' || event.type === 'comment.updated';
+}
+
+const eventStreams = new Map<number, ServerEvent[]>();
+async function startObservedServer(options: ServerOptions) {
+  const events: ServerEvent[] = [];
+  const result = await startServer({ ...options, onEvent: (event) => events.push(event) });
+  eventStreams.set(result.port, events);
+  return result;
+}
+function capturedEvents(port: number, skip = 0) {
+  const events = (eventStreams.get(port) ?? []).filter(
+    (event): event is ConversationStreamEvent =>
+      event.type !== 'server.ready' &&
+      event.type !== 'server.shutdown' &&
+      event.type !== 'server.background',
+  );
+  return { events: events.slice(skip), count: events.length };
+}
 
 // Add fetch polyfill for Node.js test environment
 const { fetch } = await import('undici');
@@ -468,6 +500,296 @@ describe('Server Integration Tests', () => {
   });
 
   describe('Server startup', () => {
+    it.each([true, false])('sends busy-port diagnostics to stderr with jsonl=%s', async (jsonl) => {
+      const occupied = await startServer({ preferredPort: 0 });
+      servers.push(occupied.server);
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      try {
+        const result = await startServer({ preferredPort: occupied.port, jsonl });
+        servers.push(result.server);
+        expect(error).toHaveBeenCalledWith(
+          `Port ${occupied.port} is busy, trying ${occupied.port + 1}...`,
+        );
+        expect(log).not.toHaveBeenCalled();
+        await result.shutdown('closed');
+      } finally {
+        write.mockRestore();
+        error.mockRestore();
+        log.mockRestore();
+      }
+    });
+
+    it('writes only JSONL, announces the actual fallback port before imports, and preserves queued receipts', async () => {
+      const first = await startServer({ preferredPort: 0 });
+      servers.push(first.server);
+      const chunks: string[] = [];
+      const write = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+        chunks.push(String(chunk));
+        return true;
+      });
+      const diagnostics = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const observed: ServerEvent[] = [];
+      try {
+        const result = await startServer({
+          preferredPort: first.port,
+          jsonl: true,
+          keepAlive: true,
+          shipIt: true,
+          onEvent: (event) => observed.push(event),
+          commentImports: Array.from({ length: 300 }, (_, i) => ({
+            type: 'thread' as const,
+            id: `import-${i}`,
+            filePath: 'a.ts',
+            position: { side: 'new' as const, line: 1 },
+            body: `Imported ${i}`,
+          })),
+        });
+        servers.push(result.server);
+        const origin = result.url;
+        expect(result.port).not.toBe(first.port);
+        expect(observed[0]).toMatchObject({
+          type: 'server.ready',
+          port: result.port,
+          url: result.url,
+          pid: process.pid,
+          reviewContext: { source: 'git' },
+          selection: { baseCommitish: 'def4567', targetCommitish: 'abc1234' },
+          reviewId: expect.any(String),
+        });
+        expect(observed[0]).not.toHaveProperty('cursor');
+        expect(observed.slice(1)).toHaveLength(300);
+        expect(observed.slice(1).every((event) => event.type === 'comment.created')).toBe(true);
+        const post = (path: string, body: unknown) =>
+          fetch(`${origin}${path}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+        await post('/api/comments', {
+          comments: [{ id: 'q', file: 'a.ts', line: 1, body: 'Why?\nExplain.' }],
+        });
+        const comment = observed.find(
+          (event) => event.type === 'comment.created' && event.messageId === 'q',
+        );
+        if (comment?.type !== 'comment.created') throw new Error('Missing user comment');
+        const snapshot = (await (
+          await fetch(`${origin}/api/conversation/snapshot`)
+        ).json()) as ConversationSnapshot;
+        expect(snapshot.reviews[0]?.threads[0]?.messages[0]?.progress?.status).toBe('queued');
+        expect(
+          (await post('/api/conversation/status', { ...comment, status: 'delivered' })).status,
+        ).toBe(200);
+        expect(observed.at(-1)).toMatchObject({
+          type: 'comment.progress',
+          progress: { status: 'delivered', cursor: comment.cursor },
+        });
+        await post('/api/approval', { approved: true });
+        await post('/api/approval', { approved: false });
+        expect(observed.slice(-2)).toMatchObject([
+          { type: 'review.approval', approved: true },
+          { type: 'review.approval', approved: false },
+        ]);
+        const heartbeat = await fetch(`${origin}/api/heartbeat`);
+        expect(heartbeat.status).toBe(200);
+        await result.shutdown('SIGINT');
+        await heartbeat.body?.cancel();
+        await result.shutdown('SIGTERM');
+        expect(observed.filter((event) => event.type === 'server.shutdown')).toMatchObject([
+          { type: 'server.shutdown', reason: 'SIGINT' },
+        ]);
+        const parsed = chunks
+          .join('')
+          .trimEnd()
+          .split('\n')
+          .map((line) => JSON.parse(line) as unknown);
+        expect(parsed).toEqual(JSON.parse(JSON.stringify(observed)));
+        expect(chunks.every((chunk) => chunk.endsWith('\n'))).toBe(true);
+        expect(diagnostics).toHaveBeenCalledWith(expect.stringContaining('busy'));
+      } finally {
+        write.mockRestore();
+        diagnostics.mockRestore();
+      }
+    });
+
+    it('buffers live submissions during asynchronous startup until readiness', async () => {
+      let started: (() => void) | undefined;
+      let complete: (() => void) | undefined;
+      const watcherStarted = new Promise<void>((resolveStart) => {
+        started = resolveStart;
+      });
+      const watcherReady = new Promise<void>((resolveReady) => {
+        complete = resolveReady;
+      });
+      const start = vi.spyOn(FileWatcherService.prototype, 'start').mockImplementation(async () => {
+        started?.();
+        await watcherReady;
+      });
+      const observed: ServerEvent[] = [];
+      const port = await getAvailablePort(4966);
+      try {
+        const starting = startServer({
+          preferredPort: port,
+          conversation: true,
+          diffMode: DiffMode.SPECIFIC,
+          onEvent: (event) => observed.push(event),
+          commentImports: [
+            {
+              type: 'thread',
+              id: 'initial',
+              filePath: 'a.ts',
+              position: { side: 'new', line: 1 },
+              body: 'Initial finding',
+            },
+          ],
+        });
+        await watcherStarted;
+        const response = await fetch(`http://localhost:${port}/api/comments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            comments: [{ id: 'live', file: 'a.ts', line: 1, body: 'Live question' }],
+          }),
+        });
+        expect(response.status).toBe(200);
+        expect(observed).toEqual([]);
+        complete?.();
+        const result = await starting;
+        servers.push(result.server);
+        expect(observed.map((event) => event.type)).toEqual([
+          'server.ready',
+          'comment.created',
+          'comment.created',
+          'thread.deleted',
+        ]);
+        const snapshot = (await (
+          await fetch(`${result.url}/api/conversation/snapshot`)
+        ).json()) as ConversationSnapshot;
+        expect(snapshot.reviews[0]?.threads[0]?.messages[0]).toMatchObject({
+          body: 'Live question',
+          progress: { status: 'queued' },
+        });
+      } finally {
+        complete?.();
+        start.mockRestore();
+      }
+    });
+
+    it('pins readiness to the launch review when browser revisions change during startup', async () => {
+      let started: (() => void) | undefined;
+      let complete: (() => void) | undefined;
+      const watcherStarted = new Promise<void>((resolveStart) => {
+        started = resolveStart;
+      });
+      const watcherReady = new Promise<void>((resolveReady) => {
+        complete = resolveReady;
+      });
+      const start = vi.spyOn(FileWatcherService.prototype, 'start').mockImplementation(async () => {
+        started?.();
+        await watcherReady;
+      });
+      const listen = vi.spyOn(express.application, 'listen');
+      const observed: ServerEvent[] = [];
+      const port = await getAvailablePort(4966);
+      try {
+        const starting = startServer({
+          preferredPort: port,
+          selection: { baseCommitish: 'HEAD^', targetCommitish: 'HEAD' },
+          conversation: true,
+          diffMode: DiffMode.SPECIFIC,
+          onEvent: (event) => observed.push(event),
+          commentImports: [
+            {
+              type: 'thread',
+              id: 'launch-finding',
+              filePath: 'a.ts',
+              position: { side: 'new', line: 1 },
+              body: 'Launch finding',
+            },
+          ],
+        });
+        await watcherStarted;
+        const origin = `http://localhost:${port}`;
+        const initial = (await (
+          await fetch(`${origin}/api/conversation/snapshot`)
+        ).json()) as ConversationSnapshot;
+        const launchReview = initial.reviews[0]!;
+        const parser = parserInstances.at(-1);
+        const diff = await parser.parseDiff();
+        parser.parseDiff.mockResolvedValue({
+          ...diff,
+          baseCommitish: 'browser-base',
+          targetCommitish: 'browser-target',
+        });
+        const response = await fetch(`${origin}/api/diff?base=HEAD~2&target=HEAD~1`);
+        expect(response.status).toBe(200);
+        expect(observed).toEqual([]);
+        complete?.();
+        const result = await starting;
+        expect(observed[0]).toMatchObject({
+          type: 'server.ready',
+          reviewId: launchReview.id,
+          selection: launchReview.selection,
+        });
+        expect(observed.slice(1)).toMatchObject([
+          { type: 'comment.created', reviewId: launchReview.id },
+        ]);
+        const saved = (await (await fetch(`${result.url}/api/comments-json`)).json()) as {
+          threads: DiffCommentThread[];
+        };
+        expect(saved.threads).toEqual([]);
+        const post = await fetch(`${result.url}/api/comments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            comments: [
+              { id: 'browser-question', file: 'b.ts', line: 1, body: 'New review question' },
+            ],
+          }),
+        });
+        expect(post.status).toBe(200);
+        const comment = observed.at(-1);
+        expect(comment).toMatchObject({
+          type: 'comment.created',
+          selection: { baseCommitish: 'browser-base', targetCommitish: 'browser-target' },
+        });
+        if (comment?.type !== 'comment.created') throw new Error('Missing browser comment');
+        expect(comment.reviewId).not.toBe(launchReview.id);
+      } finally {
+        complete?.();
+        for (const result of listen.mock.results) {
+          const server = result.value as Server | undefined;
+          if (server?.listening)
+            await new Promise<void>((resolveClose) => {
+              server.close(() => resolveClose());
+              server.closeAllConnections();
+            });
+        }
+        listen.mockRestore();
+        start.mockRestore();
+      }
+    });
+
+    it('reports readiness through onEvent without enabling JSONL output', async () => {
+      const observed: ServerEvent[] = [];
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const result = await startServer({
+          preferredPort: 0,
+          onEvent: (event) => observed.push(event),
+        });
+        servers.push(result.server);
+        expect(observed[0]).toMatchObject({ type: 'server.ready', port: result.port });
+        expect((await fetch(`${result.url}/api/conversation/snapshot`)).status).toBe(200);
+        await new Promise<void>((resolveClose) => result.server!.close(() => resolveClose()));
+        expect(observed.at(-1)).toMatchObject({ type: 'server.shutdown', reason: 'closed' });
+        expect(log).not.toHaveBeenCalled();
+      } finally {
+        log.mockRestore();
+      }
+    });
+
     it('starts on preferred port', async () => {
       // Use a high port number to avoid conflicts
       const preferredPort = 9000;
@@ -1810,6 +2132,89 @@ describe('Server Integration Tests', () => {
   });
 
   describe('Keep-alive option', () => {
+    it.each([
+      { jsonl: true, keepAlive: true },
+      { jsonl: true, keepAlive: false },
+      { jsonl: false, keepAlive: true },
+      { jsonl: false, keepAlive: false },
+    ])(
+      'sends heartbeat diagnostics to stderr with jsonl=$jsonl keepAlive=$keepAlive',
+      async ({ jsonl, keepAlive }) => {
+        const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const write = vi.spyOn(process.stdout, 'write').mockImplementation((...args: unknown[]) => {
+          const callback = args.at(-1);
+          if (typeof callback === 'function') Reflect.apply(callback, undefined, []);
+          return true;
+        });
+        let result: Awaited<ReturnType<typeof startServer>> | undefined;
+        try {
+          result = await startServer({ preferredPort: 0, jsonl, keepAlive, shipIt: true });
+          servers.push(result.server);
+          const post = (path: string, body: unknown) =>
+            fetch(`${result!.url}${path}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+          await post('/api/comments', {
+            comments: [
+              { id: 'human-output', file: 'a.ts', line: 1, body: 'Human comment transcript' },
+            ],
+          });
+          await post('/api/approval', { approved: true });
+          const controller = new AbortController();
+          const heartbeat = await fetch(`${result.url}/api/heartbeat`, {
+            signal: controller.signal,
+          });
+          await heartbeat.body?.getReader().read();
+          controller.abort();
+          await vi.waitFor(() =>
+            expect(error).toHaveBeenCalledWith(
+              keepAlive
+                ? 'Client disconnected, but server is staying alive (--keep-alive)'
+                : 'Client disconnected, shutting down server...',
+            ),
+          );
+          const output = log.mock.calls.map((args) => String(args[0])).join('\n');
+          expect(output).not.toContain('Client disconnected');
+          expect(output).not.toContain('Press Ctrl+C');
+          if (jsonl) expect(log).not.toHaveBeenCalled();
+          else {
+            expect(output).toContain('LGTM approved: abc1234');
+            if (!keepAlive) expect(output).toContain('Human comment transcript');
+          }
+          if (keepAlive) expect(process.exit).not.toHaveBeenCalled();
+          else await vi.waitFor(() => expect(process.exit).toHaveBeenCalledWith(0));
+          if (jsonl) {
+            const records = write.mock.calls
+              .map((args) => String(args[0]))
+              .filter((chunk) => chunk.trim())
+              .map((chunk) => JSON.parse(chunk) as { type: string; reason?: string });
+            if (keepAlive)
+              expect(records.some((event) => event.type === 'server.shutdown')).toBe(false);
+            else {
+              expect(records.at(-1)).toMatchObject({
+                type: 'server.shutdown',
+                reason: 'client-disconnected',
+              });
+              const shutdownWrite = write.mock.calls.findIndex((args) =>
+                String(args[0]).includes('"type":"server.shutdown"'),
+              );
+              expect(write.mock.invocationCallOrder[shutdownWrite]).toBeLessThan(
+                vi.mocked(process.exit).mock.invocationCallOrder[0]!,
+              );
+            }
+          }
+        } finally {
+          await result?.shutdown('closed');
+          write.mockRestore();
+          error.mockRestore();
+          log.mockRestore();
+        }
+      },
+    );
+
     it('accepts keepAlive option without error', async () => {
       const { port, server } = await startServer({
         selection: { targetCommitish: 'HEAD', baseCommitish: 'HEAD^' },
@@ -1945,8 +2350,414 @@ describe('Server Integration Tests', () => {
   });
 
   describe('Conversation API', () => {
+    it('preserves supported excerpts and position behavior in comment thread forms', async () => {
+      const result = await startServer({ preferredPort: 0, conversation: true });
+      servers.push(result.server);
+      const timestamp = '2026-11-01T00:00:00Z';
+      const common = {
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        messages: [{ id: 'message', body: 'Question', createdAt: timestamp, updatedAt: timestamp }],
+      };
+      const cases = [
+        {
+          thread: {
+            ...common,
+            id: 'canonical',
+            filePath: 'a.ts',
+            position: { side: 'new', line: 3 },
+            codeSnapshot: { content: 'canonical excerpt', language: 'typescript' },
+          },
+          position: { side: 'new', line: 3 },
+          codeSnapshot: { content: 'canonical excerpt', language: 'typescript' },
+        },
+        {
+          thread: {
+            ...common,
+            id: 'display',
+            file: 'a.ts',
+            line: 3,
+            side: 'new',
+            codeContent: 'display excerpt',
+            codeSnapshot: { content: 'ignored excerpt', language: 'typescript' },
+          },
+          position: { side: 'new', line: 3 },
+          codeSnapshot: { content: 'display excerpt' },
+        },
+        {
+          thread: {
+            ...common,
+            id: 'review',
+            scope: 'review',
+            codeContent: 'ignored display excerpt',
+            codeSnapshot: { content: 'ignored canonical excerpt' },
+          },
+          position: undefined,
+          codeSnapshot: undefined,
+        },
+        {
+          thread: {
+            ...common,
+            id: 'unchecked-range',
+            filePath: 'a.ts',
+            position: { side: 'new', line: { start: 9, end: 2 } },
+          },
+          position: { side: 'new', line: { start: 9, end: 2 } },
+          codeSnapshot: undefined,
+        },
+        {
+          thread: { ...common, id: 'normalized-range', file: 'a.ts', line: [9, 2], side: 'new' },
+          position: { side: 'new', line: 1 },
+          codeSnapshot: undefined,
+        },
+      ];
+      for (const fixture of cases) {
+        const response = await fetch(`${result.url}/api/comments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ threads: [fixture.thread] }),
+        });
+        expect(response.status).toBe(200);
+        const saved = (await (await fetch(`${result.url}/api/comments-json`)).json()) as {
+          threads: { position?: unknown; codeSnapshot?: unknown }[];
+        };
+        expect(saved.threads).toHaveLength(1);
+        expect(saved.threads[0]?.position).toEqual(fixture.position);
+        expect(saved.threads[0]?.codeSnapshot).toEqual(fixture.codeSnapshot);
+      }
+    });
+
+    it('keeps serialized server event fields aligned with the schema command', async () => {
+      interface ObjectDefinition {
+        $ref?: string;
+        type?: string;
+        const?: string;
+        enum?: string[];
+        properties?: Record<string, ObjectDefinition>;
+        required?: string[];
+      }
+      let definitions: Record<string, ObjectDefinition>;
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        await createSchemaCommand().parseAsync(['node', 'difit']);
+        expect(log).toHaveBeenCalledTimes(1);
+        const schema = JSON.parse(String(log.mock.calls[0]?.[0])) as {
+          $defs: Record<string, ObjectDefinition>;
+        };
+        definitions = schema.$defs;
+      } finally {
+        log.mockRestore();
+      }
+      const checkedObjectReferences = new Set<string>();
+      const assertObjectFields = (
+        value: unknown,
+        definition: ObjectDefinition,
+        path: string,
+      ): void => {
+        if (definition.$ref) {
+          const name = definition.$ref.slice('#/$defs/'.length);
+          const referenced = definitions[name];
+          if (!referenced) throw new Error(`Missing schema reference ${name}`);
+          if (referenced.type === 'object') checkedObjectReferences.add(name);
+          assertObjectFields(value, referenced, path);
+          return;
+        }
+        if (definition.const !== undefined) expect(value).toBe(definition.const);
+        if (definition.enum) expect(definition.enum).toContain(value);
+        if (definition.type !== 'object') return;
+        if (!value || typeof value !== 'object' || Array.isArray(value))
+          throw new Error(`Expected object at ${path}`);
+        const record = value as Record<string, unknown>;
+        const properties = definition.properties;
+        const required = definition.required;
+        if (!properties || !required) throw new Error(`Missing object schema fields at ${path}`);
+        expect(
+          Object.keys(record).filter((key) => !(key in properties)),
+          `${path}: undocumented fields`,
+        ).toEqual([]);
+        expect(
+          required.filter((key) => !(key in record)),
+          `${path}: missing required fields`,
+        ).toEqual([]);
+        for (const [key, child] of Object.entries(record)) {
+          const property = properties[key];
+          if (property) assertObjectFields(child, property, `${path}.${key}`);
+        }
+      };
+      const assertEventFields = (record: Record<string, unknown>) => {
+        const type = record.type;
+        if (typeof type !== 'string') throw new Error('Expected an event type');
+        const definition = Object.values(definitions).find((candidate) => {
+          const discriminator = candidate.properties?.type;
+          return (
+            candidate.type === 'object' &&
+            (discriminator?.const === type || discriminator?.enum?.includes(type))
+          );
+        });
+        if (!definition) throw new Error(`Missing object schema for ${type}`);
+        assertObjectFields(record, definition, type);
+      };
+      const observed: ServerEvent[] = [];
+      const result = await startServer({
+        preferredPort: 0,
+        shipIt: true,
+        onEvent: (event) => observed.push(event),
+      });
+      servers.push(result.server);
+      const assertNamedFields = (value: unknown, name: string) => {
+        const definition = definitions[name];
+        if (!definition) throw new Error(`Missing schema definition ${name}`);
+        assertObjectFields(value, definition, name);
+      };
+      const post = async (path: string, body: unknown, responseDefinition: string) => {
+        const response = await fetch(`${result.url}${path}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        expect(response.status).toBe(200);
+        const payload: unknown = await response.json();
+        assertNamedFields(payload, responseDefinition);
+        return payload;
+      };
+      const comment = {
+        id: 'schema-question',
+        file: 'a.ts',
+        line: 1,
+        body: 'Original question',
+        author: 'Reviewer',
+        codeContent: 'const value = 1;',
+      };
+      await post('/api/comments', { comments: [comment] }, 'CommentsEditResponse');
+      await post(
+        '/api/comments',
+        { comments: [{ ...comment, body: 'Edited question' }] },
+        'CommentsEditResponse',
+      );
+      const edited = observed.find((event) => event.type === 'comment.updated');
+      if (edited?.type !== 'comment.updated') throw new Error('Missing edited comment');
+      await post('/api/conversation/status', { ...edited, status: 'read' }, 'StatusResponse');
+      await post(
+        '/api/conversation/reply',
+        {
+          reviewId: edited.reviewId,
+          threadId: edited.threadId,
+          inReplyTo: edited.messageId,
+          cursor: edited.cursor,
+          body: 'Agent answer',
+        },
+        'ReplyResponse',
+      );
+      const saved = (await (await fetch(`${result.url}/api/comments-json`)).json()) as {
+        version: number;
+        threads: DiffCommentThread[];
+      };
+      assertNamedFields(saved, 'CommentsResponse');
+      await post(
+        '/api/comments',
+        {
+          baseVersion: saved.version,
+          threads: saved.threads.map((thread) => ({
+            ...thread,
+            messages: thread.messages.slice(0, 1),
+          })),
+        },
+        'CommentsEditResponse',
+      );
+      await post(
+        '/api/review-summary',
+        {
+          commitMessage: 'fix: document contract',
+          rationale: 'Review event fields',
+          baseVersion: 0,
+        },
+        'SummaryResponse',
+      );
+      await post('/api/approval', { approved: true, summaryVersion: 1 }, 'ApprovalResponse');
+      await post(
+        '/api/conversation/summary',
+        {
+          reviewId: edited.reviewId,
+          commitMessage: 'fix: retain event origin',
+          rationale: 'An agent edit revokes approval with agent origin.',
+          baseVersion: 1,
+        },
+        'SummaryResponse',
+      );
+      await post(
+        `/api/comments/${edited.threadId}/resolution`,
+        { resolved: true },
+        'ResolutionResponse',
+      );
+      await post(
+        `/api/comments/${edited.threadId}/resolution`,
+        { resolved: false },
+        'ResolutionResponse',
+      );
+      // Exercise CLI serializers against the real server, not mocked response bodies.
+      const imported = {
+        type: 'thread',
+        filePath: 'import.ts',
+        position: { side: 'new', line: 1 },
+        body: 'Imported contract',
+      };
+      assertNamedFields(imported, 'CommentImport');
+      const importResult = await post('/api/comment-imports', imported, 'CommentImportResponse');
+      expect(importResult).toMatchObject({ success: true, changed: true, count: 1 });
+      const cliLog = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        await createCommentCommand().parseAsync([
+          'node',
+          'difit',
+          'add',
+          '--port',
+          String(result.port),
+          JSON.stringify(imported),
+        ]);
+        const added: unknown = JSON.parse(String(cliLog.mock.calls.at(-1)?.[0]));
+        assertNamedFields(added, 'CommentAddResponse');
+        expect(added).toMatchObject({ success: true, count: 1, warnings: [] });
+        cliLog.mockClear();
+        await createCommentCommand().parseAsync([
+          'node',
+          'difit',
+          'resolve',
+          edited.threadId,
+          '--port',
+          String(result.port),
+        ]);
+        const action: unknown = JSON.parse(String(cliLog.mock.calls.at(-1)?.[0]));
+        const actionSchema = definitions.CommentActionResponse as
+          | { anyOf: ObjectDefinition[] }
+          | undefined;
+        const resolvedSchema = actionSchema?.anyOf.find(
+          (candidate) => candidate.properties?.resolved,
+        );
+        if (!resolvedSchema) throw new Error('Missing resolved action schema');
+        assertObjectFields(action, resolvedSchema, 'CommentActionResponse');
+        expect(action).toEqual({
+          success: true,
+          resolved: [edited.threadId],
+          notFound: [],
+          errors: [],
+        });
+      } finally {
+        cliLog.mockRestore();
+      }
+      const deletion = await fetch(`${result.url}/api/comments/${edited.threadId}`, {
+        method: 'DELETE',
+      });
+      expect(deletion.status).toBe(200);
+      assertNamedFields(await deletion.json(), 'DeleteResponse');
+      const timestamp = '2026-10-29T00:00:00Z';
+      await post(
+        '/api/comments',
+        {
+          threads: [
+            {
+              id: 'schema-review-thread',
+              scope: 'review',
+              createdAt: timestamp,
+              updatedAt: timestamp,
+              messages: [
+                {
+                  id: 'schema-review-root',
+                  body: 'Why this overall approach?',
+                  intent: 'question',
+                  createdAt: timestamp,
+                  updatedAt: timestamp,
+                },
+              ],
+            },
+          ],
+        },
+        'CommentsEditResponse',
+      );
+      await result.shutdown('closed');
+      expect([...new Set(observed.map((event) => event.type))].sort()).toEqual(
+        [
+          'server.ready',
+          'server.shutdown',
+          'comment.created',
+          'comment.updated',
+          'comment.deleted',
+          'comment.progress',
+          'review.summary',
+          'review.approval',
+          'thread.resolved',
+          'thread.reopened',
+          'thread.deleted',
+        ].sort(),
+      );
+      // Match stdout serialization: optional undefined fields do not appear in JSONL records.
+      const records = observed.map(
+        (event) => JSON.parse(JSON.stringify(event)) as Record<string, unknown>,
+      );
+      expect(records).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'comment.created',
+            author: 'Reviewer',
+            codeSnapshot: { content: 'const value = 1;' },
+          }),
+          expect.objectContaining({ type: 'comment.created', scope: 'review', intent: 'question' }),
+        ]),
+      );
+      for (const record of records) assertEventFields(record);
+      expect([...checkedObjectReferences]).toEqual(
+        expect.arrayContaining([
+          'DiffSelection',
+          'ReviewContext',
+          'CommentProgress',
+          'ReviewSummary',
+          'CodeSnapshot',
+        ]),
+      );
+      // Negative controls verify both halves of the drift guard.
+      expect(() => assertEventFields({ ...records[0], undocumentedFixtureField: true })).toThrow();
+      const missingRequiredField = { ...records[0] };
+      delete missingRequiredField.pid;
+      expect(() => assertEventFields(missingRequiredField)).toThrow();
+      const ready = records.find((record) => record.type === 'server.ready')!;
+      expect(() =>
+        assertEventFields({
+          ...ready,
+          selection: { ...(ready.selection as Record<string, unknown>), nestedFixtureField: true },
+        }),
+      ).toThrow();
+      const missingNestedField = { ...(ready.selection as Record<string, unknown>) };
+      delete missingNestedField.baseCommitish;
+      expect(() => assertEventFields({ ...ready, selection: missingNestedField })).toThrow();
+    });
+
+    it('labels agent resolution and deletion endpoints separately from browser submissions', async () => {
+      const result = await startObservedServer({ conversation: true });
+      servers.push(result.server);
+      const post = (path: string, body: unknown) =>
+        fetch(`${result.url}${path}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      await post('/api/comments', {
+        comments: [{ id: 'q', file: 'a.ts', line: 1, body: 'Question' }],
+      });
+      expect(capturedEvents(result.port).events[0]).toMatchObject({
+        type: 'comment.created',
+        origin: 'user',
+      });
+      await post('/api/comments/q/resolution', { resolved: true });
+      await post('/api/comments/q/resolution', { resolved: false });
+      await fetch(`${result.url}/api/comments/q`, { method: 'DELETE' });
+      expect(capturedEvents(result.port).events.slice(1)).toMatchObject([
+        { type: 'thread.resolved', origin: 'agent' },
+        { type: 'thread.reopened', origin: 'agent' },
+        { type: 'thread.deleted', origin: 'agent' },
+      ]);
+    });
+
     it('streams general questions and resolves/reopens their exact review without deleting messages', async () => {
-      const { port, server } = await startServer({ conversation: true, keepAlive: true });
+      const { port, server } = await startObservedServer({ conversation: true, keepAlive: true });
       servers.push(server);
       const origin = `http://localhost:${port}`;
       const post = (path: string, body: unknown) =>
@@ -1973,17 +2784,15 @@ describe('Server Integration Tests', () => {
         ],
       };
       expect((await post(`/api/comments${selection}`, { threads: [thread] })).status).toBe(200);
-      const batch = (await (
-        await fetch(`${origin}/api/conversation/events?wait=0`)
-      ).json()) as ConversationBatch;
-      const event = batch.events.find((entry) => 'threadId' in entry)!;
+      const batch = capturedEvents(port);
+      const event = batch.events.find(isCommentEvent)!;
       expect(event).toMatchObject({
         scope: 'review',
         intent: 'question',
         body: 'Why this approach?',
       });
-      expect(event).not.toHaveProperty('file');
-      expect(event).not.toHaveProperty('line');
+      expect(event.file).toBeUndefined();
+      expect(event.line).toBeUndefined();
       expect(
         (
           await post('/api/conversation/reply', {
@@ -2016,7 +2825,7 @@ describe('Server Integration Tests', () => {
     });
 
     it('accepts Noted without manufacturing a reply or resolving the thread', async () => {
-      const { port, server } = await startServer({ conversation: true, keepAlive: true });
+      const { port, server } = await startObservedServer({ conversation: true, keepAlive: true });
       servers.push(server);
       const origin = `http://localhost:${port}`;
       const post = (path: string, body: unknown) =>
@@ -2028,10 +2837,8 @@ describe('Server Integration Tests', () => {
       await post('/api/comments', {
         comments: [{ id: 'note', file: 'a.ts', line: 1, body: 'Looks good.' }],
       });
-      const batch = (await (
-        await fetch(`${origin}/api/conversation/events?wait=0`)
-      ).json()) as ConversationBatch;
-      const event = batch.events.find((entry) => 'threadId' in entry)!;
+      const batch = capturedEvents(port);
+      const event = batch.events.find(isCommentEvent)!;
       expect((await post('/api/conversation/status', { ...event, status: 'noted' })).status).toBe(
         200,
       );
@@ -2045,7 +2852,7 @@ describe('Server Integration Tests', () => {
     });
 
     it('projects agent progress, ignores browser status, and rejects stale replies after edits', async () => {
-      const { port, server } = await startServer({ conversation: true, keepAlive: true });
+      const { port, server } = await startObservedServer({ conversation: true, keepAlive: true });
       servers.push(server);
       const origin = `http://localhost:${port}`;
       const post = (path: string, body: unknown) =>
@@ -2062,10 +2869,8 @@ describe('Server Integration Tests', () => {
       await post('/api/comments', {
         comments: [{ id: 'q', file: 'a.ts', line: 1, body: 'Question' }],
       });
-      const batch = (await (
-        await fetch(`${origin}/api/conversation/events?wait=0`)
-      ).json()) as ConversationBatch;
-      const event = batch.events.find((entry) => 'threadId' in entry)!;
+      const batch = capturedEvents(port);
+      const event = batch.events.find(isCommentEvent)!;
       const identity = {
         reviewId: event.reviewId,
         threadId: event.threadId,
@@ -2081,10 +2886,9 @@ describe('Server Integration Tests', () => {
       // A browser's old view cannot overwrite agent progress or manufacture a new journal event.
       await post('/api/comments', initial);
       expect((await getThreads()).threads[0]!.messages[0]!.progress?.status).toBe('replying');
-      const unchanged = (await (
-        await fetch(`${origin}/api/conversation/events?wait=0&after=${batch.cursor}`)
-      ).json()) as ConversationBatch;
-      expect(unchanged.events).toEqual([]);
+      const unchanged = capturedEvents(port, batch.count);
+      expect(unchanged.events.filter((event) => event.type !== 'comment.progress')).toEqual([]);
+      expect(unchanged.events.filter((event) => event.type === 'comment.progress')).toHaveLength(4);
       expect(
         (await post('/api/conversation/status', { ...identity, status: 'replied' })).status,
       ).toBe(400);
@@ -2134,7 +2938,7 @@ describe('Server Integration Tests', () => {
     });
 
     it('delivers comments before approval and routes idempotent replies to the original review', async () => {
-      const { port, server } = await startServer({ conversation: true, keepAlive: true });
+      const { port, server } = await startObservedServer({ conversation: true, keepAlive: true });
       servers.push(server);
       const origin = `http://localhost:${port}`;
       const post = async (path: string, body: unknown) =>
@@ -2149,10 +2953,9 @@ describe('Server Integration Tests', () => {
           { id: 'question-a', file: 'a.ts', line: 4, body: 'Why?', codeContent: 'return 42;' },
         ],
       });
-      const initial = await fetch(`${origin}/api/conversation/events?wait=0`);
-      const batch = (await initial.json()) as ConversationBatch;
+      const batch = capturedEvents(port);
       expect(batch.events).toHaveLength(1);
-      const event = batch.events.find((entry) => 'threadId' in entry)!;
+      const event = batch.events.find(isCommentEvent)!;
       expect(event).toMatchObject({
         type: 'comment.created',
         origin: 'user',
@@ -2191,9 +2994,7 @@ describe('Server Integration Tests', () => {
         threads: unknown[];
       };
       expect(other.threads).toEqual([]);
-      const events = (await (
-        await fetch(`${origin}/api/conversation/events?wait=0&after=${batch.cursor}`)
-      ).json()) as ConversationBatch;
+      const events = capturedEvents(port, batch.count);
       expect(events.events).toHaveLength(1);
       expect(events.events[0]).toMatchObject({
         origin: 'agent',
@@ -2210,8 +3011,8 @@ describe('Server Integration Tests', () => {
     // Browser restoration must preserve agent origin through the real HTTP API.
     // Run: pnpm test src/server/server.test.ts -t 'restores persisted message origins'
     it('restores persisted message origins after restarting a review', async () => {
-      const first = await startServer({ conversation: true });
-      const second = await startServer({ conversation: true });
+      const first = await startObservedServer({ conversation: true });
+      const second = await startObservedServer({ conversation: true });
       servers.push(first.server, second.server);
       const post = (port: number, path: string, body: unknown) =>
         fetch(`http://localhost:${port}${path}`, {
@@ -2222,10 +3023,8 @@ describe('Server Integration Tests', () => {
       await post(first.port, '/api/comments', {
         comments: [{ id: 'q', file: 'a.ts', line: 1, body: 'Why?' }],
       });
-      const batch = (await (
-        await fetch(`http://localhost:${first.port}/api/conversation/events?wait=0`)
-      ).json()) as ConversationBatch;
-      const event = batch.events.find((entry) => 'threadId' in entry)!;
+      const batch = capturedEvents(first.port);
+      const event = batch.events.find(isCommentEvent)!;
       await post(first.port, '/api/conversation/reply', {
         reviewId: event.reviewId,
         threadId: event.threadId,
@@ -2237,13 +3036,9 @@ describe('Server Integration Tests', () => {
         await fetch(`http://localhost:${first.port}/api/comments-json`)
       ).json();
       await post(second.port, '/api/comments', saved);
-      const restored = (await (
-        await fetch(`http://localhost:${second.port}/api/conversation/events?wait=0`)
-      ).json()) as ConversationBatch;
+      const restored = capturedEvents(second.port);
       expect(
-        restored.events
-          .filter((entry) => 'threadId' in entry)
-          .map(({ body, origin }) => ({ body, origin })),
+        restored.events.filter(isCommentEvent).map(({ body, origin }) => ({ body, origin })),
       ).toEqual([
         { body: 'Why?', origin: 'user' },
         { body: 'Because.', origin: 'agent' },
@@ -2251,7 +3046,7 @@ describe('Server Integration Tests', () => {
     });
 
     it('preserves preloaded and imported agent messages through browser restoration', async () => {
-      const first = await startServer({
+      const first = await startObservedServer({
         conversation: true,
         commentImports: [
           {
@@ -2263,7 +3058,7 @@ describe('Server Integration Tests', () => {
           },
         ],
       });
-      const second = await startServer({ conversation: true });
+      const second = await startObservedServer({ conversation: true });
       servers.push(first.server, second.server);
       const origin = `http://localhost:${first.port}`;
       const snapshot = (await (await fetch(`${origin}/api/conversation/snapshot`)).json()) as {
@@ -2288,23 +3083,19 @@ describe('Server Integration Tests', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(saved),
       });
-      const restored = (await (
-        await fetch(`http://localhost:${second.port}/api/conversation/events?wait=0`)
-      ).json()) as ConversationBatch;
+      const restored = capturedEvents(second.port);
       expect(
-        restored.events
-          .filter((entry) => 'threadId' in entry)
-          .map(({ body, origin }) => ({ body, origin })),
+        restored.events.filter(isCommentEvent).map(({ body, origin }) => ({ body, origin })),
       ).toEqual([
         { body: 'Finding.', origin: 'agent' },
         { body: 'Imported reply.', origin: 'agent' },
       ]);
     });
 
-    // Recovery must expose IDs for every outstanding review and an atomic cursor.
-    // Run: pnpm test src/server/server.test.ts -t 'recovers expired reviews'
-    it('recovers expired reviews with reply identities and a gap-free cursor', async () => {
-      const { port, server } = await startServer({ conversation: true });
+    // Snapshots expose identities for outstanding reviews after missed process output.
+    // Run: pnpm test src/server/server.test.ts -t 'reconciles outstanding reviews'
+    it('reconciles outstanding reviews from a snapshot and emits subsequent replies', async () => {
+      const { port, server } = await startObservedServer({ conversation: true });
       servers.push(server);
       const origin = `http://localhost:${port}`;
       const post = (path: string, body: unknown) =>
@@ -2324,7 +3115,7 @@ describe('Server Integration Tests', () => {
           body: `Question ${i}`,
         })),
       });
-      expect((await fetch(`${origin}/api/conversation/events?wait=0`)).status).toBe(409);
+      expect(capturedEvents(port).events).toHaveLength(257);
       const response = await fetch(`${origin}/api/conversation/snapshot`);
       expect(response.status).toBe(200);
       const snapshot = (await response.json()) as {
@@ -2335,6 +3126,7 @@ describe('Server Integration Tests', () => {
           threads: { id: string; messages: { id: string }[] }[];
         }[];
       };
+      const beforeReply = capturedEvents(port).count;
       const review = snapshot.reviews.find((r) => r.selection.targetCommitish === 'target-b')!;
       const thread = review.threads[0]!;
       expect(
@@ -2347,9 +3139,7 @@ describe('Server Integration Tests', () => {
           })
         ).status,
       ).toBe(200);
-      const resumed = (await (
-        await fetch(`${origin}/api/conversation/events?wait=0&after=${snapshot.cursor}`)
-      ).json()) as ConversationBatch;
+      const resumed = capturedEvents(port, beforeReply);
       expect(resumed.events).toHaveLength(1);
       expect(resumed.events[0]).toMatchObject({
         body: 'Recovered.',
@@ -2362,15 +3152,13 @@ describe('Server Integration Tests', () => {
       const disabled = await startServer({});
       servers.push(disabled.server);
       expect(
-        (await fetch(`http://localhost:${disabled.port}/api/conversation/events?wait=0`)).status,
+        (await fetch(`http://localhost:${disabled.port}/api/conversation/snapshot`)).status,
       ).toBe(404);
-      const enabled = await startServer({ conversation: true });
+      const enabled = await startObservedServer({ conversation: true });
       servers.push(enabled.server);
       const origin = `http://localhost:${enabled.port}`;
-      expect((await fetch(`${origin}/api/conversation/events?wait=25001`)).status).toBe(400);
-      expect((await fetch(`${origin}/api/conversation/events?after=invalid&wait=0`)).status).toBe(
-        409,
-      );
+      expect((await fetch(`${origin}/api/conversation/events?wait=0`)).status).toBe(404);
+      expect((await fetch(`${origin}/api/conversation/snapshot`)).status).toBe(200);
       expect(
         (
           await fetch(`${origin}/api/conversation/reply`, {
@@ -2394,7 +3182,7 @@ describe('Server Integration Tests', () => {
 
   describe('Review summary API', () => {
     it('isolates summaries, rejects stale writes, emits trusted origins, and revokes approval', async () => {
-      const { port, server } = await startServer({ conversation: true, shipIt: true });
+      const { port, server } = await startObservedServer({ conversation: true, shipIt: true });
       servers.push(server);
       const origin = `http://localhost:${port}`;
       const url = `${origin}/api/review-summary?base=base-a&target=target-a`;
@@ -2473,9 +3261,15 @@ describe('Server Integration Tests', () => {
       expect(
         await (await fetch(`${origin}/api/approval?base=base-a&target=target-a`)).json(),
       ).toMatchObject({ approved: true });
-      const batch = (await (
-        await fetch(`${origin}/api/conversation/events?wait=0`)
-      ).json()) as ConversationBatch;
+      const batch = capturedEvents(port);
+      // Ground truth: node node_modules/vitest/vitest.mjs run src/server/server.test.ts -t 'isolates summaries, rejects stale writes, emits trusted origins, and revokes approval'.
+      expect(batch.events.filter((entry) => entry.type === 'review.approval')).toEqual([
+        expect.objectContaining({ approved: true, origin: 'user' }),
+        expect.objectContaining({ approved: false, origin: 'user' }),
+        expect.objectContaining({ approved: true, origin: 'user' }),
+        expect.objectContaining({ approved: false, origin: 'agent' }),
+        expect.objectContaining({ approved: true, origin: 'user' }),
+      ]);
       expect(batch.events.filter((entry) => entry.type === 'review.summary')).toEqual([
         expect.objectContaining({
           origin: 'user',
@@ -2586,7 +3380,7 @@ describe('Server Integration Tests', () => {
     );
 
     it('rejects malformed, oversized, and browser-simple summary requests', async () => {
-      const { port, server } = await startServer({ conversation: true });
+      const { port, server } = await startObservedServer({ conversation: true });
       servers.push(server);
       const url = `http://localhost:${port}/api/review-summary`;
       const valid = { commitMessage: '', rationale: '', baseVersion: 0 };
@@ -2623,7 +3417,7 @@ describe('Server Integration Tests', () => {
 
   describe('Ship it option', () => {
     it('keeps approval reversible, selection-scoped, and visible to conversation consumers', async () => {
-      const { port, server } = await startServer({
+      const { port, server } = await startObservedServer({
         selection: { targetCommitish: 'HEAD', baseCommitish: 'HEAD^' },
         shipIt: true,
         conversation: true,
@@ -2645,9 +3439,7 @@ describe('Server Integration Tests', () => {
       }
       const other = await fetch(`${origin}/api/approval?base=base-b&target=target-b`);
       expect(await other.json()).toMatchObject({ approved: false });
-      const batch = (await (
-        await fetch(`${origin}/api/conversation/events?wait=0`)
-      ).json()) as ConversationBatch;
+      const batch = capturedEvents(port);
       expect(batch.events).toEqual([
         expect.objectContaining({
           type: 'review.approval',
@@ -2753,6 +3545,45 @@ describe('Server Integration Tests', () => {
         expect(output.at(-2)).toContain('src/App.tsx:L10');
       } finally {
         log.mockRestore();
+      }
+    });
+
+    it('writes JSONL approval and approved shutdown before draining ship-it output', async () => {
+      // Ground truth: node node_modules/vitest/vitest.mjs run src/server/server.test.ts -t 'writes JSONL approval'.
+      let flush: (() => void) | undefined;
+      const write = vi.spyOn(process.stdout, 'write').mockImplementation((...args: unknown[]) => {
+        const callback = args.at(-1);
+        if (typeof callback === 'function') {
+          if (args[0] === '') flush = () => Reflect.apply(callback, undefined, []);
+          else Reflect.apply(callback, undefined, []);
+        }
+        return true;
+      });
+      try {
+        const result = await startServer({ preferredPort: 0, shipIt: true, jsonl: true });
+        servers.push(result.server);
+        const response = await fetch(`${result.url}/api/ship-it`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        expect(response.status).toBe(200);
+        await vi.waitFor(() => expect(flush).toBeTypeOf('function'));
+        const records = write.mock.calls
+          .map((args) => String(args[0]))
+          .filter((chunk) => chunk.trim())
+          .map((chunk) => JSON.parse(chunk) as ServerEvent);
+        expect(records.slice(-2)).toEqual([
+          expect.objectContaining({ type: 'review.approval', approved: true, origin: 'user' }),
+          expect.objectContaining({ type: 'server.shutdown', reason: 'approved' }),
+        ]);
+        expect(process.exit).not.toHaveBeenCalled();
+        flush?.();
+        flush = undefined;
+        expect(process.exit).toHaveBeenCalledWith(0);
+      } finally {
+        flush?.();
+        write.mockRestore();
       }
     });
 

@@ -3,91 +3,76 @@ import { describe, expect, it, vi } from 'vitest';
 import { createCliStdoutProxy } from './dev-stdout.js';
 
 describe('createCliStdoutProxy', () => {
-  it('detects the CLI server URL across chunks and hides only that line', () => {
+  it('detects legacy readiness once and forwards diagnostics and line endings unchanged', () => {
     const onServerUrl = vi.fn();
     const output: string[] = [];
-    const proxy = createCliStdoutProxy({
-      onServerUrl,
-      onOutput: (text: string) => output.push(text),
-    });
-
-    proxy.push('\n🚀 difit server started on http://localhost:4966\n📋 Rev');
-    proxy.push('iewing: HEAD\n💡 Use --open to automatically open browser\n');
-    proxy.push('\n👋 Shutting down difit server...\n\n📝 Comments from review session:\n');
-    proxy.push('==================================================\n');
-    proxy.push('src/index.ts:L10\nFix this edge case\n');
-    proxy.push('==================================================\nTotal comments: 1\n');
+    const proxy = createCliStdoutProxy({ onServerUrl, onOutput: (text) => output.push(text) });
+    const chunks = [
+      '\nPort 4966 is busy, trying 4967...\r\n🚀 difit server started on http://local',
+      'host:4967#difit-editor-token=legacy-capability\r\n📋 Reviewing: HEAD\n\n',
+      '🚀 difit server started on http://localhost:4999\n\n',
+    ];
+    for (const chunk of chunks) proxy.push(chunk);
     proxy.flush();
-
-    expect(onServerUrl).toHaveBeenCalledWith('http://localhost:4966');
-    expect(output.join('')).toBe(
-      '📋 Reviewing: HEAD\n' +
-        '💡 Use --open to automatically open browser\n' +
-        '\n👋 Shutting down difit server...\n\n📝 Comments from review session:\n' +
-        '==================================================\n' +
-        'src/index.ts:L10\nFix this edge case\n' +
-        '==================================================\n' +
-        'Total comments: 1\n',
+    expect(onServerUrl).toHaveBeenCalledExactlyOnceWith(
+      'http://localhost:4967#difit-editor-token=legacy-capability',
     );
+    expect(output.join('')).toBe(chunks.join(''));
   });
 
-  it('drops the leading blank line that only belongs to the hidden server URL', () => {
-    const output: string[] = [];
-    const proxy = createCliStdoutProxy({
-      onServerUrl: vi.fn(),
-      onOutput: (text: string) => output.push(text),
-    });
-
-    proxy.push('\n🚀 difit server started on http://localhost:4966\n📋 Reviewing: HEAD\n');
-    proxy.flush();
-
-    expect(output).toEqual(['📋 Reviewing: HEAD\n']);
-  });
-
-  it('hides internal port retry logs before the server URL is known', () => {
+  it('detects JSONL readiness across chunks and forwards every event unchanged', () => {
     const onServerUrl = vi.fn();
     const output: string[] = [];
-    const proxy = createCliStdoutProxy({
-      onServerUrl,
-      onOutput: (text: string) => output.push(text),
+    const proxy = createCliStdoutProxy({ onServerUrl, onOutput: (text) => output.push(text) });
+    const ready = JSON.stringify({
+      type: 'server.ready',
+      url: 'http://localhost:4981',
+      launchUrl: 'http://localhost:4981#difit-editor-token=jsonl-capability',
+      port: 4981,
     });
-
-    proxy.push('Port 4966 is busy, trying 4967...\n');
-    proxy.push('\n🚀 difit server started on http://localhost:4967\n📋 Reviewing: HEAD\n');
+    const comment = JSON.stringify({ type: 'comment.created', body: 'line one\nline two' });
+    proxy.push(ready.slice(0, 17));
+    expect(onServerUrl).not.toHaveBeenCalled();
+    proxy.push(`${ready.slice(17)}\n${comment}\n`);
     proxy.flush();
-
-    expect(onServerUrl).toHaveBeenCalledWith('http://localhost:4967');
-    expect(output).toEqual(['📋 Reviewing: HEAD\n']);
+    expect(onServerUrl).toHaveBeenCalledExactlyOnceWith(
+      'http://localhost:4981#difit-editor-token=jsonl-capability',
+    );
+    expect(output.join('')).toBe(`${ready}\n${comment}\n`);
   });
 
-  it('preserves later lines that repeat the startup message', () => {
-    const output: string[] = [];
-    const proxy = createCliStdoutProxy({
-      onServerUrl: vi.fn(),
-      onOutput: (text: string) => output.push(text),
-    });
-
-    proxy.push('\n🚀 difit server started on http://localhost:4966\n');
-    proxy.push('📝 Comments from review session:\n');
-    proxy.push('🚀 difit server started on http://localhost:4966\n');
-    proxy.flush();
-
-    expect(output).toEqual([
-      '📝 Comments from review session:\n',
-      '🚀 difit server started on http://localhost:4966\n',
-    ]);
-  });
-  it('reports the actual API URL in conversation mode after a port retry', () => {
-    const output: string[] = [];
+  it('detects a final readiness line without a newline when flushed', () => {
     const onServerUrl = vi.fn();
-    const proxy = createCliStdoutProxy({
-      showServerUrl: true,
-      onServerUrl,
-      onOutput: (text: string) => output.push(text),
+    const output: string[] = [];
+    const proxy = createCliStdoutProxy({ onServerUrl, onOutput: (text) => output.push(text) });
+    const ready = JSON.stringify({ type: 'server.ready', url: 'http://localhost:4981' });
+    proxy.push(ready);
+    proxy.flush();
+    proxy.flush();
+    expect(onServerUrl).toHaveBeenCalledExactlyOnceWith('http://localhost:4981');
+    expect(output.join('')).toBe(ready);
+  });
+
+  it('forwards blank lines and incomplete diagnostics even when no server starts', () => {
+    const onServerUrl = vi.fn();
+    const output: string[] = [];
+    const proxy = createCliStdoutProxy({ onServerUrl, onOutput: (text) => output.push(text) });
+    proxy.push('\n\nPort 4966 is busy, trying 4967...\ncompiler error');
+    proxy.flush();
+    expect(onServerUrl).not.toHaveBeenCalled();
+    expect(output.join('')).toBe('\n\nPort 4966 is busy, trying 4967...\ncompiler error');
+  });
+
+  it('does not treat comment text containing a server URL as readiness', () => {
+    const onServerUrl = vi.fn();
+    const output: string[] = [];
+    const proxy = createCliStdoutProxy({ onServerUrl, onOutput: (text) => output.push(text) });
+    const comment = JSON.stringify({
+      type: 'comment.created',
+      body: '🚀 difit server started on http://localhost:4981',
     });
-    proxy.push('Port 4966 is busy, trying 4967...\n');
-    proxy.push('🚀 difit server started on http://localhost:4967\n');
-    expect(onServerUrl).toHaveBeenCalledWith('http://localhost:4967');
-    expect(output.join('')).toContain('http://localhost:4967');
+    proxy.push(`${comment}\n`);
+    expect(onServerUrl).not.toHaveBeenCalled();
+    expect(output.join('')).toBe(`${comment}\n`);
   });
 });

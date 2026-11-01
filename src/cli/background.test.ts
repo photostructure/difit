@@ -82,9 +82,14 @@ describe('background process lifecycle', () => {
         env: expect.objectContaining({ [BACKGROUND_CHILD_ENV]: '1' }),
       }),
     );
-    expect(consoleLog).toHaveBeenCalledWith(
-      JSON.stringify({ port: 4967, url: 'http://localhost:4967', pid: 42 }),
-    );
+    expect(consoleLog).toHaveBeenCalledExactlyOnceWith(expect.any(String));
+    expect(JSON.parse(String(consoleLog.mock.calls[0]?.[0]))).toEqual({
+      type: 'server.background',
+      port: 4967,
+      url: 'http://localhost:4967',
+      pid: 42,
+      timestamp: expect.any(String),
+    });
     expect(child.disconnect).toHaveBeenCalledOnce();
     expect(stderrDestroy).toHaveBeenCalledOnce();
     expect(child.unref).toHaveBeenCalledOnce();

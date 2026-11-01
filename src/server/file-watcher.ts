@@ -71,7 +71,7 @@ export class FileWatcherService {
 
     // No watching for specific commit comparisons
     if (diffMode === DiffMode.SPECIFIC) {
-      console.log('🔍 File watching disabled (specific commit comparison)');
+      console.error('🔍 File watching disabled (specific commit comparison)');
       return;
     }
 

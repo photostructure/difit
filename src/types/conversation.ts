@@ -4,6 +4,7 @@ import type {
   DiffSelection,
   DiffCommentThread,
   CommentIntent,
+  CommentProgress,
 } from './diff.js';
 
 export interface ConversationEvent {
@@ -23,11 +24,6 @@ export interface ConversationEvent {
   author?: string;
   codeSnapshot?: DiffCommentCodeSnapshot;
   timestamp: string;
-}
-
-export interface ConversationBatch {
-  events: (ConversationEvent | ReviewApprovalEvent | ReviewSummaryEvent)[];
-  cursor: string;
 }
 
 export interface ReviewApproval {
@@ -55,7 +51,7 @@ interface ReviewSummaryEvent {
 
 interface ReviewApprovalEvent {
   type: 'review.approval';
-  origin: 'user';
+  origin: 'user' | 'agent';
   cursor: string;
   reviewId: string;
   selection: DiffSelection;
@@ -73,3 +69,45 @@ export interface ConversationSnapshot {
     summary: ReviewSummary;
   }[];
 }
+
+/** progress.cursor identifies the comment revision; cursor identifies this stream event. */
+interface CommentProgressEvent {
+  type: 'comment.progress';
+  origin: 'agent';
+  cursor: string;
+  reviewId: string;
+  selection: DiffSelection;
+  threadId: string;
+  messageId: string;
+  progress: CommentProgress;
+  timestamp: string;
+}
+
+interface ThreadEvent {
+  type: 'thread.resolved' | 'thread.reopened' | 'thread.deleted';
+  origin: 'user' | 'agent';
+  cursor: string;
+  reviewId: string;
+  selection: DiffSelection;
+  threadId: string;
+  timestamp: string;
+}
+
+interface CommentDeletedEvent {
+  type: 'comment.deleted';
+  cursor: string;
+  origin: 'user' | 'agent';
+  reviewId: string;
+  selection: DiffSelection;
+  threadId: string;
+  messageId: string;
+  timestamp: string;
+}
+
+export type ConversationStreamEvent =
+  | ConversationEvent
+  | CommentDeletedEvent
+  | ReviewApprovalEvent
+  | ReviewSummaryEvent
+  | CommentProgressEvent
+  | ThreadEvent;

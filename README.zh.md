@@ -148,10 +148,12 @@ git diff --cached | difit -
 | `--no-open`           | false          | 不自动打开浏览器                                                                  |
 | `--clean`             | false          | 启动时清除所有现有评论和已查看的文件                                              |
 | `--lgtm, --ship-it`   | true           | 切换 LGTM 审批，可批准或撤销，并保持评审窗口打开                                  |
-| `--conversation`      | true           | 启用实时评论事件和向指定线程发送的代理回复                                        |
+| `--conversation`      | true           | 启用会话 API（指定线程回复、进度回执和快照）；`--jsonl` 必需                      |
 | `--include-untracked` | false          | 自动将 untracked 文件包含在 diff 中（仅在 `.` 或 `working` 时有效）               |
 | `--keep-alive`        | false          | 浏览器断开后保持服务器运行（使用 Ctrl+C 手动停止）                                |
-| `--background`        | false          | 在后台保持服务器运行，并输出 JSON 连接信息                                        |
+| `--jsonl`             | true           | 前台标准输出采用 JSON Lines；诊断写入标准错误                                     |
+| `--no-jsonl`          | false          | 使用人类可读前台输出                                                              |
+| `--background`        | false          | 分离服务器并输出连接信息；无实时标准输出                                          |
 | `--context <lines>`   | Git 默认值 (3) | 限制每处变更周围的上下文行数（`0` 仅显示变更行；不可与 `--pr` 或 stdin 一起使用） |
 
 ## 💬 评论系统
@@ -231,10 +233,21 @@ difit 自动识别并折叠某些文件以保持视图整洁：
 
 ## 与代理对话
 
-使用 `difit <target> <base> --conversation --keep-alive`，代理即可在您继续
-审查时回复已提交的评论。在另一个进程中，`difit comment watch --port <port>`
-输出 JSON Lines，`comment reply` 向指定的审查线程发送回复。通过工具运行的代理
-可使用 `comment watch --once` 限制等待时间。有关有条件的 LGTM 批准规则等详细信息，
+使用 `difit schema [events|summary|reply|status|snapshot|comments|import|approval]` 查看 JSON 格式。
+省略选择项时默认描述事件，`$defs` 中也包含请求和响应定义。
+提交消息对应 `commitMessage`，简要说明（TLDR）对应 `rationale`。
+用法请参阅 `difit comment <command> --help`。
+
+使用 `difit <target> <base> --keep-alive`，代理即可在您继续审查时回复已提交的评论。
+前台进程的标准输出默认采用 JSON Lines，诊断信息写入标准错误。
+可用 `--jsonl` 显式启用，或用 `--no-jsonl` 选择人类可读输出。
+此模式下启动诊断仍写入标准错误，评论和审批输出写入标准输出。
+若还需禁用对话功能，请同时指定 `--no-jsonl --no-conversation`。
+代理应保留启动进程的句柄，并在工具操作之间读取新输出。
+使用 `server.ready` 中的实际 API 端口，通过 `comment reply` 回复，通过 `comment status` 明确确认收悉。
+`--background` 不提供实时标准输出；遗漏输出后可用 `comment snapshot` 恢复状态。
+`comment watch` 已移除。已发布的 5.1.0 尚不包含此协议，请在下一版本发布前使用源码构建。
+有关有条件的 LGTM 批准规则等详细信息，
 请参阅[对话协议与代理工作流程](docs/agent-conversations.md)。
 
 ## 🛠️ 开发

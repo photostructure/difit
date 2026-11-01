@@ -236,7 +236,7 @@ export async function markFilesIntentToAdd(git: SimpleGit, files: string[]): Pro
 export async function promptUser(message: string): Promise<boolean> {
   const rl = createInterface({
     input: process.stdin,
-    output: process.stdout,
+    output: process.stderr,
   });
 
   const answer = await rl.question(message);

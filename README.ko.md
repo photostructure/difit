@@ -148,10 +148,12 @@ git diff --cached | difit -
 | `--no-open`           | false          | 브라우저를 자동으로 열지 않음                                                                 |
 | `--clean`             | false          | 시작 시 모든 기존 코멘트와 열람된 파일 표시 초기화                                            |
 | `--lgtm, --ship-it`   | true           | LGTM 승인을 설정하거나 취소하며 검토 화면은 열린 상태로 유지                                  |
-| `--conversation`      | true           | 실시간 댓글 이벤트와 지정 스레드에 대한 에이전트 답글을 활성화                                |
+| `--conversation`      | true           | 대화 API(지정 스레드 답글, 진행 수신 확인, 스냅샷) 활성화. `--jsonl`에 필요                   |
 | `--include-untracked` | false          | diff에 untracked 파일 자동 포함 (`.` 또는 `working`에서만 유효)                               |
 | `--keep-alive`        | false          | 브라우저 연결이 끊겨도 서버 유지 (Ctrl+C로 수동 종료)                                         |
-| `--background`        | false          | 서버를 백그라운드에서 계속 실행하고 JSON 연결 정보 출력                                       |
+| `--jsonl`             | true           | 포그라운드 표준 출력은 JSON Lines, 진단은 표준 오류로 출력                                    |
+| `--no-jsonl`          | false          | 사람이 읽기 쉬운 출력 사용                                                                    |
+| `--background`        | false          | 서버를 분리하고 연결 정보 출력. 실시간 표준 출력 없음                                         |
 | `--context <lines>`   | Git 기본값 (3) | 변경 주변의 컨텍스트 줄 수를 제한 (`0`이면 변경된 줄만 표시, `--pr` 및 stdin에서는 사용 불가) |
 
 ## 💬 코멘트 시스템
@@ -231,11 +233,21 @@ difit은 특정 파일을 자동으로 식별하고 접어서 뷰를 깔끔하�
 
 ## 에이전트와 대화
 
-`difit <target> <base> --conversation --keep-alive`를 사용하면 검토를
-계속하는 동안 에이전트가 제출된 댓글에 답할 수 있습니다. 별도 프로세스에서
-`difit comment watch --port <port>`는 JSON Lines를 출력하고, `comment reply`는
-정확한 검토 스레드에 답글을 보냅니다. 도구 기반 에이전트는 `comment watch --once`로
-대기 시간을 제한할 수 있습니다. 조건부 LGTM 승인 규칙을 포함한 자세한 내용은
+`difit schema [events|summary|reply|status|snapshot|comments|import|approval]`으로 JSON 형식을 확인할 수 있습니다.
+선택자를 생략하면 이벤트를 설명하며, `$defs`에는 요청과 응답 정의도 포함됩니다.
+커밋 메시지는 `commitMessage`, 간단한 요약(TLDR)은 `rationale`입니다.
+사용법은 `difit comment <command> --help`를 참조하세요.
+
+`difit <target> <base> --keep-alive`를 사용하면 검토를 계속하는 동안
+에이전트가 제출된 댓글에 답할 수 있습니다. 포그라운드 표준 출력은 기본적으로 JSON Lines이며,
+진단은 표준 오류로 출력됩니다. `--jsonl`로 명시하거나 `--no-jsonl`로 사람이 읽기 쉬운 출력을 선택할 수 있습니다.
+이 모드에서도 시작 진단은 표준 오류로, 댓글과 승인 출력은 표준 출력으로 전달됩니다.
+대화 기능도 끄려면 `--no-jsonl --no-conversation`을 함께 지정하세요.
+에이전트는 실행 프로세스 핸들을 유지하고 도구 작업 사이에 새 출력을 읽습니다.
+`server.ready`의 실제 API 포트를 사용하여 `comment reply`로 답하고 `comment status`로 수신을 확인합니다.
+`--background`에는 실시간 출력이 없습니다. 출력을 놓치면 `comment snapshot`으로 상태를 복구합니다.
+`comment watch`는 제거되었습니다. 배포된 5.1.0에는 이 프로토콜이 없으므로 다음 릴리스까지 소스 빌드를 사용하세요.
+조건부 LGTM 승인 규칙을 포함한 자세한 내용은
 [대화 프로토콜과 에이전트 워크플로](docs/agent-conversations.md)를 참조하세요.
 
 ## 🛠️ 개발

@@ -13,47 +13,52 @@ let compileProcess = null;
 let viteProcess = null;
 let isShuttingDown = false;
 
-const cliStdoutProxy = createCliStdoutProxy({
-  showServerUrl: rawArgs.includes('--conversation'),
-  onServerUrl: (cliServerUrl) => {
-    if (viteProcess) {
-      return;
-    }
+function startVite(cliServerUrl) {
+  if (viteProcess) return;
+  console.error('🚀 Starting Vite dev server...');
+  const serverUrl = new URL(cliServerUrl);
+  viteProcess = spawn('pnpm', ['exec', 'vite', '--clearScreen=false'], {
+    stdio: ['inherit', 2, 'inherit'],
+    env: {
+      ...process.env,
+      VITE_DIFIT_API_URL: serverUrl.origin,
+      DIFIT_VITE_OPEN_PATH: `/${serverUrl.search}${serverUrl.hash}`,
+    },
+  });
+}
 
-    console.log('🚀 Starting Vite dev server...');
-    const serverUrl = new URL(cliServerUrl);
-    viteProcess = spawn('pnpm', ['exec', 'vite', '--clearScreen=false'], {
-      stdio: 'inherit',
-      env: {
-        ...process.env,
-        VITE_DIFIT_API_URL: serverUrl.origin,
-        DIFIT_VITE_OPEN_PATH: `/${serverUrl.hash}`,
-      },
-    });
-  },
-  onOutput: (output) => {
-    process.stdout.write(output);
-  },
+const cliStdoutProxy = createCliStdoutProxy({
+  onServerUrl: startVite,
+  onOutput: (output) => process.stdout.write(output),
+});
+const cliStderrProxy = createCliStdoutProxy({
+  onServerUrl: startVite,
+  onOutput: (output) => process.stderr.write(output),
 });
 
 function startCliProcess() {
   cliProcess = spawn(process.execPath, ['dist/cli/index.js', ...cliArgs], {
     // Keep stdin attached so CLI can decide stdin mode by itself.
-    stdio: ['inherit', 'pipe', 'inherit'],
+    stdio: ['inherit', 'pipe', 'pipe'],
     env: {
       ...process.env,
       NODE_ENV: 'development',
     },
   });
 
+  cliProcess.stdout.setEncoding('utf8');
+  cliProcess.stderr.setEncoding('utf8');
   cliProcess.stdout.on('data', (data) => {
     // Wait for CLI server before starting Vite to prevent proxy connection errors.
-    // Suppress dev-only startup lines but continue mirroring shutdown output such as review comments.
-    cliStdoutProxy.push(data.toString());
+    // Forward protocol records intact while readiness starts the development UI.
+    cliStdoutProxy.push(data);
   });
+
+  cliProcess.stderr.on('data', (data) => cliStderrProxy.push(data));
 
   cliProcess.on('close', (code) => {
     cliStdoutProxy.flush();
+    cliStderrProxy.flush();
 
     if (code !== 0 && code !== null && !isShuttingDown) {
       console.error(`CLI server exited with code ${code}`);
@@ -63,13 +68,13 @@ function startCliProcess() {
       viteProcess.kill('SIGINT');
     }
 
-    process.exit(code || 0);
+    process.exitCode = code || 0;
   });
 }
 
 function startCompileProcess() {
   compileProcess = spawn('pnpm', ['exec', 'tsc', '--project', 'tsconfig.cli.json'], {
-    stdio: 'inherit',
+    stdio: ['inherit', 2, 'inherit'],
   });
 
   compileProcess.on('close', (code) => {

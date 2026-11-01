@@ -32,10 +32,15 @@ upstream; scoped packaging, publishing, and default flags belong to this fork.
 npx @photostructure/difit .
 ```
 
+Check `npx @photostructure/difit --help` before using the JSONL instructions below.
+If it does not advertise `--jsonl`, that build predates the launch JSONL protocol:
+use `--no-conversation` alone to disable conversations, or use a source build
+that advertises `--jsonl` for the JSONL behavior and flags described here.
+
 Live agent conversations and the reversible LGTM approval toggle are enabled by default.
 Approval starts off; click LGTM to approve or revoke. Use `--no-lgtm` for a read-only review
-and `--no-conversation` to disable live events. `--lgtm` and `--ship-it` are aliases.
-The agent must actively watch and answer comments; the viewer does not start an agent.
+and `--no-jsonl --no-conversation` to disable conversations. `--lgtm` and `--ship-it` are aliases.
+The agent must read the launch process output and answer comments; the viewer does not start an agent.
 See [the agent conversation protocol](docs/agent-conversations.md).
 
 Install with `npm install -g @photostructure/difit` to use the `difit` command.
@@ -205,10 +210,12 @@ Stdin mode is selected with intent-first rules:
 | `--no-open`               | false           | Don't automatically open browser                                                                        |
 | `--clean`                 | false           | Clear all existing comments and viewed files on startup                                                 |
 | `--lgtm, --ship-it`       | true            | Show the LGTM toggle to grant or revoke approval while the review stays open                            |
-| `--conversation`          | true            | Enable live comment events and exact-thread agent replies                                               |
+| `--conversation`          | true            | Enable conversation APIs (exact-thread replies, progress receipts, snapshots); required by `--jsonl`    |
 | `--include-untracked`     | false           | Automatically include untracked files in diff (only with `.` or `working`)                              |
 | `--keep-alive`            | false           | Keep server running after browser disconnects (stop manually with Ctrl+C)                               |
-| `--background`            | false           | Keep the server running in the background and output JSON connection info                               |
+| `--jsonl`                 | true            | Emit JSON Lines on foreground stdout; diagnostics go to stderr                                          |
+| `--no-jsonl`              | false           | Use human-readable foreground output                                                                    |
+| `--background`            | false           | Detach the server and output connection information; no live stdout stream                              |
 | `--context <lines>`       | git default (3) | Limit surrounding context lines per change (`0` shows changes only; not available with `--pr` or stdin) |
 
 ### Open in editor
@@ -320,6 +327,12 @@ difit automatically identifies and collapses certain files to keep your view cle
 
 ## Agent conversations
 
+Discover the JSON contract with `difit schema [events|summary|reply|status|snapshot|comments|import|approval]`.
+Without a selector, the Draft 2020-12 bundle describes launch events; `$defs` also
+includes agent requests and responses. Use `difit comment <command> --help` for
+usage. The commit message is `commitMessage` and its TLDR is `rationale` in the
+summary payload; comments and replies also use JSON.
+
 Seed editable review intent with
 `difit . --commit-message 'fix: preserve review intent' --why 'Explain why the change is needed.'`.
 Each diff selection keeps its own proposed message and rationale for the server's
@@ -327,12 +340,19 @@ lifetime. Saving a change revokes that selection's LGTM approval. Agents can upd
 the same fields with `difit comment summary --port <port> < /tmp/difit-summary.json`;
 see the [proposal protocol](docs/agent-conversations.md#proposed-commit-message-and-rationale).
 
-Use `difit <target> <base> --conversation --keep-alive` to let an agent
-answer submitted comments while you continue reviewing. In another process,
-`difit comment watch --port <port>` streams JSON Lines; `comment reply` sends
-answers to the exact review thread. A bounded `comment watch --once` wait is
-available for tool-driven agents. See [the conversation protocol and agent
-workflow](docs/agent-conversations.md), including conditional LGTM approval.
+Use `difit <target> <base> --keep-alive` to let an agent answer comments while
+you continue reviewing. Foreground stdout emits JSON Lines by default; diagnostics
+go to stderr. `--jsonl` is explicit and `--no-jsonl` selects human output while
+retaining control APIs. In human mode, startup diagnostics still go to stderr;
+comment and approval output goes to stdout. To disable conversations, use
+`--no-jsonl --no-conversation`.
+Keep the process handle and read new output between tool steps. `server.ready` identifies
+the actual API port, URL, PID, and review. Send replies and explicit Delivered/Read
+receipts with `comment reply` and `comment status` using that API port.
+`--background` has no live stdout. Recover current state with `comment snapshot`;
+events cannot be replayed or resumed by cursor. The separate `comment watch`
+command has been removed. See [the conversation protocol and
+agent workflow](docs/agent-conversations.md), including conditional LGTM approval.
 
 ## HTTPS and remote browsers
 
@@ -423,9 +443,9 @@ or bypassing a certificate warning, is not a substitute for trusted HTTPS.
 ### Check copying and live conversations
 
 Open the HTTPS page without a certificate warning, click Copy Prompt, and paste
-into a text editor. For conversations, add `--conversation` when starting difit
-and run `difit comment watch --port 4966` on the repository machine. Submit a comment
-from the remote browser, verify it appears in the local stream, then send a
+into a text editor. For conversations, start foreground difit with `--keep-alive`
+on the repository machine and retain its JSONL stdout. Submit a comment from the
+remote browser, verify it appears in the launch output, then send a
 [reply](docs/agent-conversations.md) and confirm it appears without refreshing.
 Agent commands still connect to localhost on the repository machine; the browser
 can use the HTTPS proxy. They do not acquire remote-host support from the URL.

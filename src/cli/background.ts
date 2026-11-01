@@ -100,7 +100,13 @@ export async function startBackgroundProcess(spawnProcess: typeof spawn = spawn)
       }
 
       finish(() => {
-        console.log(JSON.stringify(handshake));
+        console.log(
+          JSON.stringify({
+            type: 'server.background',
+            ...handshake,
+            timestamp: new Date().toISOString(),
+          }),
+        );
         releaseBackgroundChild(child);
         resolve();
       });

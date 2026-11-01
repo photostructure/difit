@@ -148,10 +148,12 @@ git diff --cached | difit -
 | `--no-open`           | false           | ブラウザを自動的に開かない                                                                 |
 | `--clean`             | false           | 起動時に既存コメントと閲覧済みファイルをすべてクリア                                       |
 | `--lgtm, --ship-it`   | true            | LGTM の承認を切り替える（レビューを開いたまま承認・取り消し）                              |
-| `--conversation`      | true            | ライブコメントイベントと、指定スレッドへのエージェント返信を有効にする                     |
+| `--conversation`      | true            | 会話 API（指定スレッドへの返信、進捗受領通知、スナップショット）を有効化。`--jsonl` に必須 |
 | `--include-untracked` | false           | diffにuntrackedファイルを自動的に含める（`.`または`working`のみ有効）                      |
 | `--keep-alive`        | false           | ブラウザ切断後もサーバーを終了せず起動したままにする（Ctrl+Cで手動停止）                   |
-| `--background`        | false           | サーバーをバックグラウンドで起動したままにし、接続情報をJSONで出力                         |
+| `--jsonl`             | true            | フォアグラウンドの標準出力を JSON Lines にする。診断は標準エラー出力                       |
+| `--no-jsonl`          | false           | 人間向けの出力を使う                                                                       |
+| `--background`        | false           | サーバーを切り離して接続情報を出力する。ライブ標準出力は提供しない                         |
 | `--context <lines>`   | Gitの既定値 (3) | 変更ごとの前後コンテキスト行数を制限（`0` は変更行のみ表示。`--pr` と stdin では使用不可） |
 
 ## 💬 コメントシステム
@@ -231,11 +233,22 @@ difitは特定のファイルを自動的に識別し、ビューをすっきり
 
 ## エージェントとの会話
 
-`difit <target> <base> --conversation --keep-alive` を使うと、レビューを
-続けながら、送信したコメントにエージェントが返信できます。別のプロセスで
-`difit comment watch --port <port>` を実行すると JSON Lines が流れ、`comment reply`
-で対象のレビュースレッドに返信できます。ツール経由のエージェントは
-`comment watch --once` で待機時間を区切れます。条件付きの LGTM 承認についても、
+`difit schema [events|summary|reply|status|snapshot|comments|import|approval]` で JSON の形式を確認できます。
+引数なしではイベントを示し、`$defs` には要求・応答の定義も含まれます。
+コミットメッセージは `commitMessage`、その要約（TLDR）は `rationale` です。
+使い方は `difit comment <command> --help` を参照してください。
+
+`difit <target> <base> --keep-alive` を使うと、レビューを続けながら、送信した
+コメントにエージェントが返信できます。フォアグラウンドの標準出力は既定で JSON Lines、
+診断は標準エラー出力です。`--jsonl` で明示でき、`--no-jsonl` で人間向けの出力を選べます。
+このモードでも起動時の診断は標準エラー出力、コメントと承認の出力は標準出力です。
+会話機能も無効にする場合は `--no-jsonl --no-conversation` を指定します。
+エージェントは起動プロセスのハンドルを保持し、ツール操作の合間に出力を読み取ります。
+`server.ready` が示す実際の API ポートで `comment reply` と `comment status` を使い、
+返信と受信確認を送ります。`--background` にはライブ出力がありません。
+出力を取り逃した場合は `comment snapshot` で状態を取得します。`comment watch` は廃止されました。
+公開済みの 5.1.0 はこのプロトコルに未対応のため、次のリリースまではソースビルドを使ってください。
+条件付きの LGTM 承認についても、
 [会話プロトコルとエージェントのワークフロー](docs/agent-conversations.md)を参照してください。
 
 ## 🛠️ 開発

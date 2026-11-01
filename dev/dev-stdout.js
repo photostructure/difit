@@ -1,75 +1,67 @@
 const CLI_SERVER_URL_PATTERN = /^🚀 difit server started on (https?:\/\/\S+)$/;
-const PORT_RETRY_PATTERN = /^Port \d+ is busy, trying \d+\.\.\.$/;
 
 /**
  * @param {{
- *   showServerUrl?: boolean;
  *   onServerUrl: (serverUrl: string) => void;
  *   onOutput: (output: string) => void;
  * }} options
  */
-export function createCliStdoutProxy({ onServerUrl, onOutput, showServerUrl = false }) {
+export function createCliStdoutProxy({ onServerUrl, onOutput }) {
   let buffer = '';
-  let pendingBlankLines = 0;
-  /** @type {string | undefined} */
-  let detectedServerUrl;
+  let detectedServerUrl = false;
 
-  function flushPendingBlankLines() {
-    while (pendingBlankLines > 0) {
-      onOutput('\n');
-      pendingBlankLines -= 1;
-    }
-  }
-
-  /**
-   * @param {string} rawLine
-   * @param {boolean} hasTrailingNewline
-   */
-  function handleLine(rawLine, hasTrailingNewline) {
+  /** @param {string} rawLine */
+  function detectServerUrl(rawLine) {
     const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
-
-    if (line === '') {
-      pendingBlankLines += 1;
-      return;
+    /** @type {string | undefined} */
+    let readyUrl;
+    if (line.startsWith('{')) {
+      try {
+        const event = /** @type {unknown} */ (JSON.parse(line));
+        if (
+          event &&
+          typeof event === 'object' &&
+          'type' in event &&
+          event.type === 'server.ready' &&
+          'url' in event &&
+          typeof event.url === 'string'
+        )
+          readyUrl =
+            'launchUrl' in event && typeof event.launchUrl === 'string'
+              ? event.launchUrl
+              : event.url;
+      } catch {
+        // Legacy human output is still supported with --no-jsonl.
+      }
     }
-
     const serverUrlMatch = line.match(CLI_SERVER_URL_PATTERN);
-    const shouldHideServerUrlLine = !detectedServerUrl && serverUrlMatch !== null;
-
-    if (shouldHideServerUrlLine) {
-      detectedServerUrl = serverUrlMatch[1];
-      onServerUrl(detectedServerUrl);
+    const serverUrl = readyUrl ?? serverUrlMatch?.[1];
+    if (serverUrl) {
+      detectedServerUrl = true;
+      onServerUrl(serverUrl);
     }
-
-    const shouldHidePortRetryLine = !detectedServerUrl && PORT_RETRY_PATTERN.test(line);
-
-    if ((shouldHideServerUrlLine && !showServerUrl) || shouldHidePortRetryLine) {
-      pendingBlankLines = 0;
-      return;
-    }
-
-    flushPendingBlankLines();
-    onOutput(hasTrailingNewline ? `${line}\n` : line);
   }
 
   return {
+    /** @param {string} chunk */
     push(chunk) {
+      // Preserve every byte, including diagnostics, blank lines and line endings.
+      onOutput(chunk);
+      if (detectedServerUrl) return;
       buffer += chunk;
-
       const lines = buffer.split('\n');
       buffer = lines.pop() ?? '';
-
       for (const line of lines) {
-        handleLine(line, true);
+        detectServerUrl(line);
+        if (detectedServerUrl) {
+          buffer = '';
+          break;
+        }
       }
     },
     flush() {
-      if (buffer.length > 0) {
-        handleLine(buffer, false);
-      }
-
+      if (!detectedServerUrl && buffer.length > 0) detectServerUrl(buffer);
       buffer = '';
-      pendingBlankLines = 0;
     },
   };
 }
