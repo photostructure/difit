@@ -160,7 +160,8 @@ export class GitDiffParser {
 
   private parseUnifiedDiff(diffText: string): DiffFile[] {
     const files: DiffFile[] = [];
-    const fileBlocks = diffText.split(/^diff --git /m).slice(1);
+    // Git records are LF-delimited; CR and Unicode line separators may be file content.
+    const fileBlocks = diffText.split(/(?<=^|\n)diff --git /).slice(1);
 
     if (fileBlocks.length > 0) {
       for (const fileBlock of fileBlocks) {
