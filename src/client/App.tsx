@@ -1,4 +1,13 @@
-import { Columns, AlignLeft, Settings, PanelLeftClose, PanelLeft, Keyboard } from 'lucide-react';
+import {
+  Columns,
+  AlignLeft,
+  Settings,
+  PanelLeftClose,
+  PanelLeft,
+  Keyboard,
+  Sun,
+  Moon,
+} from 'lucide-react';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
 import type { ConversationSnapshot } from '../types/conversation';
@@ -51,6 +60,7 @@ import { useReviewSummary } from './hooks/useReviewSummary';
 import { useViewedFiles } from './hooks/useViewedFiles';
 import { useViewport } from './hooks/useViewport';
 import { fetchClientSettings, saveClientSettings } from './services/userSettings';
+import { resolveThemePreference } from './utils/appearanceTheme';
 import { hasMultipleCommentAuthors } from './utils/commentAuthors';
 import { copyTextToClipboard } from './utils/clipboard';
 import { getFileElementId } from './utils/domUtils';
@@ -68,6 +78,7 @@ import {
   getMergedChunksForVersion,
 } from './utils/mergedChunks';
 import { buildFileLineIndex, isThreadOutdated } from './utils/outdatedComments';
+import { getFallbackSyntaxTheme } from './utils/themeLoader';
 
 const EMPTY_COMMENT_THREADS: CommentThread[] = [];
 const EMPTY_MERGED_CHUNKS: MergedChunk[] = [];
@@ -236,6 +247,17 @@ function App() {
 
   const { settings, updateSettings } = useAppearanceSettings();
   const { isMobile, isDesktop } = useViewport();
+  const resolvedTheme = resolveThemePreference(settings.theme);
+  const nextTheme = resolvedTheme === 'dark' ? 'light' : 'dark';
+
+  const handleThemeToggle = useCallback(() => {
+    const fallbackSyntaxTheme = getFallbackSyntaxTheme(nextTheme);
+    updateSettings({
+      ...settings,
+      theme: nextTheme,
+      syntaxTheme: fallbackSyntaxTheme?.id ?? settings.syntaxTheme,
+    });
+  }, [nextTheme, settings, updateSettings]);
 
   // New diff-aware comment system
   const {
@@ -1546,6 +1568,15 @@ function App() {
                 aria-label="Toggle file tree panel"
               >
                 {isFileTreeOpen ? <PanelLeftClose size={18} /> : <PanelLeft size={18} />}
+              </button>
+              <button
+                type="button"
+                onClick={handleThemeToggle}
+                className="p-2 text-github-text-secondary hover:text-github-text-primary hover:bg-github-bg-tertiary rounded transition-colors"
+                title={`Switch to ${nextTheme} theme`}
+                aria-label={`Switch to ${nextTheme} theme`}
+              >
+                {nextTheme === 'light' ? <Sun size={18} /> : <Moon size={18} />}
               </button>
               <button
                 onClick={() => setIsSettingsOpen(true)}
