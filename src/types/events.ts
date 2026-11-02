@@ -1,7 +1,9 @@
 import type { ConversationStreamEvent } from './conversation.js';
 import type { DiffSelection, ReviewContext } from './diff.js';
+import type { NamedReviewMetadata } from './review.js';
 
 interface ServerReadyEvent {
+  capture?: NamedReviewMetadata;
   type: 'server.ready';
   port: number;
   url: string;

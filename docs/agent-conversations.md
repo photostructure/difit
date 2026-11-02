@@ -1,11 +1,103 @@
 # Review conversations
 
-Start a foreground review with `difit <target> <base> --keep-alive` and retain its
-process handle. Conversation and LGTM are enabled by default. Prefer immutable
-target/base commits for approval. For mutable targets, save the reviewed patch,
-base SHA, and included untracked contents, then track requested fixes so unrelated
-edits cannot enter the approved scope. `--keep-alive` lets questions continue
-across browser disconnects; LGTM keeps the review open when approval changes.
+For uncommitted work, start `difit --review <task-name> --keep-alive` and retain
+the foreground process handle. This captures the selected patch under a stable
+review name. For commits, use `difit <target> <base> --keep-alive` with immutable
+SHAs for approval. Conversation and LGTM are enabled by default. `--keep-alive`
+lets questions continue across browser disconnects; LGTM keeps the review open
+when approval changes.
+
+Each resolved comparison retains its conversations and change summary. Browser
+Back/Forward restores the saved resolved comparison and discussion. Reloading a
+URL with symbolic refs such as `HEAD` follows their current commits, which can
+select a new conversation context. The revision menu's **Recent reviews** list
+also reopens earlier resolved comparisons with comments or a summary. The URL
+records the requested base, target, and comparison mode.
+Retained-review links keep the saved resolved base, including merge-base reviews
+reopened after switching branches.
+
+## Named captures for uncommitted work
+
+A named review holds an immutable patch and keeps the same conversation and
+proposal when an agent explicitly updates that patch. Names are 1–80 ASCII
+letters, digits, dots, underscores, or hyphens, starting with a letter or digit.
+Use one name per task. Names and captures are scoped to this server process and
+repository root; capture history is held in memory. A server restart loses named
+reviews and captures; existing browser comment recovery does not restore them.
+
+Capture the current tracked changes from HEAD with repeatable native Git
+pathspecs. Quote pathspecs so Git receives exclusions and glob syntax unchanged:
+
+```sh
+difit --review parser-fix --pathspec src --pathspec ':(exclude)src/generated/**' --keep-alive
+```
+
+Add `--include-untracked` to include untracked file contents. Capture operations
+read the index and working tree without staging, stashing, or editing them.
+Pathspecs include every matching change, including changes from another task.
+Check the selected patch against the intended scope before requesting approval.
+
+Native capture rejects selected paths whose configured clean or process filters
+would execute external commands, including affected paths inside checked-out
+submodules. Narrow `--pathspec` to unaffected files, or explicitly generate the
+wanted patch and supply it through stdin or a prepared `--capture` artifact.
+Imported patches remain supported.
+
+Capture artifacts allow up to 8 MiB of UTF-8 patch bytes. Creating or updating a
+named review on a running server has a separate 16 MiB serialized JSON limit;
+escaped patch text and catalogue metadata count toward it. The CLI checks before
+sending, and the server returns JSON HTTP 413 for oversized requests. Narrow the
+selected patch, or launch a new local review from a saved artifact with
+`--review <name> --capture <file>`.
+
+For overlapping changes in one file, save an artifact and use its catalogue IDs:
+
+```sh
+difit review capture --pathspec src --include-untracked --output /tmp/capture.json
+difit --review parser-subset --capture /tmp/capture.json --select '<file-id>' --select '<hunk-id>' --keep-alive
+```
+
+`--output` writes the full schema-version-1 artifact and prints a compact file/hunk
+catalogue; without `--output`, stdout contains the full artifact. Replace the
+placeholder IDs with IDs from that exact catalogue. Repeat `--select` to include
+whole files or individual hunks. IDs contain the artifact's patch digest; line or
+hunk numbers alone cannot identify a stable selection. A subset has its own
+digest and catalogue. Binary, mode, rename, addition, deletion, and submodule
+changes require a whole-file ID. Artifacts are bound to their repository root.
+`difit - --review parser-fix < /tmp/selected.patch` also captures a supplied patch.
+`--pathspec` and `--include-untracked` apply only to native captures; `--select`
+can narrow an artifact or supplied patch.
+
+Use the actual `server.ready.port` to create another task on the same server or
+to update an existing task. Read its current metadata before updating:
+
+```sh
+difit review create docs-update --port 4966 --pathspec docs
+curl --fail --silent http://localhost:4966/api/reviews/parser-fix
+difit review update parser-fix --port 4966 --expected-version 1 --pathspec src --pathspec ':(exclude)src/generated/**'
+```
+
+The new task appears in the already-open viewer's revision menu under **Recent
+reviews**, labeled with its name and capture version even before it has comments.
+Switch tasks there to keep using the existing tab's editor connection.
+
+An update can instead use `--capture /tmp/next-capture.json` and repeatable
+`--select` IDs, or `difit review update parser-fix - --port 4966
+--expected-version 1 < /tmp/selected.patch`. Capture updates are explicit: source
+edits and browser refresh leave the displayed patch unchanged.
+
+`GET /api/reviews/:name` returns current metadata and the file/hunk catalogue with
+`reviewId`; add `?version=<n>` to read a retained capture catalogue.
+`POST /api/reviews` accepts `{name,capture}` and returns the same response shape
+as update with `updated:true`.
+`POST /api/reviews/:name/capture` accepts `{expectedVersion,capture}` and returns
+`{reviewId,name,version,patchDigest,baseCommit,repositoryId,updated}`. A stale
+expected version returns HTTP 409 with `{error,current}`; inspect `current` and
+reconcile before retrying. Even an identical-patch update checks the expected
+version. An identical patch preserves the version and approval. A changed patch
+advances the version and revokes LGTM, retaining the conversation and proposal
+under the same name and `reviewId`. Earlier inline anchors retain their original
+capture version/digest and appear outdated after the capture changes.
 
 ## Discover payloads
 
@@ -13,6 +105,8 @@ Run `difit --help` for commands and `difit comment <command> --help` for compani
 command usage. `difit schema` prints a JSON Schema Draft 2020-12 bundle for launch
 events. Select a root with `difit schema events`, `summary`, `reply`, `status`, or
 `snapshot`; `comments`, `import`, and `approval` describe the other control payloads.
+`capture` validates a saved artifact and `capture-update` describes its guarded
+update request.
 The bundle's `$defs` also describe request/response payloads, comment
 messages and edits, progress, threads, and approval. Read the installed build's
 schema rather than copying payload definitions from another version.
@@ -31,12 +125,14 @@ There is no separate `comment watch` command or conversation long-poll
 endpoint. Read output from the running launch process between tool steps.
 `--background` detaches the server and returns connection information without
 live stdout; use foreground `--keep-alive` for active agent conversations. JSONL
-requires conversation APIs. To disable conversations, pass both `--no-jsonl` and
-`--no-conversation`; `--no-jsonl` alone retains the control APIs.
+and named reviews require conversation APIs. For unnamed reviews, disable
+conversations with `--no-jsonl --no-conversation`. `--no-jsonl` alone retains the
+control APIs.
 
 The first `server.ready` event includes `port`, `url`, `launchUrl`, `pid`, `reviewContext`,
-`selection`, `reviewId`, and `timestamp`. Use its actual API port for
-companion commands: 4966 may be occupied, and the Vite UI port is not the API port.
+`selection`, `reviewId`, and `timestamp`. Named reviews also include `capture`
+metadata: `name`, `version`, `patchDigest`, `baseCommit`, and `repositoryId`.
+Use its actual API port for companion commands: 4966 may be occupied, and the Vite UI port is not the API port.
 `url` is the API origin without an editor token. For production launches, give
 the reviewing user `launchUrl`: its fragment carries the editor-session token
 needed for open-in-editor actions. In development, the review UI is the Vite tab
@@ -49,18 +145,24 @@ without waiting for approval or closing the tab. Partial text still being typed
 is not sent. Message events include `type` (`comment.created` or `comment.updated`),
 `origin` (`user` or `agent`), `cursor`, `reviewId`, `selection`, `threadId`,
 `messageId`, `file`, `side`, `line` (a number or `{start,end}`), `body`, `author`,
-`timestamp`, and the available `codeSnapshot`. Working-tree and stdin selections
-remain mutable; the code snapshot records the excerpt the commenter saw, not a
-full immutable repository snapshot.
+`timestamp`, and the available `codeSnapshot`. Named review message events include
+current `capture` metadata and the thread's original `anchorCapture` version and
+digest. The code snapshot records the excerpt the commenter saw. Unnamed
+working-tree selections can change on reload; use a named capture to retain a
+fixed patch.
 
-The stream also carries `review.approval`, `review.summary`, `comment.progress`,
+The stream also carries `review.capture`, `review.approval`, `review.summary`, `comment.progress`,
 `comment.deleted`, `thread.resolved`, `thread.reopened`, and `thread.deleted`.
 Progress events include review, thread, and message IDs, `selection`, agent `origin`, stream
 `cursor`, `progress`, and `timestamp`. Their `progress.cursor` identifies the
 comment revision; their outer `cursor` identifies the progress event. Thread
 events include review/thread IDs, `selection`, `origin`, `cursor`, and `timestamp`.
 `comment.deleted` additionally identifies `messageId` and contains no body.
-These state changes are not new work requests.
+These state changes are not new work requests. `review.capture` has agent origin,
+`reviewId`, `selection`, current `capture` metadata, `cursor`, and `timestamp`.
+Named `review.summary` and `review.approval` events also include current capture
+metadata. A snapshot includes each named review's current `capture` and each
+thread's original `capture` version/digest.
 
 Persist handled message IDs, cursors, and pending work before marking launch
 output handled. Writing an event to stdout does not prove the agent received it;
@@ -78,6 +180,21 @@ them to request replay. Consumers reconciling the full state may ignore the
 checkpoint cursor. Use message `progress.cursor` for status/reply
 revision guards, not the snapshot's checkpoint cursor. An existing detached server can be recovered
 through snapshots, but it has no launch stream available to the agent.
+
+JSONL output does not itself wake an idle agent. Keep the foreground process
+attached to the harness's output monitor, or capture stdout in a file and monitor
+that file. In the tested Claude harness, Monitor notifications woke the agent
+while idle. That monitor expires after its configured timeout; rearm it on expiry and reconcile
+records written during the gap. Notifications can truncate long lines, so use
+them as a signal to read complete JSONL records from the file. Persist the last
+consumed file position and handled message revisions to avoid replaying work
+when a monitor is rearmed. Harness shutdown can also terminate the foreground
+review process; `--keep-alive` only covers browser disconnects.
+
+Consume records in emission order using their cursors. Startup can emit a seeded
+summary whose timestamp predates `server.ready`; sorting by timestamp would put
+the stream in the wrong order. If a companion command rejects a stale summary
+or comment revision, fetch a fresh snapshot before retrying.
 
 Browser storage may restore old threads into a restarted server. These arrive
 as created events, preserving agent origin. Compare message IDs and bodies with
@@ -168,8 +285,9 @@ with `{error,summary}` containing the latest version. Browser updates broadcast
 `reviewSummaryChanged` through the existing watch connection.
 
 Approving with `POST /api/approval` includes the displayed `summaryVersion`.
-The server rejects an approval for an older proposal with HTTP 409. Revocation
-remains available regardless of the summary version.
+For a named review, also include the displayed `captureVersion` and `patchDigest`.
+The server rejects stale capture or proposal approval with HTTP 409. Revocation
+remains available regardless of these versions.
 
 ## General conversation and comment intent
 
@@ -264,8 +382,13 @@ The launch stream emits a `review.approval` event with `reviewId`, `selection`,
 not need a comment receipt or reply. `comment snapshot` includes `approval`
 on each review. After addressing comments and completing the checks below,
 fetch a fresh snapshot immediately before committing and verify that the matching
-review still has `approval.approved: true`. An older approval event does not
-override a later revocation. Missing state or an unavailable server is not proof
+review still has `approval.approved: true`. For a named review, require
+`approval.captureVersion === capture.version`,
+`approval.patchDigest === capture.patchDigest`, and
+`approval.summaryVersion === summary.version`. Check that the proposed commit
+contains only the approved captured changes and authorized fixes; approval of a
+capture does not establish ownership of later shared-tree edits. An older approval
+event does not override a later revocation. Missing state or an unavailable server is not proof
 of approval. Separate explicit chat approval is independent of the button state
 unless the user revokes it. Revoking cannot undo a commit already made.
 
@@ -274,8 +397,12 @@ patch scope. A closed tab, quiet stream, timeout, resolved thread, answer, or
 ordinary process exit is not approval.
 
 The toggle uses `GET /api/approval?base=<base>&target=<target>` and
-`POST /api/approval` with the same query and JSON `{ "approved": true }` or
-`{ "approved": false }`; include `baseMode=merge-base` where applicable. Both
+`POST /api/approval` with the same query. Approve with
+`{"approved":true,"summaryVersion":0}` using the displayed summary version;
+revoke with `{"approved":false}`. Include `baseMode=merge-base` where applicable.
+For a named review, use `?review=<name>` and approve with
+`{"approved":true,"captureVersion":1,"patchDigest":"<current-digest>","summaryVersion":0}`
+using the displayed capture and summary values. Both
 require `--ship-it`. GET is read-only and returns the current approval; it also
 works without conversation mode. The legacy `POST /api/ship-it` approve-and-exit
 endpoint remains available to old clients, but the toggle never calls it. An old
@@ -304,6 +431,6 @@ The HTTP equivalents are `GET /api/conversation/snapshot` (returns
 `{reviews,cursor}`) and `POST /api/conversation/reply` (JSON body as above).
 There is no `GET /api/conversation/events` endpoint. Conversation APIs require
 `--conversation`, which is enabled by default. Responses include 400 for invalid
-input, 409 for stale message cursors or summary versions, 404 for unknown
+input, 409 for stale message cursors, capture versions/digests, or summary versions, 404 for unknown
 review/thread/parent or a disabled endpoint, and 415 for non-JSON replies.
 Stream cursors and review IDs last only for the server process.

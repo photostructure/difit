@@ -7,6 +7,7 @@ const boolean: Schema = { type: 'boolean' };
 const nonblank: Schema = { type: 'string', pattern: '\\S' };
 const timestamp: Schema = { type: 'string', description: 'Timestamp, normally ISO 8601.' };
 const version: Schema = { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER };
+const captureVersion: Schema = { ...version, minimum: 1 };
 const cursor: Schema = {
   type: 'string',
   description:
@@ -53,6 +54,7 @@ const messageFields = {
   updatedAt: timestamp,
 };
 const threadFields = {
+  capture: ref('CaptureAnchor'),
   id: string,
   scope: enumeration('line', 'review'),
   createdAt: timestamp,
@@ -80,12 +82,94 @@ const importFields = {
   codeSnapshot: ref('CodeSnapshot'),
 };
 
+const metadataFields = {
+  name: ref('ReviewName'),
+  version: captureVersion,
+  patchDigest: ref('PatchDigest'),
+  baseCommit: ref('CaptureBaseCommit'),
+  repositoryId: string,
+};
+
 const definitions: Record<string, Schema> = {
+  ReviewName: {
+    type: 'string',
+    minLength: 1,
+    maxLength: 80,
+    pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$',
+    not: { pattern: '[^A-Za-z0-9._-]' },
+    description: 'Stable name for one task in this server process and repository.',
+  },
+  PatchDigest: {
+    type: 'string',
+    pattern: '^[a-f0-9]{64}$',
+    minLength: 64,
+    maxLength: 64,
+    description: 'SHA-256 of the exact UTF-8 patch. File and hunk IDs belong to this digest.',
+  },
+  CaptureBaseCommit: {
+    type: 'string',
+    pattern: '^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64}|unborn)$',
+  },
+  CapturedHunk: object({
+    id: string,
+    oldStart: { type: 'integer', minimum: 0 },
+    oldLines: { type: 'integer', minimum: 0 },
+    newStart: { type: 'integer', minimum: 0 },
+    newLines: { type: 'integer', minimum: 0 },
+  }),
+  CapturedFile: object(
+    { id: string, path: string, oldPath: string, hunks: array(ref('CapturedHunk')) },
+    ['id', 'path', 'hunks'],
+  ),
+  ReviewCapture: {
+    ...object({
+      schemaVersion: { const: 1 },
+      repositoryId: string,
+      repositoryRoot: nonblank,
+      baseCommit: ref('CaptureBaseCommit'),
+      patch: string,
+      patchDigest: ref('PatchDigest'),
+      files: array(ref('CapturedFile')),
+    }),
+    description:
+      'Immutable repository-bound artifact from review capture. The server derives digest, file/hunk IDs and ranges from patch, and rejects artifacts from a different repository root. JSON Schema cannot verify those relationships.',
+  },
+  NamedReviewMetadata: object(metadataFields),
+  CaptureAnchor: {
+    ...object({ version: captureVersion, patchDigest: ref('PatchDigest') }),
+    description:
+      'Capture in which the thread was first saved; retained when the named review advances. Only inline threads become outdated when this anchor differs from the current capture.',
+  },
+  NamedReviewStart: {
+    ...object({ name: ref('ReviewName'), capture: ref('ReviewCapture') }),
+    description: 'POST /api/reviews creates a named review at capture version 1.',
+  },
+  ReviewCaptureUpdate: {
+    ...object({ expectedVersion: captureVersion, capture: ref('ReviewCapture') }),
+    description:
+      'POST /api/reviews/:name/capture. expectedVersion must match the current capture version, including for unchanged patches. A changed patch advances the version and revokes approval; an identical patch preserves both.',
+  },
+  NamedReviewCatalogueResponse: {
+    ...object({ reviewId: string, ...metadataFields, files: array(ref('CapturedFile')) }),
+    description:
+      'GET /api/reviews/:name returns the current capture catalogue; optional ?version=<n> reads a retained capture version from this server process.',
+  },
+  NamedReviewStartResponse: ref('ReviewCaptureUpdateResponse'),
+  ReviewCaptureUpdateResponse: object({
+    reviewId: string,
+    ...metadataFields,
+    updated: boolean,
+  }),
+  ReviewCaptureConflictResponse: object({
+    error: string,
+    current: ref('NamedReviewMetadata'),
+  }),
   DiffSelection: object(
     {
       baseCommitish: string,
       targetCommitish: string,
       baseMode: enumeration('direct', 'merge-base'),
+      reviewName: ref('ReviewName'),
     },
     ['baseCommitish', 'targetCommitish'],
   ),
@@ -191,18 +275,42 @@ const definitions: Record<string, Schema> = {
     'rationale',
     'version',
   ]),
-  ReviewApproval: object({ approved: boolean, updatedAt: timestamp, cursor }, ['approved']),
-  ServerReadyEvent: object({
-    type: { const: 'server.ready' },
-    port: { type: 'integer', minimum: 1, maximum: 65535 },
-    url: string,
-    launchUrl: string,
-    pid: { type: 'integer', minimum: 1 },
-    reviewContext: ref('ReviewContext'),
-    selection: ref('DiffSelection'),
-    reviewId: string,
-    timestamp,
-  }),
+  ReviewApproval: object(
+    {
+      approved: boolean,
+      updatedAt: timestamp,
+      cursor,
+      captureVersion,
+      patchDigest: ref('PatchDigest'),
+      summaryVersion: version,
+    },
+    ['approved'],
+  ),
+  ServerReadyEvent: object(
+    {
+      capture: ref('NamedReviewMetadata'),
+      type: { const: 'server.ready' },
+      port: { type: 'integer', minimum: 1, maximum: 65535 },
+      url: string,
+      launchUrl: string,
+      pid: { type: 'integer', minimum: 1 },
+      reviewContext: ref('ReviewContext'),
+      selection: ref('DiffSelection'),
+      reviewId: string,
+      timestamp,
+    },
+    [
+      'type',
+      'port',
+      'url',
+      'launchUrl',
+      'pid',
+      'reviewContext',
+      'selection',
+      'reviewId',
+      'timestamp',
+    ],
+  ),
   ServerBackgroundEvent: object({
     type: { const: 'server.background' },
     port: { type: 'integer', minimum: 1, maximum: 65535 },
@@ -219,6 +327,8 @@ const definitions: Record<string, Schema> = {
   CommentEvent: object(
     {
       ...streamFields,
+      capture: ref('NamedReviewMetadata'),
+      anchorCapture: ref('CaptureAnchor'),
       type: enumeration('comment.created', 'comment.updated'),
       threadId: string,
       messageId: string,
@@ -262,15 +372,30 @@ const definitions: Record<string, Schema> = {
     type: enumeration('thread.resolved', 'thread.reopened', 'thread.deleted'),
     threadId: string,
   }),
-  ReviewSummaryEvent: object({
+  ReviewSummaryEvent: object(
+    {
+      ...streamFields,
+      capture: ref('NamedReviewMetadata'),
+      type: { const: 'review.summary' },
+      summary: ref('ReviewSummary'),
+    },
+    ['cursor', 'origin', 'reviewId', 'selection', 'timestamp', 'type', 'summary'],
+  ),
+  ReviewApprovalEvent: object(
+    {
+      ...streamFields,
+      type: { const: 'review.approval' },
+      capture: ref('NamedReviewMetadata'),
+      approved: boolean,
+      summaryVersion: version,
+    },
+    ['cursor', 'origin', 'reviewId', 'selection', 'timestamp', 'type', 'approved'],
+  ),
+  ReviewCaptureEvent: object({
     ...streamFields,
-    type: { const: 'review.summary' },
-    summary: ref('ReviewSummary'),
-  }),
-  ReviewApprovalEvent: object({
-    ...streamFields,
-    type: { const: 'review.approval' },
-    approved: boolean,
+    type: { const: 'review.capture' },
+    origin: { const: 'agent' },
+    capture: ref('NamedReviewMetadata'),
   }),
   ConversationEvent: {
     oneOf: [
@@ -280,6 +405,7 @@ const definitions: Record<string, Schema> = {
       'ThreadEvent',
       'ReviewSummaryEvent',
       'ReviewApprovalEvent',
+      'ReviewCaptureEvent',
     ].map(ref),
   },
   ServerEvent: {
@@ -349,13 +475,17 @@ const definitions: Record<string, Schema> = {
         'Opaque state checkpoint captured with this snapshot. Equality with a concurrently buffered event cursor means that event is already reflected in the snapshot. Do not decode, sort, or use it for replay or message revision guards. Full-state reconciliation may ignore it.',
     },
     reviews: array(
-      object({
-        id: string,
-        selection: ref('DiffSelection'),
-        threads: array(ref('CommentThread')),
-        approval: ref('ReviewApproval'),
-        summary: ref('ReviewSummary'),
-      }),
+      object(
+        {
+          id: string,
+          selection: ref('DiffSelection'),
+          threads: array(ref('CommentThread')),
+          approval: ref('ReviewApproval'),
+          summary: ref('ReviewSummary'),
+          capture: ref('NamedReviewMetadata'),
+        },
+        ['id', 'selection', 'threads', 'approval', 'summary'],
+      ),
     ),
   }),
   CommentImport: object(importFields, ['type', 'filePath', 'position', 'body']),
@@ -394,18 +524,27 @@ const definitions: Record<string, Schema> = {
     ['id', 'file', 'line', 'body', 'timestamp'],
   ),
   CommentsRequest: {
+    type: 'object',
     description:
-      'POST /api/comments edits/replaces comments, including message body and intent edits. A stale baseVersion merges instead of replacing; server-owned progress is ignored.',
+      'POST /api/comments edits/replaces comments, including message body and intent edits. A stale baseVersion merges instead of replacing; server-owned progress is ignored. For named reviews, a new thread uses its own retained capture anchor when present, otherwise the optional captureVersion and patchDigest pair (both or neither), otherwise the current capture. A partial or unknown body pair, or an invalid new-thread anchor, returns HTTP 400 without applying comments. Saved threads keep their server anchor and ignore supplied replacements. Ordinary reviews discard capture stamps.',
+    dependentRequired: { captureVersion: ['patchDigest'], patchDigest: ['captureVersion'] },
     anyOf: [
       object(
         {
           threads: array({ anyOf: [ref('CommentThread'), ref('DisplayCommentThread')] }),
+          captureVersion,
+          patchDigest: ref('PatchDigest'),
           baseVersion: { type: 'integer', minimum: 0 },
         },
         ['threads'],
       ),
       object(
-        { comments: array(ref('LegacyComment')), baseVersion: { type: 'integer', minimum: 0 } },
+        {
+          comments: array(ref('LegacyComment')),
+          baseVersion: { type: 'integer', minimum: 0 },
+          captureVersion,
+          patchDigest: ref('PatchDigest'),
+        },
         ['comments'],
       ),
     ],
@@ -440,9 +579,17 @@ const definitions: Record<string, Schema> = {
     ),
   },
   ApprovalRequest: {
-    ...object({ approved: boolean, summaryVersion: version }, ['approved']),
+    ...object(
+      {
+        approved: boolean,
+        summaryVersion: version,
+        captureVersion,
+        patchDigest: ref('PatchDigest'),
+      },
+      ['approved'],
+    ),
     description:
-      'POST /api/approval. Approval requires summaryVersion to match the current summary.version (omission means 0); revocation does not require a matching version.',
+      'POST /api/approval. Named review approval requires captureVersion, patchDigest and summaryVersion matching the displayed capture and proposal. Unnamed approval requires the current summaryVersion (omission means 0). Stale approval returns HTTP 409; revocation requires no matching versions.',
   },
   ApprovalResponse: ref('ReviewApproval'),
 };
@@ -456,11 +603,13 @@ const roots = {
   comments: 'CommentsRequest',
   import: 'CommentImportRequest',
   approval: 'ApprovalRequest',
+  capture: 'ReviewCapture',
+  'capture-update': 'ReviewCaptureUpdate',
 };
 
 export function createSchemaCommand(): Command {
   return new Command('schema')
-    .description('Print JSON Schema for stdout events and comment request/response JSON')
+    .description('Print JSON Schema for events, captures and review/comment API JSON')
     .addArgument(
       new Argument('[name]', 'schema root; all request/response definitions remain in $defs')
         .choices(Object.keys(roots))
@@ -470,12 +619,15 @@ export function createSchemaCommand(): Command {
       'after',
       `
 The default/events root validates one JSONL record. Request roots validate JSON
-input; snapshot validates the response. All roots include every $defs definition.
+input; snapshot validates the response and capture validates a saved artifact.
+All roots include every $defs definition.
 
 Examples:
   difit schema > difit.schema.json
   difit schema summary > summary-request.schema.json
   difit schema snapshot > snapshot-response.schema.json
+  difit schema capture > capture.schema.json
+  difit schema capture-update > capture-update.schema.json
 `,
     )
     .action((name: keyof typeof roots) => {
@@ -483,7 +635,7 @@ Examples:
         JSON.stringify(
           {
             $schema: 'https://json-schema.org/draft/2020-12/schema',
-            title: 'difit events and comment API',
+            title: 'difit events, captures and review API',
             description:
               'Machine-readable event and JSON request/response contracts for expected-valid payloads. Additional properties are tolerated. The server checks existence, revision matching, version conflicts, and import dates/ranges. POST /api/comments is not a validation boundary: it may preserve invalid thread positions or normalize invalid display ranges.',
             $ref: `#/$defs/${roots[name]}`,

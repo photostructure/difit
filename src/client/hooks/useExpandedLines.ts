@@ -9,11 +9,13 @@ import {
 } from '../../types/diff';
 
 const DEFAULT_EXPAND_COUNT = 20;
+const EMPTY_EXPANDED_STATE: ExpandedLinesState = {};
 
 interface UseExpandedLinesOptions {
   baseCommitish?: string;
   targetCommitish?: string;
   diffIdentity?: string | number;
+  contextUnavailable?: boolean;
 }
 
 export interface MergedChunk extends DiffChunk {
@@ -87,9 +89,13 @@ export function useExpandedLines({
   baseCommitish,
   targetCommitish,
   diffIdentity,
+  contextUnavailable = false,
 }: UseExpandedLinesOptions): UseExpandedLinesResult {
-  const isStdinDiff = baseCommitish === 'stdin' || targetCommitish === 'stdin';
-  const [expandedState, setExpandedState] = useState<ExpandedLinesState>({});
+  const blobContentUnavailable =
+    contextUnavailable || baseCommitish === 'stdin' || targetCommitish === 'stdin';
+  const [cachedExpandedState, setExpandedState] = useState<ExpandedLinesState>({});
+  // A frozen capture must never expose mutable lines, including before passive cleanup.
+  const expandedState = contextUnavailable ? EMPTY_EXPANDED_STATE : cachedExpandedState;
   const [isLoading, setIsLoading] = useState(false);
   const [lastUpdatedFilePath, setLastUpdatedFilePath] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(0);
@@ -108,11 +114,11 @@ export function useExpandedLines({
     setIsLoading(false);
     setLastUpdatedFilePath(null);
     setLastUpdatedAt(0);
-  }, [baseCommitish, targetCommitish, diffIdentity]);
+  }, [baseCommitish, targetCommitish, diffIdentity, contextUnavailable]);
 
   const ensureFileContent = useCallback(
     async (file: DiffFile): Promise<FileExpandedState | null> => {
-      if (isStdinDiff) {
+      if (blobContentUnavailable) {
         return null;
       }
 
@@ -183,7 +189,7 @@ export function useExpandedLines({
         pendingFetchesRef.current.delete(pendingFetchKey);
       }
     },
-    [baseCommitish, targetCommitish, isStdinDiff],
+    [baseCommitish, targetCommitish, blobContentUnavailable],
   );
 
   const markFileUpdated = useCallback((filePath: string) => {
@@ -342,7 +348,7 @@ export function useExpandedLines({
   // Pre-fetch only line counts (lightweight) to show bottom expand button
   const prefetchFileContent = useCallback(
     async (file: DiffFile) => {
-      if (isStdinDiff) {
+      if (blobContentUnavailable) {
         return;
       }
 
@@ -389,7 +395,7 @@ export function useExpandedLines({
         console.error('Failed to prefetch line count:', error);
       }
     },
-    [baseCommitish, targetCommitish, isStdinDiff, markFileUpdated],
+    [baseCommitish, targetCommitish, blobContentUnavailable, markFileUpdated],
   );
 
   const getExpandedCount = useCallback(

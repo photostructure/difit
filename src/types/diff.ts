@@ -1,3 +1,5 @@
+import type { NamedReviewMetadata } from './review.js';
+
 export interface DiffFile {
   path: string;
   oldPath?: string;
@@ -44,6 +46,7 @@ export interface DiffSelection {
   baseCommitish: string;
   targetCommitish: string;
   baseMode?: BaseMode;
+  reviewName?: string;
 }
 
 export interface ReviewContext {
@@ -55,6 +58,7 @@ export interface ReviewContext {
 }
 
 export interface DiffResponse {
+  capture?: NamedReviewMetadata;
   commit: string;
   files: DiffFile[];
   ignoreWhitespace?: boolean;
@@ -132,6 +136,7 @@ export interface DiffCommentMessage {
 
 // New data structures for enhanced comment and viewed state management
 interface CommentThreadBase {
+  capture?: Pick<NamedReviewMetadata, 'version' | 'patchDigest'>;
   id: string;
   createdAt: string; // ISO 8601 format
   updatedAt: string; // ISO 8601 format
@@ -216,6 +221,7 @@ export interface DiffContextStorage {
 }
 
 interface DisplayCommentThreadBase {
+  capture?: Pick<NamedReviewMetadata, 'version' | 'patchDigest'>;
   id: string;
   createdAt: string;
   updatedAt: string;

@@ -19,6 +19,7 @@ interface DiffViewerHeaderProps {
   isCollapsed: boolean;
   isFocused?: boolean;
   isReviewed: boolean;
+  viewedStateReady?: boolean;
   isChangedSinceViewed?: boolean;
   onToggleCollapsed: (path: string) => void;
   onToggleAllCollapsed: (shouldCollapse: boolean) => void;
@@ -43,6 +44,7 @@ export const DiffViewerHeader = ({
   isCollapsed,
   isFocused = false,
   isReviewed,
+  viewedStateReady = true,
   isChangedSinceViewed = false,
   onToggleCollapsed,
   onToggleAllCollapsed,
@@ -127,12 +129,20 @@ export const DiffViewerHeader = ({
         </div>
         <button
           onClick={() => onToggleReviewed(file.path)}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
+          disabled={!viewedStateReady}
+          aria-busy={!viewedStateReady || undefined}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 disabled:cursor-wait disabled:opacity-60 ${
             isReviewed
               ? 'bg-github-accent text-white'
               : 'dark:bg-slate-600 dark:text-white dark:border-slate-500 dark:hover:bg-slate-500 dark:hover:border-slate-400 bg-github-bg-secondary text-github-text-primary border border-github-border hover:bg-github-bg-tertiary hover:border-github-text-muted'
           }`}
-          title={isReviewed ? 'Mark as not reviewed' : 'Mark as reviewed'}
+          title={
+            !viewedStateReady
+              ? 'Preparing review'
+              : isReviewed
+                ? 'Mark as not reviewed'
+                : 'Mark as reviewed'
+          }
         >
           {isReviewed ? <Check size={14} /> : <Square size={14} />}
           Viewed

@@ -1,5 +1,7 @@
-import { renderHook } from '@testing-library/react';
-import { describe, it, expect, afterEach } from 'vitest';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+
+import type { DiffResponse } from '../../types/diff';
 
 import { getFileElementId } from '../utils/domUtils';
 
@@ -30,6 +32,99 @@ function stubRect(element: HTMLElement, top: number) {
 describe('useLazyDiffRendering', () => {
   afterEach(() => {
     document.body.innerHTML = '';
+    vi.unstubAllGlobals();
+  });
+
+  function captured(name: string, version = 1): DiffResponse {
+    return {
+      commit: `Review: ${name}`,
+      requestedBaseCommitish: 'base',
+      requestedTargetCommitish: '.',
+      targetCommitish: '.',
+      capture: {
+        name,
+        version,
+        patchDigest: String(version).repeat(64),
+        baseCommit: 'base',
+        repositoryId: 'repo',
+      },
+      files: [
+        {
+          path: `${name}-${version}.ts`,
+          status: 'modified',
+          additions: 1,
+          deletions: 1,
+          chunks: [],
+          isGenerated: false,
+        },
+      ],
+    };
+  }
+
+  it('does not query the mutable worktree for captured generated-file status', () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    renderHook(() =>
+      useLazyDiffRendering({
+        diffData: captured('alpha'),
+        diffScrollContainerRef: { current: null },
+        setDiffData: vi.fn(),
+      }),
+    );
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('starts rendering the new capture files when named tasks or versions change', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }));
+    const { result, rerender } = renderHook(
+      ({ data }: { data: DiffResponse }) =>
+        useLazyDiffRendering({
+          diffData: data,
+          diffScrollContainerRef: { current: null },
+          setDiffData: vi.fn(),
+        }),
+      { initialProps: { data: captured('alpha') } },
+    );
+    expect([...result.current.renderedFilePaths]).toEqual(['alpha-1.ts']);
+    rerender({ data: captured('beta') });
+    expect([...result.current.renderedFilePaths]).toEqual(['beta-1.ts']);
+    rerender({ data: captured('beta', 2) });
+    expect([...result.current.renderedFilePaths]).toEqual(['beta-2.ts']);
+  });
+
+  it('ignores an ordinary comparison response after switching to a capture with the same Git refs', async () => {
+    let finish:
+      | ((response: { ok: boolean; json: () => Promise<{ isGenerated: boolean }> }) => void)
+      | undefined;
+    const fetch = vi.fn().mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    vi.stubGlobal('fetch', fetch);
+    const named = captured('alpha');
+    const ordinary: DiffResponse = { ...named, capture: undefined };
+    let current: DiffResponse | null = ordinary;
+    const setDiffData = vi.fn((update: React.SetStateAction<DiffResponse | null>) => {
+      current = typeof update === 'function' ? update(current) : update;
+    });
+    const { rerender } = renderHook(
+      ({ data }: { data: DiffResponse }) =>
+        useLazyDiffRendering({
+          diffData: data,
+          diffScrollContainerRef: { current: null },
+          setDiffData,
+        }),
+      { initialProps: { data: ordinary } },
+    );
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    current = named;
+    rerender({ data: named });
+    await act(async () => {
+      finish?.({ ok: true, json: async () => ({ isGenerated: true }) });
+    });
+    expect(current).toBe(named);
+    expect(current?.files[0]?.isGenerated).toBe(false);
   });
 
   describe('isFileScrolledPastContainerTop', () => {

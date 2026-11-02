@@ -48,6 +48,40 @@ describe('getPreviousCommitPreset', () => {
 });
 
 describe('DiffQuickMenu', () => {
+  it('shows and searches named captures even when no comments or proposal exist', () => {
+    const onSelectReview = vi.fn();
+    const selection = { baseCommitish: 'old-base', targetCommitish: '.', reviewName: 'task-b' };
+    render(
+      createElement(DiffQuickMenu, {
+        options,
+        selection: { baseCommitish: 'base', targetCommitish: '.', reviewName: 'task-a' },
+        recentReviews: [
+          {
+            selection,
+            title: '',
+            threadCount: 0,
+            capture: {
+              name: 'task-b',
+              version: 2,
+              patchDigest: 'b'.repeat(64),
+              baseCommit: 'old-base',
+              repositoryId: 'repo',
+            },
+          },
+        ],
+        onSelectDiff: vi.fn(),
+        onSelectReview,
+        onOpenAdvanced: vi.fn(),
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Revision menu: Review: task-a' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Filter branches and commits' }), {
+      target: { value: 'task-b' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Return to task-b · capture v2/ }));
+    expect(onSelectReview).toHaveBeenCalledExactlyOnceWith(selection);
+  });
+
   it('shows commit label when previous-pair target resolves to a listed commit', () => {
     render(
       createElement(DiffQuickMenu, {

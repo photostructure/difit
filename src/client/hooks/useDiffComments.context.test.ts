@@ -4,6 +4,35 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { useDiffComments } from './useDiffComments';
 
 describe('comment context isolation', () => {
+  it('retains thread anchors and stamps new roots as a named capture advances', () => {
+    const { result, rerender } = renderHook(
+      ({ capture }) =>
+        useDiffComments(
+          'review:task',
+          'review:task',
+          'review:task',
+          undefined,
+          'repo',
+          undefined,
+          capture,
+        ),
+      { initialProps: { capture: { version: 1, patchDigest: 'first' } } },
+    );
+    act(() =>
+      result.current.addThread({
+        filePath: 'file.ts',
+        side: 'new',
+        line: 1,
+        body: 'Original inline question',
+      }),
+    );
+    rerender({ capture: { version: 2, patchDigest: 'second' } });
+    expect(result.current.threads[0]?.capture).toEqual({ version: 1, patchDigest: 'first' });
+    act(() => result.current.addReviewThread('New general question'));
+    expect(result.current.threads[1]?.capture).toEqual({ version: 2, patchDigest: 'second' });
+    expect(result.current.threads[0]?.messages[0]?.body).toBe('Original inline question');
+  });
+
   beforeEach(() => localStorage.clear());
 
   it('never reports the previous review comments as loaded for a new selection', () => {

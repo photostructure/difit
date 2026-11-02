@@ -12,6 +12,9 @@ This fork builds on Yoshiko's diff viewer with a review workflow for coding agen
   JSON events; exact-thread replies appear in the viewer while the review continues.
 - **Comment progress:** see Delivered, Read, Thinking, Replying, Replied, or Noted
   when the agent reports its activity. This does not wake an idle agent automatically.
+- **Named task captures:** freeze selected uncommitted changes, keep discussions
+  and the proposed commit under one task name, and explicitly update the capture
+  as fixes land. Capture changes revoke LGTM.
 - **Reversible LGTM:** approval stays visible and can be revoked. Conversations
   and the approval toggle are enabled by default; approval starts off.
 - **Intent and retained discussions:** choose Comment, Change request, or Question
@@ -131,6 +134,40 @@ difit staged   # Staging area changes
 difit working  # Unstaged changes only
 ```
 
+### Named reviews of uncommitted changes
+
+Use one review name per task. Repeat `--pathspec` for native Git filters and
+exclusions; add `--include-untracked` when needed:
+
+```sh
+difit --review parser-fix --pathspec src --pathspec ':(exclude)src/generated/**' --keep-alive
+```
+
+For a subset of changes in the same file, save a capture and use its printed
+file/hunk IDs (replace the placeholder with an ID from that exact artifact):
+
+```sh
+difit review capture --pathspec src --output /tmp/capture.json
+difit --review parser-subset --capture /tmp/capture.json --select '<hunk-id>' --keep-alive
+```
+
+Use the actual API port from `server.ready` to add another task or explicitly
+replace a capture. Read `GET /api/reviews/parser-fix` for its current version
+before updating:
+
+```sh
+difit review create docs-update --port 4966 --pathspec docs
+difit review update parser-fix --port 4966 --expected-version 1 --pathspec src --pathspec ':(exclude)src/generated/**'
+```
+
+Captures read the index and working tree without changing them. Source edits and
+browser refresh leave a named capture fixed. Updating to a changed patch retains
+the conversation and proposal, advances its version, and revokes LGTM; stale
+updates fail. Identical patches preserve the version and approval. Names and
+capture history last for the server process. Path filters can include other tasks'
+changes; inspect the patch before asking for approval. See the
+[capture and approval protocol](docs/agent-conversations.md#named-captures-for-uncommitted-work).
+
 ### GitHub PR
 
 ```bash
@@ -196,27 +233,31 @@ Stdin mode is selected with intent-first rules:
 
 ## ⚙️ CLI Options
 
-| Flag                      | Default         | Description                                                                                             |
-| ------------------------- | --------------- | ------------------------------------------------------------------------------------------------------- |
-| `<target>`                | HEAD            | Commit hash, tag, HEAD~n, branch, or special arguments                                                  |
-| `[compare-with]`          | -               | Optional second commit to compare with (shows diff between the two)                                     |
-| `--merge-base`            | false           | Resolve the base revision with `git merge-base` before diffing (Git revision mode only)                 |
-| `--pr <url>`              | -               | GitHub PR URL to review (e.g., https://github.com/owner/repo/pull/123)                                  |
-| `--comment <json>`        | -               | Inject initial comments (repeatable; accepts a JSON object or array)                                    |
-| `--commit-message <text>` | -               | Seed the proposed commit message for the initial review                                                 |
-| `--why <text>`            | -               | Seed the rationale for the initial review                                                               |
-| `--port`                  | 4966            | Preferred port; falls back to +1 if occupied                                                            |
-| `--host`                  | 127.0.0.1       | Host address to bind server to (use 0.0.0.0 for external access)                                        |
-| `--no-open`               | false           | Don't automatically open browser                                                                        |
-| `--clean`                 | false           | Clear all existing comments and viewed files on startup                                                 |
-| `--lgtm, --ship-it`       | true            | Show the LGTM toggle to grant or revoke approval while the review stays open                            |
-| `--conversation`          | true            | Enable conversation APIs (exact-thread replies, progress receipts, snapshots); required by `--jsonl`    |
-| `--include-untracked`     | false           | Automatically include untracked files in diff (only with `.` or `working`)                              |
-| `--keep-alive`            | false           | Keep server running after browser disconnects (stop manually with Ctrl+C)                               |
-| `--jsonl`                 | true            | Emit JSON Lines on foreground stdout; diagnostics go to stderr                                          |
-| `--no-jsonl`              | false           | Use human-readable foreground output                                                                    |
-| `--background`            | false           | Detach the server and output connection information; no live stdout stream                              |
-| `--context <lines>`       | git default (3) | Limit surrounding context lines per change (`0` shows changes only; not available with `--pr` or stdin) |
+| Flag                         | Default         | Description                                                                                             |
+| ---------------------------- | --------------- | ------------------------------------------------------------------------------------------------------- |
+| `<target>`                   | HEAD            | Commit hash, tag, HEAD~n, branch, or special arguments                                                  |
+| `[compare-with]`             | -               | Optional second commit to compare with (shows diff between the two)                                     |
+| `--merge-base`               | false           | Resolve the base revision with `git merge-base` before diffing (Git revision mode only)                 |
+| `--review <name>`            | -               | Capture uncommitted changes under a stable task name                                                    |
+| `--pathspec <git-pathspec>`  | -               | Filter a native named capture with repeatable Git pathspecs, including exclusions                       |
+| `--capture <file>`           | -               | Load an immutable capture artifact for a named review                                                   |
+| `--select <file-or-hunk-id>` | -               | Select exact file/hunk IDs from a capture; repeatable                                                   |
+| `--pr <url>`                 | -               | GitHub PR URL to review (e.g., https://github.com/owner/repo/pull/123)                                  |
+| `--comment <json>`           | -               | Inject initial comments (repeatable; accepts a JSON object or array)                                    |
+| `--commit-message <text>`    | -               | Seed the proposed commit message for the initial review                                                 |
+| `--why <text>`               | -               | Seed the rationale for the initial review                                                               |
+| `--port`                     | 4966            | Preferred port; falls back to +1 if occupied                                                            |
+| `--host`                     | 127.0.0.1       | Host address to bind server to (use 0.0.0.0 for external access)                                        |
+| `--no-open`                  | false           | Don't automatically open browser                                                                        |
+| `--clean`                    | false           | Clear all existing comments and viewed files on startup                                                 |
+| `--lgtm, --ship-it`          | true            | Show the LGTM toggle to grant or revoke approval while the review stays open                            |
+| `--conversation`             | true            | Enable conversation APIs (exact-thread replies, progress receipts, snapshots); required by `--jsonl`    |
+| `--include-untracked`        | false           | Include untracked files with `.`, `working`, or a native named capture                                  |
+| `--keep-alive`               | false           | Keep server running after browser disconnects (stop manually with Ctrl+C)                               |
+| `--jsonl`                    | true            | Emit JSON Lines on foreground stdout; diagnostics go to stderr                                          |
+| `--no-jsonl`                 | false           | Use human-readable foreground output                                                                    |
+| `--background`               | false           | Detach the server and output connection information; no live stdout stream                              |
+| `--context <lines>`          | git default (3) | Limit surrounding context lines per change (`0` shows changes only; not available with `--pr` or stdin) |
 
 ### Open in editor
 
@@ -328,13 +369,14 @@ difit automatically identifies and collapses certain files to keep your view cle
 ## Agent conversations
 
 Discover the JSON contract with `difit schema [events|summary|reply|status|snapshot|comments|import|approval]`.
-Without a selector, the Draft 2020-12 bundle describes launch events; `$defs` also
+Use `difit schema capture` for saved artifacts and `difit schema capture-update`
+for guarded updates. Without a selector, the Draft 2020-12 bundle describes launch events; `$defs` also
 includes agent requests and responses. Use `difit comment <command> --help` for
 usage. The commit message is `commitMessage` and its TLDR is `rationale` in the
 summary payload; comments and replies also use JSON.
 
 Seed editable review intent with
-`difit . --commit-message 'fix: preserve review intent' --why 'Explain why the change is needed.'`.
+`difit --review parser-fix --commit-message 'fix: preserve review intent' --why 'Explain why the change is needed.'`.
 Each diff selection keeps its own proposed message and rationale for the server's
 lifetime. Saving a change revokes that selection's LGTM approval. Agents can update
 the same fields with `difit comment summary --port <port> < /tmp/difit-summary.json`;

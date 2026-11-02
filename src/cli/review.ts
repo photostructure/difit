@@ -1,0 +1,314 @@
+import { readFile, writeFile } from 'node:fs/promises';
+
+import { Command, InvalidArgumentError } from 'commander';
+
+import {
+  capturePatch,
+  captureWorkingTree,
+  getCaptureRepository,
+  selectCapture,
+  validateCapture,
+} from '../server/review-capture.js';
+import type { NamedReviewStart, ReviewCapture, ReviewCaptureUpdate } from '../types/review.js';
+import { validateReviewName } from '../utils/review-name.js';
+
+import { detectStdinSource, readStdin } from './utils.js';
+
+interface NamedReviewOptions {
+  name: string;
+  patch?: string;
+  captureFile?: string;
+  pathspecs?: string[];
+  selectedIds?: string[];
+  includeUntracked?: boolean;
+  cwd?: string;
+}
+
+interface CaptureOptions {
+  pathspec?: string[];
+  includeUntracked?: boolean;
+  output?: string;
+}
+
+interface SourceOptions extends CaptureOptions {
+  capture?: string;
+  select?: string[];
+  port: number;
+}
+
+interface UpdateOptions extends SourceOptions {
+  expectedVersion: number;
+}
+
+export { validateReviewName };
+
+function validateCaptureSource(options: {
+  suppliedPatch: boolean;
+  captureFile?: string;
+  pathspecs?: string[];
+  includeUntracked?: boolean;
+}): void {
+  if (options.suppliedPatch && options.captureFile !== undefined) {
+    throw new Error('Choose one patch source: stdin or --capture');
+  }
+  if (
+    (options.suppliedPatch || options.captureFile !== undefined) &&
+    (options.pathspecs?.length || options.includeUntracked)
+  ) {
+    throw new Error(
+      '--pathspec and --include-untracked only apply to a native working-tree capture',
+    );
+  }
+}
+
+async function readCapture(file: string): Promise<ReviewCapture> {
+  const text = await readFile(file, 'utf8');
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new Error(`Invalid capture JSON in ${file}`);
+  }
+  return validateCapture(value);
+}
+
+export async function resolveNamedReview(options: NamedReviewOptions): Promise<NamedReviewStart> {
+  const name = validateReviewName(options.name);
+  validateCaptureSource({
+    suppliedPatch: options.patch !== undefined,
+    captureFile: options.captureFile,
+    pathspecs: options.pathspecs,
+    includeUntracked: options.includeUntracked,
+  });
+
+  let capture: ReviewCapture;
+  if (options.captureFile !== undefined) {
+    capture = await readCapture(options.captureFile);
+  } else if (options.patch !== undefined) {
+    const repository = await getCaptureRepository(options.cwd);
+    capture = capturePatch(options.patch, repository);
+  } else {
+    capture = await captureWorkingTree({
+      cwd: options.cwd,
+      pathspecs: options.pathspecs,
+      includeUntracked: options.includeUntracked,
+    });
+  }
+
+  return {
+    name,
+    capture: options.selectedIds?.length ? selectCapture(capture, options.selectedIds) : capture,
+  };
+}
+
+function integerInRange(value: string, min: number, max: number): number {
+  const number = Number(value);
+  if (
+    value.length === 0 ||
+    /\D/.test(value) ||
+    !Number.isSafeInteger(number) ||
+    number < min ||
+    number > max
+  ) {
+    throw new InvalidArgumentError(`Expected an integer from ${min} to ${max}`);
+  }
+  return number;
+}
+
+function collect(value: string, previous: string[]): string[] {
+  return [...previous, value];
+}
+
+function addCaptureOptions(command: Command): Command {
+  return command
+    .option(
+      '--pathspec <git-pathspec>',
+      'capture files matching a native Git pathspec; repeatable',
+      collect,
+      [],
+    )
+    .option('--include-untracked', 'include untracked files without changing the Git index');
+}
+
+function addSourceOptions(command: Command): Command {
+  return addCaptureOptions(command)
+    .argument('[patch-source]', 'use - to read a unified diff from stdin')
+    .option('--capture <file>', 'load a saved capture artifact')
+    .option(
+      '--select <file-or-hunk-id>',
+      'select IDs from the capture catalogue; repeatable',
+      collect,
+      [],
+    )
+    .requiredOption('--port <port>', 'port of the running difit server', (value: string) =>
+      integerInRange(value, 1, 65535),
+    );
+}
+
+async function resolveCommandReview(
+  name: string,
+  patchSource: string | undefined,
+  options: SourceOptions,
+): Promise<NamedReviewStart> {
+  validateReviewName(name);
+  if (patchSource !== undefined && patchSource !== '-') {
+    throw new Error('Patch source must be - for stdin; use --capture <file> for a saved capture');
+  }
+  validateCaptureSource({
+    suppliedPatch: patchSource !== undefined,
+    captureFile: options.capture,
+    pathspecs: options.pathspec,
+    includeUntracked: options.includeUntracked,
+  });
+  if (patchSource === '-' && detectStdinSource() === 'tty') {
+    throw new Error('Provide a unified diff via stdin for patch source -');
+  }
+  const patch = patchSource === '-' ? await readStdin({ strictUtf8: true }) : undefined;
+  if (patch !== undefined && !patch.trim()) {
+    throw new Error('No diff content received from stdin');
+  }
+  return resolveNamedReview({
+    name,
+    patch,
+    captureFile: options.capture,
+    pathspecs: options.pathspec,
+    selectedIds: options.select,
+    includeUntracked: options.includeUntracked,
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function serializeReviewRequest(body: NamedReviewStart | ReviewCaptureUpdate): string {
+  const serialized = JSON.stringify(body);
+  if (Buffer.byteLength(serialized, 'utf8') > 16 * 1024 * 1024) {
+    throw new Error(
+      'Named review request exceeds the 16 MiB serialized JSON limit. Narrow the selected patch, or launch a new local review with --review and --capture.',
+    );
+  }
+  return serialized;
+}
+
+async function readResponse(response: Response, name: string): Promise<unknown> {
+  if (response.ok) {
+    const body: unknown = await response.json();
+    return body;
+  }
+  const body: unknown = await response.json().catch(() => null);
+  const message = isRecord(body) && typeof body.error === 'string' ? body.error : undefined;
+  if (response.status === 409) {
+    const current = isRecord(body) && isRecord(body.current) ? body.current : undefined;
+    const identity =
+      current && typeof current.version === 'number' && typeof current.patchDigest === 'string'
+        ? `; current version ${current.version}, digest ${current.patchDigest}`
+        : '';
+    throw new Error(
+      `${message ?? `Named review ${name} already exists or changed`}${identity}. Read /api/reviews/${encodeURIComponent(name)} before retrying`,
+    );
+  }
+  throw new Error(message ?? `Named review request failed (${response.status})`);
+}
+
+function reportError(error: unknown, port?: number): void {
+  const message =
+    port !== undefined && error instanceof TypeError && error.message.includes('fetch failed')
+      ? `Cannot connect to difit server on port ${port}. Is the server running?`
+      : error instanceof Error
+        ? error.message
+        : 'Named review request failed';
+  console.error(`Error: ${message}`);
+  // Preserve buffered JSON output and let the process exit naturally.
+  process.exitCode = 1;
+}
+
+export function createReviewCommand(): Command {
+  const review = new Command('review').description(
+    'Capture uncommitted changes and manage named reviews',
+  );
+
+  addCaptureOptions(review.command('capture').description('Capture uncommitted changes read-only'))
+    .option('--output <file>', 'write the full capture artifact here and print its catalogue')
+    .action(async (options: CaptureOptions) => {
+      try {
+        const capture = await captureWorkingTree({
+          pathspecs: options.pathspec,
+          includeUntracked: options.includeUntracked,
+        });
+        if (options.output !== undefined) {
+          await writeFile(options.output, `${JSON.stringify(capture, null, 2)}\n`, 'utf8');
+          const { schemaVersion, repositoryId, repositoryRoot, baseCommit, patchDigest, files } =
+            capture;
+          console.log(
+            JSON.stringify({
+              schemaVersion,
+              repositoryId,
+              repositoryRoot,
+              baseCommit,
+              patchDigest,
+              files,
+            }),
+          );
+        } else {
+          console.log(JSON.stringify(capture));
+        }
+      } catch (error) {
+        reportError(error);
+      }
+    });
+
+  addSourceOptions(
+    review
+      .command('create')
+      .description('Create a named review on a running server')
+      .argument('<name>'),
+  ).action(async (name: string, patchSource: string | undefined, options: SourceOptions) => {
+    try {
+      const namedReview = await resolveCommandReview(name, patchSource, options);
+      const response = await fetch(`http://localhost:${options.port}/api/reviews`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: serializeReviewRequest(namedReview),
+        signal: AbortSignal.timeout(30000),
+      });
+      console.log(JSON.stringify(await readResponse(response, namedReview.name)));
+    } catch (error) {
+      reportError(error, options.port);
+    }
+  });
+
+  addSourceOptions(
+    review
+      .command('update')
+      .description('Replace a named review capture at an expected version')
+      .argument('<name>'),
+  )
+    .requiredOption(
+      '--expected-version <integer>',
+      'current capture version, required to reject stale updates',
+      (value: string) => integerInRange(value, 1, Number.MAX_SAFE_INTEGER),
+    )
+    .action(async (name: string, patchSource: string | undefined, options: UpdateOptions) => {
+      try {
+        const namedReview = await resolveCommandReview(name, patchSource, options);
+        const response = await fetch(
+          `http://localhost:${options.port}/api/reviews/${encodeURIComponent(namedReview.name)}/capture`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: serializeReviewRequest({
+              expectedVersion: options.expectedVersion,
+              capture: namedReview.capture,
+            } satisfies ReviewCaptureUpdate),
+            signal: AbortSignal.timeout(30000),
+          },
+        );
+        console.log(JSON.stringify(await readResponse(response, namedReview.name)));
+      } catch (error) {
+        reportError(error, options.port);
+      }
+    });
+
+  return review;
+}

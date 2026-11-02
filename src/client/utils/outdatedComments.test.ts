@@ -55,6 +55,27 @@ const oldLine = (lineNumber: number, content: string): DiffLine => ({
 });
 
 describe('isThreadOutdated', () => {
+  it('marks a prior capture anchor outdated even if its code still matches', () => {
+    const thread = buildThread({ capture: { version: 1, patchDigest: 'first' } });
+    const index = buildFileLineIndex(buildFile([newLine(10, 'const value = 1;')]));
+    expect(isThreadOutdated(thread, index, { version: 1, patchDigest: 'first' })).toBe(false);
+    expect(isThreadOutdated(thread, index, { version: 2, patchDigest: 'second' })).toBe(true);
+    expect(thread.capture).toEqual({ version: 1, patchDigest: 'first' });
+  });
+
+  it('keeps a general discussion current across captures', () => {
+    const inline = buildThread();
+    const thread: DiffCommentThread = {
+      id: inline.id,
+      scope: 'review',
+      createdAt: inline.createdAt,
+      updatedAt: inline.updatedAt,
+      messages: inline.messages,
+      capture: { version: 1, patchDigest: 'first' },
+    };
+    expect(isThreadOutdated(thread, undefined, { version: 2, patchDigest: 'second' })).toBe(false);
+  });
+
   it('returns false when the current line content matches the snapshot', () => {
     const thread = buildThread({
       codeSnapshot: { content: 'const value = 1;' },

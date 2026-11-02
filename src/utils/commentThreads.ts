@@ -2,6 +2,7 @@ import type { CommentThread, DiffCommentThread } from '../types/diff.js';
 
 export function toCommentThread(thread: DiffCommentThread): CommentThread {
   const common = {
+    capture: thread.capture,
     id: thread.id,
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,

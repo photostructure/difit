@@ -1158,6 +1158,7 @@ describe('App Component - Merge-base selection', () => {
         undefined,
         undefined,
         undefined,
+        undefined,
       );
     });
 
@@ -1169,6 +1170,7 @@ describe('App Component - Merge-base selection', () => {
       response.files,
       undefined,
       [],
+      undefined,
       undefined,
     );
   });

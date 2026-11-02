@@ -143,6 +143,15 @@ const getInitialFileTreeOpen = () => getStoredSidebarOpen() ?? true;
 const readEditorSessionToken = (): string | null =>
   new URLSearchParams(window.location.hash.slice(1)).get(EDITOR_SESSION_FRAGMENT_KEY);
 
+// The legacy punctuation escape conflates dots with literal _2e_. Preserve safe caches.
+function getNamedReviewStorageRef(name: string): string {
+  if (!name.includes('.') && !name.includes('_2e_')) return `review:${name}`;
+  const encoded = Array.from(name, (character) =>
+    character.charCodeAt(0).toString(16).padStart(2, '0'),
+  ).join('');
+  return `named-review:${encoded}`;
+}
+
 function App() {
   const [editorSessionToken, setEditorSessionToken] = useState(readEditorSessionToken);
   useEffect(() => {
@@ -158,6 +167,7 @@ function App() {
   const [diffMode, setDiffMode] = useState<DiffViewMode>(getInitialDiffViewMode);
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [captureReloading, setCaptureReloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isCopiedAll, setIsCopiedAll] = useState(false);
   const [isShipping, setIsShipping] = useState(false);
@@ -178,12 +188,15 @@ function App() {
   const [revisionOptions, setRevisionOptions] = useState<RevisionsResponse | null>(null);
   const [recentReviews, setRecentReviews] = useState<RecentReview[]>([]);
   const recentReviewsRequestRef = useRef(0);
+  const loadRecentReviewsRef = useRef<(() => Promise<void>) | null>(null);
   const [selectedRevision, setSelectedRevision] = useState<ReviewSelection>(
     () => readReviewLocation() ?? createDiffSelection('', ''),
   );
   const [resolvedBaseRevision, setResolvedBaseRevision] = useState<string>('');
   const [resolvedTargetRevision, setResolvedTargetRevision] = useState<string>('');
-  const hasRequestedSelectionRef = useRef(Boolean(selectedRevision.targetCommitish));
+  const hasRequestedSelectionRef = useRef(
+    Boolean(selectedRevision.reviewName !== undefined || selectedRevision.targetCommitish),
+  );
   const currentRequestedBaseModeRef = useRef(selectedRevision.baseMode);
   currentRequestedBaseModeRef.current = diffData?.requestedBaseMode ?? selectedRevision.baseMode;
   const selectedRevisionRef = useRef(selectedRevision);
@@ -200,6 +213,7 @@ function App() {
       diffData.baseCommitish,
       diffData.targetCommitish,
       diffData.requestedBaseMode,
+      diffData.capture?.name,
     );
   }, [diffData]);
   const resolvedSelectionKey = useMemo(() => {
@@ -209,6 +223,15 @@ function App() {
 
     return getDiffSelectionKey(resolvedSelection);
   }, [resolvedSelection]);
+
+  const storageSelection = useMemo(() => {
+    if (!resolvedSelection?.reviewName) return resolvedSelection;
+    const ref = getNamedReviewStorageRef(resolvedSelection.reviewName);
+    return createDiffSelection(ref, ref);
+  }, [resolvedSelection]);
+  const storageCommit = resolvedSelection?.reviewName
+    ? storageSelection?.baseCommitish
+    : diffData?.commit;
 
   const { settings, updateSettings } = useAppearanceSettings();
   const { isMobile, isDesktop } = useViewport();
@@ -229,12 +252,13 @@ function App() {
     generateThreadPrompt,
     generateAllCommentsPrompt,
   } = useDiffComments(
-    resolvedSelection?.baseCommitish,
-    resolvedSelection?.targetCommitish,
-    diffData?.commit, // Using commit as currentCommitHash
+    storageSelection?.baseCommitish,
+    storageSelection?.targetCommitish,
+    storageCommit, // Stable for a named review across capture updates
     undefined, // branchToHash map - could be populated from server data
     diffData?.repositoryId, // Repository identifier for storage isolation
-    resolvedSelection?.baseMode,
+    storageSelection?.baseMode,
+    diffData?.capture,
   );
 
   const showMobileCommentsBar = isMobile && threads.length > 0;
@@ -246,14 +270,17 @@ function App() {
     return JSON.stringify([
       diffData?.repositoryId ?? 'default',
       resolvedSelectionKey,
-      diffData?.commit,
+      storageCommit,
     ]);
-  }, [diffData?.repositoryId, diffData?.commit, resolvedSelectionKey]);
+  }, [diffData?.repositoryId, storageCommit, resolvedSelectionKey]);
   const commentSessionQueryString = useMemo(() => {
     if (!resolvedSelection) {
       return null;
     }
 
+    if (resolvedSelection.reviewName) {
+      return new URLSearchParams({ review: resolvedSelection.reviewName }).toString();
+    }
     const params = new URLSearchParams({
       base: resolvedSelection.baseCommitish,
       target: resolvedSelection.targetCommitish,
@@ -281,19 +308,31 @@ function App() {
   const refreshSummary = summary.refresh;
   const approval = useReviewApproval(
     diffData?.shipIt && commentSessionQueryString ? getCommentApiUrl('/api/approval') : null,
+    diffData?.capture,
+    summary.version,
   );
   const refreshApproval = approval.refresh;
   const bootstrappingCommentsGenerationRef = useRef<number | null>(null);
   const skipNextCommentSyncRef = useRef(false);
   // Last server comment version seen; echoed back as baseVersion so the server can detect concurrent writes.
   const serverCommentVersionRef = useRef<number | null>(null);
+  const commentsCaptureKey = diffData?.capture
+    ? `${diffData.capture.version}:${diffData.capture.patchDigest}`
+    : null;
   const activeCommentsContextRef = useRef({
     key: commentsContextKey,
+    captureKey: commentsCaptureKey,
     generation: 0,
   });
-  if (activeCommentsContextRef.current.key !== commentsContextKey) {
+  // Storage stays stable across captures; retire old HTTP callbacks so late responses
+  // cannot replace threads loaded for the new capture.
+  if (
+    activeCommentsContextRef.current.key !== commentsContextKey ||
+    activeCommentsContextRef.current.captureKey !== commentsCaptureKey
+  ) {
     activeCommentsContextRef.current = {
       key: commentsContextKey,
+      captureKey: commentsCaptureKey,
       generation: activeCommentsContextRef.current.generation + 1,
     };
     serverCommentVersionRef.current = null;
@@ -312,22 +351,29 @@ function App() {
     }
   }, [bootstrappedCommentsKey, commentsContextKey]);
 
-  const fetchServerThreads = useCallback(async (): Promise<DiffCommentThread[] | null> => {
-    const response = await fetch(getCommentApiUrl('/api/comments-json'));
-    if (!response.ok) {
-      throw new Error(`Failed to fetch comments: ${response.status} ${response.statusText}`);
-    }
+  const fetchServerThreads = useCallback(
+    async (isCurrentRefresh?: () => boolean): Promise<DiffCommentThread[] | null> => {
+      const response = await fetch(getCommentApiUrl('/api/comments-json'));
+      if (!response.ok) {
+        throw new Error(`Failed to fetch comments: ${response.status} ${response.statusText}`);
+      }
 
-    const payload = (await response.json()) as {
-      version?: number;
-      threads?: DiffCommentThread[];
-    };
-    if (activeCommentsContextRef.current.generation !== commentsGeneration) return null;
-    if (typeof payload.version === 'number') {
-      serverCommentVersionRef.current = payload.version;
-    }
-    return Array.isArray(payload.threads) ? payload.threads : [];
-  }, [getCommentApiUrl, commentsGeneration]);
+      const payload = (await response.json()) as {
+        version?: number;
+        threads?: DiffCommentThread[];
+      };
+      if (
+        activeCommentsContextRef.current.generation !== commentsGeneration ||
+        (isCurrentRefresh && !isCurrentRefresh())
+      )
+        return null;
+      if (typeof payload.version === 'number') {
+        serverCommentVersionRef.current = payload.version;
+      }
+      return Array.isArray(payload.threads) ? payload.threads : [];
+    },
+    [getCommentApiUrl, commentsGeneration],
+  );
 
   const syncThreadsToServer = useCallback(
     async (nextThreads: DiffCommentThread[]) => {
@@ -337,6 +383,12 @@ function App() {
         body: JSON.stringify({
           threads: nextThreads,
           baseVersion: serverCommentVersionRef.current ?? undefined,
+          ...(diffData?.capture
+            ? {
+                captureVersion: diffData.capture.version,
+                patchDigest: diffData.capture.patchDigest,
+              }
+            : {}),
         }),
       });
       if (!response.ok) {
@@ -358,13 +410,14 @@ function App() {
         replaceThreads(result.threads);
       }
     },
-    [getCommentApiUrl, replaceThreads, commentsGeneration],
+    [getCommentApiUrl, replaceThreads, commentsGeneration, diffData?.capture],
   );
 
   const handleShipIt = async () => {
     if (
       !approval.ready ||
       isShipping ||
+      captureReloading ||
       (!approval.approved &&
         (!hasBootstrappedComments || !summary.ready || summary.dirty || summary.saving))
     ) {
@@ -395,20 +448,23 @@ function App() {
     setFilesViewed,
     clearViewedFiles,
   } = useViewedFiles(
-    resolvedSelection?.baseCommitish,
-    resolvedSelection?.targetCommitish,
-    diffData?.commit,
+    storageSelection?.baseCommitish,
+    storageSelection?.targetCommitish,
+    storageCommit,
     undefined,
     diffData?.files,
     diffData?.repositoryId, // Repository identifier for storage isolation
     settings.autoViewedPatterns,
-    resolvedSelection?.baseMode,
+    storageSelection?.baseMode,
+    commentsCaptureKey ?? undefined,
   );
+
+  const viewedStateReady = !diffData?.capture || hasLoadedInitialViewedFiles;
 
   // Reset initialization flag when diff context changes
   useEffect(() => {
     collapsedInitializedRef.current = false;
-  }, [diffData?.repositoryId, resolvedSelectionKey, diffData?.commit]);
+  }, [diffData?.repositoryId, resolvedSelectionKey, diffData?.commit, commentsCaptureKey]);
 
   // Initialize collapsed files from viewed files (only once per diff)
   useEffect(() => {
@@ -417,6 +473,12 @@ function App() {
       collapsedInitializedRef.current = true;
     }
   }, [viewedFiles, hasLoadedInitialViewedFiles]);
+  const isScrollContextCurrent = useCallback(
+    () =>
+      (commentsCaptureKey === null && activeCommentsContextRef.current.captureKey === null) ||
+      activeCommentsContextRef.current.generation === commentsGeneration,
+    [commentsCaptureKey, commentsGeneration],
+  );
   const {
     renderedFilePaths,
     ensureFileRendered,
@@ -428,12 +490,12 @@ function App() {
     diffData,
     diffScrollContainerRef,
     setDiffData,
+    isScrollContextCurrent,
   });
 
   const toggleFileReviewed = useCallback(
     async (filePath: string) => {
-      if (!diffData) return;
-
+      if (!diffData || !viewedStateReady) return;
       const file = diffData.files.find((f) => f.path === filePath);
       if (!file) return;
 
@@ -444,6 +506,11 @@ function App() {
       // is already visible, stay stationary and let files below fill up (#402).
       const shouldScrollToHeader = !wasViewed && isFileScrolledPastContainerTop(filePath);
       await toggleFileViewed(filePath, file);
+      if (
+        (diffData.capture || activeCommentsContextRef.current.captureKey !== null) &&
+        activeCommentsContextRef.current.generation !== commentsGeneration
+      )
+        return;
 
       // Update collapsed state based on viewed state
       setCollapsedFiles((prev) => {
@@ -460,13 +527,17 @@ function App() {
 
       if (shouldScrollToHeader) {
         setTimeout(() => {
+          if (!isScrollContextCurrent()) return;
           scrollFileIntoDiffContainer(filePath);
         }, 100);
       }
     },
     [
       diffData,
+      viewedStateReady,
+      commentsGeneration,
       isFileScrolledPastContainerTop,
+      isScrollContextCurrent,
       scrollFileIntoDiffContainer,
       toggleFileViewed,
       viewedFiles,
@@ -475,12 +546,16 @@ function App() {
 
   const toggleFolderReviewed = useCallback(
     async (folderPath: string, reviewed: boolean) => {
-      if (!diffData) return;
-
+      if (!diffData || !viewedStateReady) return;
       const folderFiles = diffData.files.filter((file) => file.path.startsWith(`${folderPath}/`));
       if (folderFiles.length === 0) return;
 
       await setFilesViewed(folderFiles, reviewed);
+      if (
+        (diffData.capture || activeCommentsContextRef.current.captureKey !== null) &&
+        activeCommentsContextRef.current.generation !== commentsGeneration
+      )
+        return;
 
       // Keep the collapse state of every file in the folder in sync with its viewed state
       setCollapsedFiles((prev) => {
@@ -495,7 +570,7 @@ function App() {
         return newSet;
       });
     },
-    [diffData, setFilesViewed],
+    [diffData, setFilesViewed, viewedStateReady, commentsGeneration],
   );
 
   const toggleFileCollapsed = useCallback((filePath: string) => {
@@ -551,6 +626,7 @@ function App() {
     baseCommitish: diffData?.baseCommitish,
     targetCommitish: diffData?.targetCommitish,
     diffIdentity: diffDataVersion,
+    contextUnavailable: Boolean(diffData?.capture),
   });
 
   const getMergedChunksRef = useRef(getMergedChunks);
@@ -605,9 +681,9 @@ function App() {
         ...toCommentThread(thread),
         isOutdated:
           thread.scope !== 'review' &&
-          isThreadOutdated(thread, fileLineIndexByPath.get(thread.filePath)),
+          isThreadOutdated(thread, fileLineIndexByPath.get(thread.filePath), diffData?.capture),
       })),
-    [threads, fileLineIndexByPath],
+    [threads, fileLineIndexByPath, diffData?.capture],
   );
   const showAuthorBadges = useMemo(
     () => hasMultipleCommentAuthors(normalizedThreads.flatMap((thread) => thread.messages)),
@@ -639,9 +715,13 @@ function App() {
     await refreshApproval();
     await refreshSummary();
   }, [refreshApproval, refreshSummary]);
+  const commentsRefreshRequestRef = useRef(0);
   const handleCommentsChanged = useCallback(async () => {
+    const request = ++commentsRefreshRequestRef.current;
     try {
-      const serverThreads = await fetchServerThreads();
+      const serverThreads = await fetchServerThreads(
+        () => commentsRefreshRequestRef.current === request,
+      );
       if (serverThreads === null) return;
       skipNextCommentSyncRef.current = true;
       replaceThreads(serverThreads);
@@ -654,12 +734,30 @@ function App() {
     }
   }, [commentsContextKey, commentsGeneration, fetchServerThreads, replaceThreads]);
 
+  const captureReloadRequestRef = useRef(0);
+  const handleCaptureChanged = useCallback(async (reviewName?: string) => {
+    const recent = loadRecentReviewsRef.current?.();
+    const currentName = selectedRevisionRef.current.reviewName;
+    if (!currentName || (reviewName && reviewName !== currentName)) {
+      await recent;
+      return;
+    }
+    const request = ++captureReloadRequestRef.current;
+    setCaptureReloading(true);
+    try {
+      await Promise.all([fetchDiffDataRef.current?.(), recent]);
+    } finally {
+      if (request === captureReloadRequestRef.current) setCaptureReloading(false);
+    }
+  }, []);
+
   // File watch for reload functionality - initialize with callback
   const { shouldReload, reload, watchState } = useFileWatch(
     handleWatchReload,
     handleCommentsChanged,
     refreshApproval,
     refreshSummary,
+    handleCaptureChanged,
   );
 
   // Track which file the mouse is over so `v` works without a cursor
@@ -672,6 +770,7 @@ function App() {
       comments: normalizedThreads.filter((thread) => thread.scope !== 'review'),
       viewMode: diffMode,
       reviewedFiles: viewedFiles,
+      viewedStateReady,
       onToggleReviewed: toggleFileReviewed,
       getHoveredFileIndex,
       onCreateComment: () => {
@@ -787,12 +886,17 @@ function App() {
         const params = new URLSearchParams({
           ignoreWhitespace: String(ignoreWhitespace),
         });
-        if (requestedSelection?.baseCommitish) params.set('base', requestedSelection.baseCommitish);
-        if (requestedSelection?.targetCommitish)
-          params.set('target', requestedSelection.targetCommitish);
-        if (requestedSelection?.baseMode === 'merge-base')
-          params.set('baseMode', requestedSelection.baseMode);
-        if (requestedSelection?.retained) params.set('retainedReview', '1');
+        if (requestedSelection?.reviewName !== undefined) {
+          params.set('review', requestedSelection.reviewName);
+        } else {
+          if (requestedSelection?.baseCommitish)
+            params.set('base', requestedSelection.baseCommitish);
+          if (requestedSelection?.targetCommitish)
+            params.set('target', requestedSelection.targetCommitish);
+          if (requestedSelection?.baseMode === 'merge-base')
+            params.set('baseMode', requestedSelection.baseMode);
+          if (requestedSelection?.retained) params.set('retainedReview', '1');
+        }
 
         const response = await fetch(`/api/diff?${params}`, {
           signal: controller.signal,
@@ -809,7 +913,12 @@ function App() {
         if (requestedBase && requestedTarget && !preserveLocation) {
           writeReviewLocation(
             {
-              ...createDiffSelection(requestedBase, requestedTarget, data.requestedBaseMode),
+              ...createDiffSelection(
+                requestedBase,
+                requestedTarget,
+                data.requestedBaseMode,
+                data.capture?.name,
+              ),
               ...(requestedSelection?.retained ? { retained: true as const } : {}),
             },
             'replace',
@@ -817,6 +926,7 @@ function App() {
               data.baseCommitish ?? requestedBase,
               data.targetCommitish ?? requestedTarget,
               data.requestedBaseMode,
+              data.capture?.name,
             ),
           );
         }
@@ -833,11 +943,24 @@ function App() {
               requestedBase,
               requestedTarget,
               data.requestedBaseMode,
+              data.capture?.name,
             );
             hasRequestedSelectionRef.current = true;
             selectedRevisionRef.current = launchSelection;
             setSelectedRevision(launchSelection);
           }
+        }
+
+        if (data.capture && requestedBase && requestedTarget) {
+          const namedSelection = createDiffSelection(
+            requestedBase,
+            requestedTarget,
+            data.requestedBaseMode,
+            data.capture.name,
+          );
+          hasRequestedSelectionRef.current = true;
+          selectedRevisionRef.current = namedSelection;
+          setSelectedRevision(namedSelection);
         }
 
         // Lock files are now automatically marked as viewed by useViewedFiles hook
@@ -988,11 +1111,15 @@ function App() {
         snapshot.reviews
           .filter(
             (review) =>
+              Boolean(review.capture) ||
               review.threads.length > 0 ||
               Boolean(review.summary.commitMessage.trim() || review.summary.rationale.trim()),
           )
           .map((review) => ({
-            selection: review.selection,
+            selection: review.capture
+              ? { ...review.selection, reviewName: review.capture.name }
+              : review.selection,
+            capture: review.capture,
             title:
               (review.summary.commitMessage.trim() || review.summary.rationale.trim()).split(
                 '\n',
@@ -1005,6 +1132,8 @@ function App() {
       console.error('Could not load recent reviews:', historyError);
     }
   }, []);
+
+  loadRecentReviewsRef.current = loadRecentReviews;
 
   const handleRevisionChange = useCallback(
     async (nextSelection: ReviewSelection, addHistory = true) => {
@@ -1152,6 +1281,9 @@ function App() {
     const data = JSON.stringify({
       threads,
       baseVersion: serverCommentVersionRef.current ?? undefined,
+      ...(diffData?.capture
+        ? { captureVersion: diffData.capture.version, patchDigest: diffData.capture.patchDigest }
+        : {}),
     });
     const commentsApiUrl = getCommentApiUrl('/api/comments');
 
@@ -1177,7 +1309,7 @@ function App() {
     return () => {
       window.removeEventListener('beforeunload', sendCommentsBeforeUnload);
     };
-  }, [getCommentApiUrl, hasBootstrappedComments, syncThreadsToServer, threads]);
+  }, [getCommentApiUrl, hasBootstrappedComments, syncThreadsToServer, threads, diffData?.capture]);
 
   // Establish SSE connection for tab close detection
   useEffect(() => {
@@ -1441,13 +1573,22 @@ function App() {
                   </button>
                 </div>
               )}
-              <Checkbox
-                checked={ignoreWhitespace}
-                onChange={setIgnoreWhitespace}
-                label="Ignore Whitespace"
-                className="text-sm!"
-                title={ignoreWhitespace ? 'Show whitespace changes' : 'Ignore whitespace changes'}
-              />
+              {diffData.capture ? (
+                <span
+                  className="text-sm text-github-text-primary"
+                  title="Captured patches include whitespace changes"
+                >
+                  Whitespace included
+                </span>
+              ) : (
+                <Checkbox
+                  checked={ignoreWhitespace}
+                  onChange={setIgnoreWhitespace}
+                  label="Ignore Whitespace"
+                  className="text-sm!"
+                  title={ignoreWhitespace ? 'Show whitespace changes' : 'Ignore whitespace changes'}
+                />
+              )}
               {/* File Watch Reload Button */}
               <ReloadButton
                 shouldReload={shouldReload}
@@ -1458,10 +1599,27 @@ function App() {
               />
             </div>
             <div
-              className={`flex flex-wrap items-center text-sm text-github-text-secondary ${
+              className={`flex min-w-0 max-w-full flex-wrap items-center text-sm text-github-text-secondary ${
                 isMobile ? 'gap-3' : 'gap-4'
               }`}
             >
+              {diffData.capture && (
+                <div
+                  role="status"
+                  aria-label="Named review capture"
+                  className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-1 text-xs text-github-text-secondary"
+                  title={`Capture digest ${diffData.capture.patchDigest}; base ${diffData.capture.baseCommit}. Fixed patch; extra context and previews are unavailable.`}
+                >
+                  <span className="break-all font-mono text-github-text-primary">
+                    {diffData.capture.name}
+                  </span>
+                  <span>capture v{diffData.capture.version}</span>
+                  <span className="break-all font-mono">
+                    {diffData.capture.patchDigest.slice(0, 12)}
+                  </span>
+                  {captureReloading && <span>Updating capture…</span>}
+                </div>
+              )}
               <button
                 type="button"
                 onClick={() => setIsCommentsListOpen(true)}
@@ -1549,6 +1707,7 @@ function App() {
                     onClick={() => void handleShipIt()}
                     disabled={
                       isShipping ||
+                      captureReloading ||
                       !approval.ready ||
                       (!approval.approved &&
                         (!hasBootstrappedComments ||
@@ -1637,6 +1796,7 @@ function App() {
                   onFileSelected={isMobile ? handleMobileFileSelected : undefined}
                   comments={normalizedThreads}
                   reviewedFiles={viewedFiles}
+                  viewedStateReady={viewedStateReady}
                   onToggleReviewed={toggleFileReviewed}
                   onToggleFolderReviewed={toggleFolderReviewed}
                   selectedFileIndex={cursor?.fileIndex ?? null}
@@ -1712,6 +1872,7 @@ function App() {
                       showAuthorBadges={showAuthorBadges}
                       diffMode={diffMode}
                       reviewedFiles={viewedFiles}
+                      viewedStateReady={viewedStateReady}
                       isChangedSinceViewed={changedSinceViewedFiles.has(file.path)}
                       onToggleReviewed={handleViewedButtonToggle}
                       collapsedFiles={collapsedFiles}
@@ -1728,6 +1889,7 @@ function App() {
                       syntaxTheme={settings.syntaxTheme}
                       baseCommitish={diffData.baseCommitish}
                       targetCommitish={diffData.targetCommitish}
+                      contextUnavailable={Boolean(diffData.capture)}
                       cursor={cursor?.fileIndex === fileIndex ? cursor : null}
                       isFocused={cursor?.fileIndex === fileIndex}
                       fileIndex={fileIndex}

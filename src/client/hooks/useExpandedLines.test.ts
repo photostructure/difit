@@ -36,6 +36,49 @@ function createMockDiffFile(): DiffFile {
 }
 
 describe('useExpandedLines', () => {
+  it('never exposes previously expanded mutable lines on a frozen capture render', async () => {
+    const file = createMockDiffFile();
+    const observed: string[][] = [];
+    const { result, rerender } = renderHook(
+      ({ frozen }) => {
+        const api = useExpandedLines({
+          baseCommitish: 'base-a',
+          targetCommitish: 'target',
+          diffIdentity: frozen ? 'capture' : 'ordinary',
+          contextUnavailable: frozen,
+        });
+        if (frozen)
+          observed.push(
+            api.getMergedChunks(file).flatMap((chunk) => chunk.lines.map((line) => line.content)),
+          );
+        return api;
+      },
+      { initialProps: { frozen: false } },
+    );
+    await act(async () => result.current.expandLines(file, 0, 'up', 1));
+    expect(
+      result.current
+        .getMergedChunks(file)
+        .flatMap((chunk) => chunk.lines.map((line) => line.content)),
+    ).toContain('base a line 1');
+    rerender({ frozen: true });
+    expect(observed.flat()).not.toContain('base a line 1');
+    expect(observed.flat()).not.toContain('target line 1');
+  });
+
+  it('never fetches mutable blob content for a fixed named capture', async () => {
+    const file = createMockDiffFile();
+    const { result } = renderHook(() =>
+      useExpandedLines({ baseCommitish: 'base-a', targetCommitish: '.', contextUnavailable: true }),
+    );
+    await act(async () => {
+      await result.current.prefetchFileContent(file);
+      await result.current.expandLines(file, 0, 'up', 1);
+      await result.current.expandAllBetweenChunks(file, 0, 1);
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
 

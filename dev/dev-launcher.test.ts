@@ -166,7 +166,7 @@ writeFileSync('cli.pid', String(process.pid));
 const ready = {
   type: 'server.ready',
   url: 'http://localhost:4966',
-  launchUrl: 'http://localhost:4966?mode=fixture#difit-editor-token=fixture-capability',
+  launchUrl: 'http://localhost:4966?review=agent-task#difit-editor-token=fixture-capability',
   port: 4966,
 };
 const announceReady = () => {
@@ -250,7 +250,7 @@ if (${JSON.stringify(mode)} === 'burst') {
 // The fixture uses POSIX shebang executables and catchable SIGTERM/SIGINT signals.
 describe.skipIf(process.platform === 'win32')('development launcher subprocess output', () => {
   it.each([true, false])(
-    'forwards query and capability without putting either in the proxy target (JSONL: %s)',
+    'opens the named review and capability without putting either in the proxy target (JSONL: %s)',
     async (jsonl) => {
       const fixture = await startFixture('exit', jsonl);
       try {
@@ -263,7 +263,7 @@ describe.skipIf(process.platform === 'win32')('development launcher subprocess o
         };
         expect(viteEnv).toEqual({
           apiUrl: 'http://localhost:4966',
-          openPath: '/?mode=fixture#difit-editor-token=fixture-capability',
+          openPath: '/?review=agent-task#difit-editor-token=fixture-capability',
         });
       } finally {
         await fixture.cleanup();

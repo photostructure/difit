@@ -19,6 +19,7 @@ import { createId } from '../../utils/createId';
 import { mergeCommentImports } from '../../utils/commentImports';
 import { storageService } from '../services/StorageService';
 import { normalizeBaseMode } from '../../utils/diffSelection';
+import type { NamedReviewMetadata } from '../../types/review';
 import { getLanguageFromPath } from '../utils/diffUtils';
 
 interface AddThreadParams {
@@ -107,6 +108,7 @@ export function useDiffComments(
   branchToHash?: Map<string, string>,
   repositoryId?: string,
   baseMode?: BaseMode,
+  capture?: Pick<NamedReviewMetadata, 'version' | 'patchDigest'>,
 ): UseDiffCommentsReturn {
   const [threads, setThreads] = useState<DiffCommentThread[]>([]);
   const contextKey = JSON.stringify([
@@ -240,6 +242,9 @@ export function useDiffComments(
       const now = new Date().toISOString();
       const threadId = createId();
       const newThread: DiffCommentThread = {
+        ...(capture
+          ? { capture: { version: capture.version, patchDigest: capture.patchDigest } }
+          : {}),
         id: threadId,
         filePath: params.filePath,
         createdAt: now,
@@ -271,7 +276,7 @@ export function useDiffComments(
       saveThreads(newThreads);
       return newThread;
     },
-    [saveThreads, threads],
+    [saveThreads, threads, capture],
   );
 
   const addReviewThread = useCallback(
@@ -282,6 +287,9 @@ export function useDiffComments(
         ...threads,
         {
           id,
+          ...(capture
+            ? { capture: { version: capture.version, patchDigest: capture.patchDigest } }
+            : {}),
           scope: 'review',
           isQuestion:
             (options?.intent === undefined ? options?.isQuestion : options.intent === 'question') ||
@@ -301,7 +309,7 @@ export function useDiffComments(
         },
       ]);
     },
-    [saveThreads, threads],
+    [saveThreads, threads, capture],
   );
 
   const toggleThreadResolved = useCallback(

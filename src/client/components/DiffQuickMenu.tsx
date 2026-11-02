@@ -15,6 +15,7 @@ import {
 import { ChevronDown, ChevronLeft, GitBranch, Search } from 'lucide-react';
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 
+import type { NamedReviewMetadata } from '../../types/review';
 import { type CommitInfo, type DiffSelection, type RevisionsResponse } from '../../types/diff';
 import {
   createDiffSelection,
@@ -27,6 +28,7 @@ export interface RecentReview {
   selection: DiffSelection;
   title: string;
   threadCount: number;
+  capture?: NamedReviewMetadata;
 }
 const EMPTY_RECENT_REVIEWS: RecentReview[] = [];
 
@@ -58,7 +60,7 @@ export const getPreviousCommitPreset = (targetRevision: string): DiffSelection =
 };
 
 const isPreviousPair = (selection: DiffSelection) => {
-  if (normalizeBaseMode(selection.baseMode) === 'merge-base') {
+  if (selection.reviewName || normalizeBaseMode(selection.baseMode) === 'merge-base') {
     return false;
   }
 
@@ -188,6 +190,7 @@ export function DiffQuickMenu({
   }, [isOpen]);
 
   const currentLabel = useMemo(() => {
+    if (selection.reviewName) return `Review: ${selection.reviewName}`;
     const currentSelectionIsPreviousPair = isPreviousPair(selection);
     const commitMatch = options.commits.find((commit) => {
       if (!currentSelectionIsPreviousPair) return false;
@@ -305,7 +308,13 @@ export function DiffQuickMenu({
   const filteredReviews = recentReviews.filter(
     (review) =>
       !isFiltering ||
-      matchesQuery(review.title, review.selection.baseCommitish, review.selection.targetCommitish),
+      matchesQuery(
+        review.title,
+        review.selection.reviewName ?? '',
+        review.capture?.patchDigest ?? '',
+        review.selection.baseCommitish,
+        review.selection.targetCommitish,
+      ),
   );
   const filteredCommits = isFiltering
     ? options.commits.filter((commit) =>
@@ -433,7 +442,9 @@ export function DiffQuickMenu({
                   Recent reviews
                 </div>
                 {filteredReviews.map((review) => {
-                  const label = `${review.selection.baseCommitish}...${SPECIAL_LABEL_OVERRIDES[review.selection.targetCommitish] ?? review.selection.targetCommitish}${review.selection.baseMode === 'merge-base' ? ' (merge-base)' : ''}`;
+                  const label = review.selection.reviewName
+                    ? `${review.selection.reviewName}${review.capture ? ` · capture v${review.capture.version} · ${review.capture.patchDigest.slice(0, 12)}` : ''}`
+                    : `${review.selection.baseCommitish}...${SPECIAL_LABEL_OVERRIDES[review.selection.targetCommitish] ?? review.selection.targetCommitish}${review.selection.baseMode === 'merge-base' ? ' (merge-base)' : ''}`;
                   return (
                     <button
                       key={getDiffSelectionKey(review.selection)}

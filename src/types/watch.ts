@@ -48,13 +48,20 @@ interface ReviewSummaryChangedWatchEvent {
   timestamp: string;
 }
 
+interface ReviewCaptureChangedWatchEvent {
+  type: 'reviewCaptureChanged';
+  reviewName?: string;
+  timestamp: string;
+}
+
 export type WatchEvent =
   | ConnectedWatchEvent
   | ReloadWatchEvent
   | ErrorWatchEvent
   | CommentsChangedWatchEvent
   | ApprovalChangedWatchEvent
-  | ReviewSummaryChangedWatchEvent;
+  | ReviewSummaryChangedWatchEvent
+  | ReviewCaptureChangedWatchEvent;
 
 export interface ClientWatchState {
   isWatchEnabled: boolean;

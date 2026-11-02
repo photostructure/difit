@@ -31,6 +31,7 @@ interface FileListProps {
   onFileSelected?: () => void;
   comments: CommentThread[];
   reviewedFiles: Set<string>;
+  viewedStateReady?: boolean;
   onToggleReviewed: (path: string) => void;
   onToggleFolderReviewed: (path: string, reviewed: boolean) => void;
   selectedFileIndex: number | null;
@@ -166,6 +167,7 @@ export const FileList = memo(function FileList({
   onFileSelected,
   comments,
   reviewedFiles,
+  viewedStateReady = true,
   onToggleReviewed,
   onToggleFolderReviewed,
   selectedFileIndex,
@@ -334,6 +336,20 @@ export const FileList = memo(function FileList({
     toggleDirectory(path);
   };
 
+  const renderViewedControl = (checked: boolean, onChange: () => void, title: string) =>
+    viewedStateReady ? (
+      <Checkbox checked={checked} onChange={onChange} title={title} className="z-10" />
+    ) : (
+      <button
+        type="button"
+        disabled
+        aria-busy="true"
+        aria-label="Preparing review"
+        title="Preparing review"
+        className="z-10 h-4 w-4 shrink-0 cursor-wait rounded border border-github-text-muted bg-github-bg-tertiary opacity-60"
+      />
+    );
+
   const renderTreeNode = (node: TreeNode, depth: number = 0): React.ReactNode => {
     if (node.isDirectory && node.children) {
       const isExpanded = expandedDirs.has(node.path);
@@ -378,16 +394,11 @@ export const FileList = memo(function FileList({
                 )}
               </span>
               <span className="hidden items-center pl-[2px] group-hover:flex">
-                <Checkbox
-                  checked={isReviewed}
-                  onChange={() => {
-                    onToggleFolderReviewed(node.path, !isReviewed);
-                  }}
-                  title={
-                    isReviewed ? 'Mark all files as not reviewed' : 'Mark all files as reviewed'
-                  }
-                  className="z-10"
-                />
+                {renderViewedControl(
+                  isReviewed,
+                  () => onToggleFolderReviewed(node.path, !isReviewed),
+                  isReviewed ? 'Mark all files as not reviewed' : 'Mark all files as reviewed',
+                )}
               </span>
               <span
                 className={`text-sm text-github-text-primary font-medium flex-1 overflow-hidden text-ellipsis whitespace-nowrap ${
@@ -425,14 +436,11 @@ export const FileList = memo(function FileList({
             onFileSelected?.();
           }}
         >
-          <Checkbox
-            checked={isReviewed}
-            onChange={() => {
-              onToggleReviewed(file.path);
-            }}
-            title={isReviewed ? 'Mark as not reviewed' : 'Mark as reviewed'}
-            className="z-10"
-          />
+          {renderViewedControl(
+            isReviewed,
+            () => onToggleReviewed(file.path),
+            isReviewed ? 'Mark as not reviewed' : 'Mark as reviewed',
+          )}
           {getFileIcon(node.file.status)}
           <span
             className={`text-sm text-github-text-primary flex-1 overflow-hidden text-ellipsis whitespace-nowrap ${

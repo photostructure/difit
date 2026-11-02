@@ -5,6 +5,12 @@ export type ReviewSelection = DiffSelection & { retained?: true };
 
 export function readReviewLocation(): ReviewSelection | null {
   const params = new URLSearchParams(window.location.search);
+  const reviewName = params.get('review');
+  if (reviewName !== null) {
+    // Keep explicit names, including malformed ones, for the server to validate.
+    // Falling back would show an unrelated review instead of an error.
+    return { baseCommitish: '', targetCommitish: '', reviewName };
+  }
   const base = params.get('base');
   const target = params.get('target');
   const mode = params.get('baseMode');
@@ -48,6 +54,9 @@ export function readReviewHistoryLocation(): ReviewSelection | null {
             'baseMode' in selection && selection.baseMode === 'merge-base'
               ? 'merge-base'
               : undefined,
+            'reviewName' in selection && typeof selection.reviewName === 'string'
+              ? selection.reviewName
+              : undefined,
           ),
           retained: true,
         };
@@ -63,12 +72,20 @@ export function writeReviewLocation(
   resolvedSelection?: ReviewSelection,
 ): void {
   const url = new URL(window.location.href);
-  url.searchParams.set('base', selection.baseCommitish);
-  url.searchParams.set('target', selection.targetCommitish);
-  if (selection.baseMode === 'merge-base') url.searchParams.set('baseMode', 'merge-base');
-  else url.searchParams.delete('baseMode');
-  if (selection.retained) url.searchParams.set('retainedReview', '1');
-  else url.searchParams.delete('retainedReview');
+  if (selection.reviewName !== undefined) {
+    url.searchParams.set('review', selection.reviewName);
+    for (const parameter of ['base', 'target', 'baseMode', 'retainedReview']) {
+      url.searchParams.delete(parameter);
+    }
+  } else {
+    url.searchParams.delete('review');
+    url.searchParams.set('base', selection.baseCommitish);
+    url.searchParams.set('target', selection.targetCommitish);
+    if (selection.baseMode === 'merge-base') url.searchParams.set('baseMode', 'merge-base');
+    else url.searchParams.delete('baseMode');
+    if (selection.retained) url.searchParams.set('retainedReview', '1');
+    else url.searchParams.delete('retainedReview');
+  }
   // Preserve unrelated URL parameters, fragments and history state.
   if (mode === 'replace' && url.href === window.location.href && !resolvedSelection) return;
   const previous: unknown = window.history.state;

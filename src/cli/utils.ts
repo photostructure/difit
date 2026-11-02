@@ -247,10 +247,17 @@ export async function promptUser(message: string): Promise<boolean> {
   return trimmed === '' || ['y', 'yes'].includes(trimmed);
 }
 
-export async function readStdin(): Promise<string> {
+export async function readStdin(options?: { strictUtf8?: boolean }): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) {
     chunks.push(chunk as Buffer);
   }
-  return Buffer.concat(chunks).toString('utf8');
+  const input = Buffer.concat(chunks);
+  if (!options?.strictUtf8) return input.toString('utf8');
+  try {
+    // Keep every valid byte, including a leading BOM; never approve substituted text.
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(input);
+  } catch {
+    throw new Error('Input from stdin must contain valid UTF-8');
+  }
 }

@@ -334,10 +334,12 @@ function cloneThread(thread: DiffCommentThread): DiffCommentThread {
   if (thread.scope === 'review')
     return {
       ...thread,
+      capture: thread.capture ? { ...thread.capture } : undefined,
       messages: thread.messages.map(cloneMessage),
       resolution: thread.resolution ? { ...thread.resolution } : undefined,
     };
   return {
+    capture: thread.capture ? { ...thread.capture } : undefined,
     resolution: thread.resolution ? { ...thread.resolution } : undefined,
     id: thread.id,
     filePath: thread.filePath,

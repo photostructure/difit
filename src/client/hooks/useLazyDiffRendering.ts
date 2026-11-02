@@ -12,6 +12,7 @@ interface UseLazyDiffRenderingOptions {
   diffData: DiffResponse | null;
   diffScrollContainerRef: React.RefObject<HTMLElement | null>;
   setDiffData: React.Dispatch<React.SetStateAction<DiffResponse | null>>;
+  isScrollContextCurrent?: () => boolean;
 }
 
 interface UseLazyDiffRenderingReturn {
@@ -27,6 +28,7 @@ export function useLazyDiffRendering({
   diffData,
   diffScrollContainerRef,
   setDiffData,
+  isScrollContextCurrent,
 }: UseLazyDiffRenderingOptions): UseLazyDiffRenderingReturn {
   const [renderedFilePaths, setRenderedFilePaths] = useState<Set<string>>(new Set());
   const renderedFilePathsRef = useRef<Set<string>>(new Set());
@@ -46,7 +48,14 @@ export function useLazyDiffRendering({
       return;
     }
 
-    const revisionKey = `${diffData.requestedBaseCommitish ?? ''}:${diffData.requestedTargetCommitish ?? ''}:${diffData.requestedBaseMode ?? 'direct'}`;
+    const revisionKey = JSON.stringify([
+      diffData.requestedBaseCommitish,
+      diffData.requestedTargetCommitish,
+      diffData.requestedBaseMode ?? 'direct',
+      diffData.capture?.name,
+      diffData.capture?.version,
+      diffData.capture?.patchDigest,
+    ]);
     if (renderedRevisionKeyRef.current === revisionKey) {
       return;
     }
@@ -233,7 +242,7 @@ export function useLazyDiffRendering({
       let attempts = 0;
       const attemptScroll = () => {
         requestAnimationFrame(() => {
-          if (scrollRequestIdRef.current !== requestId) {
+          if (scrollRequestIdRef.current !== requestId || isScrollContextCurrent?.() === false) {
             return;
           }
 
@@ -254,7 +263,7 @@ export function useLazyDiffRendering({
           }
 
           window.setTimeout(() => {
-            if (scrollRequestIdRef.current !== requestId) {
+            if (scrollRequestIdRef.current !== requestId || isScrollContextCurrent?.() === false) {
               return;
             }
             scrollToFile();
@@ -263,11 +272,11 @@ export function useLazyDiffRendering({
       };
       attemptScroll();
     },
-    [diffData, diffScrollContainerRef, ensureFilesRenderedUpTo],
+    [diffData, diffScrollContainerRef, ensureFilesRenderedUpTo, isScrollContextCurrent],
   );
 
   useEffect(() => {
-    if (!diffData || diffData.targetCommitish === 'stdin') return;
+    if (!diffData || diffData.capture || diffData.targetCommitish === 'stdin') return;
 
     const ref = diffData.targetCommitish || 'HEAD';
     const generatedStatusRevisionKey = `${diffData.requestedBaseCommitish ?? ''}...${diffData.requestedTargetCommitish ?? ''}:${diffData.requestedBaseMode ?? 'direct'}`;
@@ -294,7 +303,7 @@ export function useLazyDiffRendering({
           if (!payload || payload.isGenerated !== true) return;
 
           setDiffData((prev) => {
-            if (!prev) return prev;
+            if (!prev || prev.capture) return prev;
             if (
               prev.requestedBaseCommitish !== diffData.requestedBaseCommitish ||
               prev.requestedTargetCommitish !== diffData.requestedTargetCommitish ||

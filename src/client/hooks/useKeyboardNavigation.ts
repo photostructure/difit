@@ -28,6 +28,7 @@ export function useKeyboardNavigation({
   comments,
   viewMode = DEFAULT_DIFF_VIEW_MODE,
   reviewedFiles,
+  viewedStateReady = true,
   onToggleReviewed,
   onCreateComment,
   onCopyAllComments,
@@ -473,6 +474,7 @@ export function useKeyboardNavigation({
   useHotkeys(
     'v',
     () => {
+      if (!viewedStateReady) return;
       const fileIndex = cursor?.fileIndex ?? getHoveredFileIndex?.() ?? null;
       if (fileIndex !== null) {
         const file = files[fileIndex];
@@ -482,13 +484,14 @@ export function useKeyboardNavigation({
       }
     },
     hotkeyOptions,
-    [cursor, files, onToggleReviewed, getHoveredFileIndex],
+    [cursor, files, onToggleReviewed, getHoveredFileIndex, viewedStateReady],
   );
 
   // Mark current file as viewed (collapse) and move to the next unviewed file
   useHotkeys(
     'shift+v',
     () => {
+      if (!viewedStateReady) return;
       const fileIndex =
         cursor?.fileIndex ?? getHoveredFileIndex?.() ?? lastCursorRef.current?.fileIndex ?? null;
       if (fileIndex === null) return;
@@ -501,7 +504,15 @@ export function useKeyboardNavigation({
       focusNextUnviewedFile(fileIndex);
     },
     hotkeyOptions,
-    [cursor, files, reviewedFiles, onToggleReviewed, getHoveredFileIndex, focusNextUnviewedFile],
+    [
+      cursor,
+      files,
+      reviewedFiles,
+      onToggleReviewed,
+      getHoveredFileIndex,
+      focusNextUnviewedFile,
+      viewedStateReady,
+    ],
   );
 
   // Refresh

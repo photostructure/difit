@@ -62,3 +62,98 @@ describe('review approval', () => {
     expect(result.current.approved).toBe(false);
   });
 });
+
+describe('named capture approval', () => {
+  const first = { version: 1, patchDigest: 'first-digest' };
+  const second = { version: 2, patchDigest: 'second-digest' };
+  const namedResponse = (capture = first, summaryVersion = 3) =>
+    new Response(
+      JSON.stringify({
+        approved: true,
+        captureVersion: capture.version,
+        patchDigest: capture.patchDigest,
+        summaryVersion,
+      }),
+    );
+
+  it('sends the displayed capture and summary identities for approval and revocation', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => namedResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useReviewApproval('/api/approval?review=task', first, 3));
+    await waitFor(() => expect(result.current.approved).toBe(true));
+    await act(async () => result.current.setApproved(false, 3));
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/approval?review=task',
+      expect.objectContaining({
+        body: JSON.stringify({
+          approved: false,
+          summaryVersion: 3,
+          captureVersion: 1,
+          patchDigest: 'first-digest',
+        }),
+      }),
+    );
+    await act(async () => result.current.setApproved(true, 3));
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/approval?review=task',
+      expect.objectContaining({
+        body: JSON.stringify({
+          approved: true,
+          summaryVersion: 3,
+          captureVersion: 1,
+          patchDigest: 'first-digest',
+        }),
+      }),
+    );
+  });
+
+  it('clears approval immediately when the same named URL displays another capture', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => namedResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    const { result, rerender } = renderHook(
+      ({ capture }) => useReviewApproval('/api/approval?review=task', capture, 3),
+      { initialProps: { capture: first } },
+    );
+    await waitFor(() => expect(result.current.approved).toBe(true));
+    const staleApprove = result.current.setApproved;
+    rerender({ capture: second });
+    expect(result.current.approved).toBe(false);
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    expect(result.current.approved).toBe(false);
+    await expect(staleApprove(true, 3)).rejects.toThrow('Approval is unavailable for this capture');
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  });
+
+  it('does not restore an earlier capture after its in-flight request finishes', async () => {
+    let finish: ((response: Response) => void) | undefined;
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementationOnce(
+        async () =>
+          new Promise<Response>((resolve) => {
+            finish = resolve;
+          }),
+      )
+      .mockImplementation(async () => new Response(JSON.stringify({ approved: false })));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result, rerender } = renderHook(
+      ({ capture }) => useReviewApproval('/api/approval?review=task', capture, 3),
+      { initialProps: { capture: first } },
+    );
+    rerender({ capture: second });
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    await act(async () => finish?.(namedResponse()));
+    expect(result.current.approved).toBe(false);
+    expect(result.current.ready).toBe(true);
+  });
+
+  it('requires the approval to match the displayed proposal version', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>().mockImplementation(async () => namedResponse(first, 2)),
+    );
+    const { result } = renderHook(() => useReviewApproval('/api/approval?review=task', first, 3));
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    expect(result.current.approved).toBe(false);
+  });
+});

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
 import {
   type BaseMode,
@@ -37,6 +37,7 @@ export function useViewedFiles(
   repositoryId?: string,
   autoViewedPatterns: string[] = [],
   baseMode?: BaseMode,
+  captureIdentity?: string,
 ): UseViewedFilesReturn {
   const [viewedFileRecords, setViewedFileRecords] = useState<ViewedFileRecord[]>([]);
   const [loadedViewedFilesKey, setLoadedViewedFilesKey] = useState<string | null>(null);
@@ -50,8 +51,32 @@ export function useViewedFiles(
           baseMode,
         })}:${currentCommitHash ?? 'no-commit'}`
       : null;
+  const viewedFilesGeneration =
+    captureIdentity === undefined
+      ? viewedFilesKey
+      : JSON.stringify([viewedFilesKey, captureIdentity]);
+  const namedEpochRef = useRef({
+    identity: viewedFilesGeneration,
+    epoch: 0,
+    named: captureIdentity !== undefined,
+  });
+  if (
+    namedEpochRef.current.identity !== viewedFilesGeneration ||
+    namedEpochRef.current.named !== (captureIdentity !== undefined)
+  ) {
+    namedEpochRef.current = {
+      identity: viewedFilesGeneration,
+      epoch: namedEpochRef.current.epoch + 1,
+      named: captureIdentity !== undefined,
+    };
+  }
+  const namedEpoch = captureIdentity === undefined ? 0 : namedEpochRef.current.epoch;
+  const loadGeneration =
+    captureIdentity === undefined
+      ? viewedFilesKey
+      : JSON.stringify([viewedFilesGeneration, namedEpoch]);
   const hasLoadedInitialViewedFiles =
-    viewedFilesKey !== null && loadedViewedFilesKey === viewedFilesKey;
+    viewedFilesKey !== null && loadedViewedFilesKey === loadGeneration;
 
   // Load viewed files from storage and auto-mark configured/generated files
   useEffect(() => {
@@ -59,7 +84,7 @@ export function useViewedFiles(
 
     let cancelled = false;
 
-    const loadedFiles = storageService.getViewedFiles(
+    let loadedFiles = storageService.getViewedFiles(
       baseCommitish,
       targetCommitish,
       currentCommitHash,
@@ -73,10 +98,7 @@ export function useViewedFiles(
     // so editing the textarea does not immediately re-mark the current diff.
     const processAutoCollapsedFiles = async () => {
       const additions: ViewedFileRecord[] = [];
-
       if (initialFiles && initialFiles.length > 0) {
-        const knownPaths = new Set(loadedFiles.map((f) => f.filePath));
-
         // Hash every displayed file once so we can both auto-mark and
         // hydrate-from-index without recomputing.
         const hashByPath = new Map<string, string>();
@@ -90,6 +112,23 @@ export function useViewedFiles(
             }
           }),
         );
+
+        if (
+          (captureIdentity !== undefined || namedEpochRef.current.named) &&
+          (cancelled || namedEpochRef.current.epoch !== namedEpoch)
+        )
+          return;
+
+        // Named captures reuse their storage key, so revalidate displayed content.
+        if (captureIdentity !== undefined) {
+          const displayedPaths = new Set(initialFiles.map((file) => file.path));
+          loadedFiles = loadedFiles.filter(
+            (record) =>
+              !displayedPaths.has(record.filePath) ||
+              record.diffContentHash === hashByPath.get(record.filePath),
+          );
+        }
+        const knownPaths = new Set(loadedFiles.map((file) => file.filePath));
 
         // Auto-mark generated / deleted / pattern-matched files.
         for (const file of initialFiles) {
@@ -155,7 +194,7 @@ export function useViewedFiles(
         if (!cancelled) setChangedSinceViewedFiles(new Set());
       }
 
-      if (additions.length > 0) {
+      if (additions.length > 0 || captureIdentity !== undefined) {
         const updatedRecords = [...loadedFiles, ...additions];
         storageService.saveViewedFiles(
           baseCommitish,
@@ -168,14 +207,14 @@ export function useViewedFiles(
         );
         if (!cancelled) {
           setViewedFileRecords(updatedRecords);
-          setLoadedViewedFilesKey(viewedFilesKey);
+          setLoadedViewedFilesKey(loadGeneration);
         }
         return;
       }
 
       if (!cancelled) {
         setViewedFileRecords(loadedFiles);
-        setLoadedViewedFilesKey(viewedFilesKey);
+        setLoadedViewedFilesKey(loadGeneration);
       }
     };
 
@@ -191,6 +230,10 @@ export function useViewedFiles(
     branchToHash,
     repositoryId,
     viewedFilesKey,
+    viewedFilesGeneration,
+    loadGeneration,
+    namedEpoch,
+    captureIdentity,
     baseMode,
   ]); // initialFiles and autoViewedPatterns intentionally omitted to run only on diff init
 
@@ -213,10 +256,18 @@ export function useViewedFiles(
     [baseCommitish, targetCommitish, currentCommitHash, branchToHash, repositoryId, baseMode],
   );
 
-  // Convert records to Set of file paths for easy checking
+  const displayedPaths = useMemo(
+    () => (captureIdentity === undefined ? null : new Set(initialFiles?.map((file) => file.path))),
+    [captureIdentity, initialFiles],
+  );
+  // Retain hidden records in storage, but count only displayed paths for named captures.
   const viewedFiles = useMemo(() => {
-    return new Set(viewedFileRecords.map((record) => record.filePath));
-  }, [viewedFileRecords]);
+    return new Set(
+      viewedFileRecords
+        .filter((record) => displayedPaths === null || displayedPaths.has(record.filePath))
+        .map((record) => record.filePath),
+    );
+  }, [viewedFileRecords, displayedPaths]);
 
   // Get specific file record
   const getViewedFileRecord = useCallback(
@@ -229,6 +280,10 @@ export function useViewedFiles(
   // Generate and cache hash for a file
   const getFileHash = useCallback(
     async (diffFile: DiffFile): Promise<string> => {
+      // A named capture can replace content at the same path without changing storage keys.
+      if (captureIdentity !== undefined) {
+        return generateDiffHash(getDiffContentForHashing(diffFile));
+      }
       const cached = fileHashes.get(diffFile.path);
       if (cached) return cached;
 
@@ -238,7 +293,7 @@ export function useViewedFiles(
       setFileHashes((prev) => new Map(prev).set(diffFile.path, hash));
       return hash;
     },
-    [fileHashes],
+    [fileHashes, captureIdentity],
   );
 
   // Check if file content has changed
@@ -256,6 +311,11 @@ export function useViewedFiles(
   // Toggle viewed state for a file
   const toggleFileViewed = useCallback(
     async (filePath: string, diffFile: DiffFile): Promise<void> => {
+      if (
+        (captureIdentity !== undefined || namedEpochRef.current.named) &&
+        (!hasLoadedInitialViewedFiles || namedEpochRef.current.epoch !== namedEpoch)
+      )
+        return;
       const existingRecord = getViewedFileRecord(filePath);
 
       if (existingRecord) {
@@ -270,6 +330,11 @@ export function useViewedFiles(
       } else {
         // File is not viewed, add it
         const hash = await getFileHash(diffFile);
+        if (
+          (captureIdentity !== undefined || namedEpochRef.current.named) &&
+          namedEpoch !== namedEpochRef.current.epoch
+        )
+          return;
         const viewedAt = new Date().toISOString();
         const newRecord: ViewedFileRecord = {
           filePath,
@@ -289,12 +354,26 @@ export function useViewedFiles(
         storageService.recordViewedHashes(repositoryId, [indexEntry]);
       }
     },
-    [viewedFileRecords, getViewedFileRecord, getFileHash, saveViewedFiles, repositoryId],
+    [
+      viewedFileRecords,
+      getViewedFileRecord,
+      getFileHash,
+      saveViewedFiles,
+      repositoryId,
+      captureIdentity,
+      namedEpoch,
+      hasLoadedInitialViewedFiles,
+    ],
   );
 
   // Set viewed state for multiple files at once (e.g. marking an entire folder)
   const setFilesViewed = useCallback(
     async (diffFiles: DiffFile[], viewed: boolean): Promise<void> => {
+      if (
+        (captureIdentity !== undefined || namedEpochRef.current.named) &&
+        (!hasLoadedInitialViewedFiles || namedEpochRef.current.epoch !== namedEpoch)
+      )
+        return;
       if (viewed) {
         const filesToAdd = diffFiles.filter((file) => !getViewedFileRecord(file.path));
         if (filesToAdd.length === 0) return;
@@ -308,6 +387,11 @@ export function useViewedFiles(
           })),
         );
 
+        if (
+          (captureIdentity !== undefined || namedEpochRef.current.named) &&
+          namedEpoch !== namedEpochRef.current.epoch
+        )
+          return;
         saveViewedFiles([...viewedFileRecords, ...addedRecords]);
         storageService.recordViewedHashes(
           repositoryId,
@@ -335,7 +419,16 @@ export function useViewedFiles(
         );
       }
     },
-    [viewedFileRecords, getViewedFileRecord, getFileHash, saveViewedFiles, repositoryId],
+    [
+      viewedFileRecords,
+      getViewedFileRecord,
+      getFileHash,
+      saveViewedFiles,
+      repositoryId,
+      captureIdentity,
+      namedEpoch,
+      hasLoadedInitialViewedFiles,
+    ],
   );
 
   // Clear all viewed files

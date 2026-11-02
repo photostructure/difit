@@ -22,6 +22,7 @@ import {
 } from './utils.js';
 import { createCommentCommand } from './comment.js';
 import { createSchemaCommand } from './schema.js';
+import { createReviewCommand, resolveNamedReview } from './review.js';
 import { getPrPatch, getPrCommentImports } from './github.js';
 import {
   BACKGROUND_CHILD_ENV,
@@ -81,6 +82,10 @@ function determineDiffMode(selection: DiffSelection, compareWith?: string): Diff
 }
 
 interface CliOptions {
+  review?: string;
+  capture?: string;
+  pathspec: string[];
+  select: string[];
   port?: number;
   host?: string;
   open: boolean;
@@ -107,6 +112,7 @@ program
   .version(pkg.version, '-v, --version', 'output the version number')
   .enablePositionalOptions()
   .addCommand(createCommentCommand())
+  .addCommand(createReviewCommand())
   .argument(
     '[commit-ish]',
     'Git commit, tag, branch, HEAD~n reference, or "working"/"staged"/"."',
@@ -143,6 +149,20 @@ program
   .option('--no-jsonl', 'use human-readable output instead of JSON Lines')
   .option('--commit-message <text>', 'seed the proposed commit message for the initial review')
   .option('--why <text>', 'seed a short rationale for the initial review')
+  .option('--review <name>', 'start a named review of a frozen uncommitted patch')
+  .option('--capture <file>', 'load a saved capture for --review')
+  .option(
+    '--pathspec <git-pathspec>',
+    'filter a named capture with a Git pathspec; repeatable',
+    (value: string, previous: string[]) => [...previous, value],
+    [],
+  )
+  .option(
+    '--select <file-or-hunk-id>',
+    'select IDs from a named capture; repeatable',
+    (value: string, previous: string[]) => [...previous, value],
+    [],
+  )
   .option('--include-untracked', 'automatically include untracked files in diff')
   .option('--keep-alive', 'keep server running even after browser disconnects')
   .option('--background', 'keep the server running in the background and output JSON info')
@@ -166,11 +186,37 @@ Editor configuration (set before starting difit):
     try {
       const isBackgroundChild = process.env[BACKGROUND_CHILD_ENV] === '1';
       const backgroundMode = options.background || isBackgroundChild;
+      if (options.review !== undefined && !options.conversation) {
+        throw new Error('Named reviews require conversation mode; remove --no-conversation');
+      }
       if (options.jsonl && !options.conversation) {
         console.error(
           'Error: --no-conversation requires --no-jsonl; JSONL events use the conversation protocol',
         );
         process.exit(1);
+      }
+      if (
+        options.review === undefined &&
+        (options.capture !== undefined || options.pathspec.length || options.select.length)
+      ) {
+        throw new Error('--capture, --pathspec and --select require --review');
+      }
+      if (
+        options.review !== undefined &&
+        (options.pr ||
+          options.mergeBase ||
+          options.context !== undefined ||
+          compareWith ||
+          (program.args.length > 0 && commitish !== '-'))
+      ) {
+        throw new Error(
+          '--review accepts an uncommitted capture or positional -; --pr, --merge-base, --context and Git revision arguments are not supported',
+        );
+      }
+      if (options.background && options.review !== undefined && commitish === '-') {
+        throw new Error(
+          'A background review cannot read stdin; save a capture and use --capture instead',
+        );
       }
       let stdinDiff: string | undefined;
       let stdinReviewLabel = 'diff from stdin';
@@ -241,11 +287,14 @@ Editor configuration (set before starting difit):
         }
       } else {
         // Check if we should read from stdin
-        const readFromStdin = shouldReadStdin({
-          commitish,
-          hasPositionalArgs: program.args.length > 0,
-          hasPrOption: false,
-        });
+        const readFromStdin =
+          options.review !== undefined
+            ? commitish === '-'
+            : shouldReadStdin({
+                commitish,
+                hasPositionalArgs: program.args.length > 0,
+                hasPrOption: false,
+              });
 
         if (readFromStdin) {
           if (options.context !== undefined) {
@@ -257,12 +306,61 @@ Editor configuration (set before starting difit):
             process.exit(1);
           }
           // Read unified diff from stdin
-          stdinDiff = await readStdin();
+          stdinDiff =
+            options.review !== undefined
+              ? await readStdin({ strictUtf8: true })
+              : await readStdin();
           if (!stdinDiff.trim()) {
             console.error('Error: No diff content received from stdin');
             process.exit(1);
           }
         }
+      }
+
+      if (options.review !== undefined) {
+        const namedReview = await resolveNamedReview({
+          name: options.review,
+          patch: stdinDiff,
+          captureFile: options.capture,
+          pathspecs: options.pathspec,
+          selectedIds: options.select,
+          includeUntracked: options.includeUntracked,
+        });
+
+        const { launchUrl, port, isEmpty } = await startServer({
+          namedReview,
+          repoPath: namedReview.capture.repositoryRoot,
+          preferredPort: options.port,
+          host: options.host,
+          openBrowser: options.open,
+          clearComments: options.clean,
+          shipIt: options.shipIt,
+          conversation: options.conversation,
+          jsonl: options.jsonl && !backgroundMode,
+          onReady: backgroundMode
+            ? undefined
+            : ({ shutdown, port }) => registerShutdownHandlers(shutdown, port, options.jsonl),
+          commitMessage: options.commitMessage,
+          why: options.why,
+          keepAlive: options.keepAlive,
+          diffMode: DiffMode.SPECIFIC,
+          ...(commentImports.length > 0 ? { commentImports } : {}),
+        });
+
+        if (backgroundMode) {
+          emitBackgroundHandshake({ port, url: launchUrl, pid: process.pid });
+          if (isBackgroundChild) ignoreStdioErrorsForBackgroundDaemon();
+          return;
+        }
+        console.error(`\n🚀 difit server started on ${launchUrl}`);
+        console.error(`📋 Reviewing: ${namedReview.name}`);
+        if (isEmpty) {
+          console.error(
+            '\n! \x1b[33mNo differences found. Browser will not open automatically.\x1b[0m',
+          );
+          console.error(`   Server is running at ${launchUrl} if you want to check manually.\n`);
+        }
+        return;
       }
 
       if (stdinDiff) {

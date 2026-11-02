@@ -69,6 +69,8 @@ describe('schema command', () => {
     ['comments', 'CommentsRequest'],
     ['import', 'CommentImportRequest'],
     ['approval', 'ApprovalRequest'],
+    ['capture', 'ReviewCapture'],
+    ['capture-update', 'ReviewCaptureUpdate'],
   ])('selects the %s root while retaining response definitions', async (name, definition) => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     await createSchemaCommand().parseAsync(['node', 'difit', name]);
@@ -81,9 +83,173 @@ describe('schema command', () => {
       'StatusResponse',
       'SnapshotResponse',
       'ErrorResponse',
+      'NamedReviewCatalogueResponse',
+      'NamedReviewStartResponse',
+      'ReviewCaptureUpdateResponse',
+      'ReviewCaptureConflictResponse',
     ]) {
       expect(document.$defs[response]).toBeDefined();
     }
+  });
+
+  it('describes immutable capture artifacts and guarded updates', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await createSchemaCommand().parseAsync(['node', 'difit', 'capture']);
+    const { $defs } = readOutput(log);
+    expect($defs.ReviewCapture).toMatchObject({
+      required: [
+        'schemaVersion',
+        'repositoryId',
+        'repositoryRoot',
+        'baseCommit',
+        'patch',
+        'patchDigest',
+        'files',
+      ],
+      properties: {
+        schemaVersion: { const: 1 },
+        patchDigest: { $ref: '#/$defs/PatchDigest' },
+        files: { type: 'array', items: { $ref: '#/$defs/CapturedFile' } },
+      },
+    });
+    expect($defs.CapturedFile).toMatchObject({
+      required: ['id', 'path', 'hunks'],
+      properties: { hunks: { items: { $ref: '#/$defs/CapturedHunk' } } },
+    });
+    expect($defs.CapturedHunk).toMatchObject({
+      required: ['id', 'oldStart', 'oldLines', 'newStart', 'newLines'],
+      properties: {
+        oldStart: { type: 'integer', minimum: 0 },
+        newLines: { type: 'integer', minimum: 0 },
+      },
+    });
+    expect($defs.ReviewCaptureUpdate).toMatchObject({
+      required: ['expectedVersion', 'capture'],
+      properties: {
+        expectedVersion: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
+        capture: { $ref: '#/$defs/ReviewCapture' },
+      },
+    });
+    expect($defs.NamedReviewCatalogueResponse).toMatchObject({
+      required: [
+        'reviewId',
+        'name',
+        'version',
+        'patchDigest',
+        'baseCommit',
+        'repositoryId',
+        'files',
+      ],
+      properties: { files: { type: 'array', items: { $ref: '#/$defs/CapturedFile' } } },
+    });
+    expect($defs.NamedReviewStartResponse).toEqual({ $ref: '#/$defs/ReviewCaptureUpdateResponse' });
+    expect($defs.ReviewCaptureUpdateResponse).toMatchObject({
+      required: [
+        'reviewId',
+        'name',
+        'version',
+        'patchDigest',
+        'baseCommit',
+        'repositoryId',
+        'updated',
+      ],
+    });
+    expect($defs.ReviewCaptureConflictResponse).toMatchObject({
+      required: ['error', 'current'],
+      properties: { current: { $ref: '#/$defs/NamedReviewMetadata' } },
+    });
+  });
+
+  it('describes the paired displayed-capture binding for both comment request forms', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await createSchemaCommand().parseAsync(['node', 'difit', 'comments']);
+    const document = readOutput(log);
+    expect(document.$ref).toBe('#/$defs/CommentsRequest');
+    const request = document.$defs.CommentsRequest as { anyOf: unknown[] };
+    expect(request).toMatchObject({
+      type: 'object',
+      dependentRequired: { captureVersion: ['patchDigest'], patchDigest: ['captureVersion'] },
+    });
+    expect(request.anyOf).toHaveLength(2);
+    for (const form of request.anyOf) {
+      expect(form).toMatchObject({
+        properties: {
+          captureVersion: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
+          patchDigest: { $ref: '#/$defs/PatchDigest' },
+        },
+      });
+    }
+  });
+
+  it('keeps capture metadata optional on existing events and required on review.capture', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await createSchemaCommand().parseAsync(['node', 'difit']);
+    const { $defs } = readOutput(log);
+    for (const name of [
+      'ServerReadyEvent',
+      'CommentEvent',
+      'ReviewSummaryEvent',
+      'ReviewApprovalEvent',
+    ]) {
+      const definition = $defs[name] as { properties: Record<string, unknown>; required: string[] };
+      expect(definition.properties.capture).toEqual({ $ref: '#/$defs/NamedReviewMetadata' });
+      expect(definition.required).not.toContain('capture');
+    }
+    expect($defs.CommentEvent).toMatchObject({
+      properties: { anchorCapture: { $ref: '#/$defs/CaptureAnchor' } },
+    });
+    expect($defs.ReviewCaptureEvent).toMatchObject({
+      required: ['cursor', 'origin', 'reviewId', 'selection', 'timestamp', 'type', 'capture'],
+      properties: {
+        type: { const: 'review.capture' },
+        origin: { const: 'agent' },
+        capture: { $ref: '#/$defs/NamedReviewMetadata' },
+      },
+    });
+    expect($defs.ConversationEvent).toMatchObject({
+      oneOf: expect.arrayContaining([{ $ref: '#/$defs/ReviewCaptureEvent' }]),
+    });
+    expect($defs.DiffSelection).toMatchObject({
+      required: ['baseCommitish', 'targetCommitish'],
+      properties: { reviewName: { $ref: '#/$defs/ReviewName' } },
+    });
+    expect($defs.SnapshotResponse).toMatchObject({
+      properties: {
+        reviews: {
+          items: {
+            required: ['id', 'selection', 'threads', 'approval', 'summary'],
+            properties: { capture: { $ref: '#/$defs/NamedReviewMetadata' } },
+          },
+        },
+      },
+    });
+    expect($defs.CommentThread).toMatchObject({
+      oneOf: expect.arrayContaining([
+        expect.objectContaining({
+          properties: expect.objectContaining({ capture: { $ref: '#/$defs/CaptureAnchor' } }),
+        }),
+      ]),
+    });
+  });
+
+  it('documents the capture and proposal guards on approval requests and saved approval', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await createSchemaCommand().parseAsync(['node', 'difit', 'approval']);
+    const { $defs } = readOutput(log);
+    const approvalFields = {
+      captureVersion: { type: 'integer', minimum: 1 },
+      patchDigest: { $ref: '#/$defs/PatchDigest' },
+      summaryVersion: { type: 'integer', minimum: 0 },
+    };
+    expect($defs.ApprovalRequest).toMatchObject({
+      required: ['approved'],
+      properties: approvalFields,
+      description: expect.stringContaining('captureVersion, patchDigest and summaryVersion'),
+    });
+    expect($defs.ReviewApproval).toMatchObject({
+      required: ['approved'],
+      properties: approvalFields,
+    });
   });
 
   it('declares excerpt fields only on thread forms that preserve them', async () => {
@@ -132,6 +298,8 @@ describe('schema command', () => {
     expect(help).toContain('default/events root validates one JSONL record');
     expect(help).toContain('difit schema summary');
     expect(help).toContain('difit schema snapshot');
+    expect(help).toContain('difit schema capture-update');
+    expect(help).toContain('capture validates a saved artifact');
     expect(help).toContain('$defs');
   });
 });

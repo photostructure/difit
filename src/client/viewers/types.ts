@@ -25,6 +25,7 @@ export type DiffViewerBodyProps = {
   fileIndex?: number;
   mergedChunks: MergedChunk[];
   isExpandLoading: boolean;
+  canExpandHiddenLines?: boolean;
   expandHiddenLines: (
     file: DiffFile,
     chunkIndex: number,

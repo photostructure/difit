@@ -7,7 +7,7 @@ import { hostname } from 'os';
 import { join, dirname, isAbsolute, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
 
-import express, { type Express } from 'express';
+import express, { type Express, type ErrorRequestHandler } from 'express';
 import open from 'open';
 
 import type {
@@ -17,6 +17,9 @@ import type {
 } from '../types/conversation.js';
 import type { ServerEvent, ServerShutdownEvent } from '../types/events.js';
 import { writeJsonl } from './event-output.js';
+import type { NamedReviewStart } from '../types/review.js';
+import { NamedReviewError, NamedReviewStore, type NamedReviewState } from './named-reviews.js';
+import { getCaptureRepository, validateCapture } from './review-capture.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -65,6 +68,7 @@ import {
 } from '../utils/diffSelection.js';
 
 export interface ServerOptions {
+  namedReview?: NamedReviewStart;
   selection?: DiffSelection;
   stdinDiff?: string;
   preferredPort?: number;
@@ -142,7 +146,12 @@ function createResolvedCommentSelection(
     responseDiffData.targetCommitish ?? (stdinDiff ? 'stdin' : fallbackSelection.targetCommitish);
   const baseMode = responseDiffData.requestedBaseMode ?? fallbackSelection.baseMode;
 
-  return createDiffSelection(baseCommitish, targetCommitish, baseMode);
+  return createDiffSelection(
+    baseCommitish,
+    targetCommitish,
+    baseMode,
+    fallbackSelection.reviewName,
+  );
 }
 
 function createCommentSessionKey(selection: DiffSelection): string {
@@ -157,9 +166,26 @@ export async function startServer(options: ServerOptions): Promise<{
   server?: Server;
   shutdown: (reason: ServerShutdownEvent['reason']) => Promise<void>;
 }> {
+  if (options.namedReview && options.conversation === false) {
+    throw new Error('Named reviews require conversation mode');
+  }
   const app = express();
-  const repositoryPath = resolve(options.repoPath ?? process.cwd());
-  const repositoryId = createHash('sha256').update(repositoryPath).digest('hex');
+  const captureRepository = await getCaptureRepository(options.repoPath ?? process.cwd()).catch(
+    (error) => {
+      if (options.namedReview) throw error;
+      // Stdin patches also work outside Git, but a Git-backed server must bind
+      // future named captures to the canonical worktree root, not the launch folder.
+      return undefined;
+    },
+  );
+  const repositoryPath =
+    captureRepository?.repositoryRoot ?? resolve(options.repoPath ?? process.cwd());
+  const repositoryId =
+    captureRepository?.repositoryId ?? createHash('sha256').update(repositoryPath).digest('hex');
+  const namedReviews = new NamedReviewStore({ repositoryRoot: repositoryPath, repositoryId });
+  const initialNamedReview = options.namedReview
+    ? namedReviews.create(options.namedReview.name, options.namedReview.capture)
+    : undefined;
   const editorSessionToken = randomBytes(16).toString('base64url');
   const editorSessionTokenBytes = Buffer.from(editorSessionToken);
   const editorSelection = process.env.DIFIT_EDITOR ?? process.env.EDITOR;
@@ -205,7 +231,8 @@ export async function startServer(options: ServerOptions): Promise<{
     editorArgsTemplate !== '' &&
     customEditorArgsSafe;
   const initialCommentImports = options.commentImports || [];
-  const initialSelection = options.selection ?? createDiffSelection('', '');
+  const initialSelection =
+    initialNamedReview?.selection ?? options.selection ?? createDiffSelection('', '');
   const commentImportId =
     initialCommentImports.length > 0
       ? createHash('sha256').update(serializeCommentImports(initialCommentImports)).digest('hex')
@@ -227,7 +254,7 @@ export async function startServer(options: ServerOptions): Promise<{
     options.onEvent?.(event);
   };
   const conversation =
-    options.conversation || options.jsonl || options.onEvent
+    options.namedReview || options.conversation || options.jsonl || options.onEvent
       ? new Conversation((event) => {
           if (ready) emit(event);
           else pendingEvents.push(event);
@@ -258,6 +285,23 @@ export async function startServer(options: ServerOptions): Promise<{
     return undefined;
   };
 
+  // Give named capture clients a machine-readable size error.
+  const handleNamedReviewBodyLimit: ErrorRequestHandler = (error: unknown, _req, res, next) => {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'type' in error &&
+      error.type === 'entity.too.large'
+    ) {
+      res.status(413).json({
+        error:
+          'Named review request exceeds the 16 MiB serialized JSON limit. Narrow the selected patch, or launch a new local review with --review and --capture.',
+      });
+      return;
+    }
+    next(error);
+  };
+  app.use('/api/reviews', express.json({ limit: '16mb' }), handleNamedReviewBodyLimit);
   app.use(express.json());
   app.use(express.text()); // For sendBeacon text/plain requests
 
@@ -269,7 +313,7 @@ export async function startServer(options: ServerOptions): Promise<{
   });
 
   // Skip validation if using stdin diff
-  if (!options.stdinDiff) {
+  if (!options.stdinDiff && !initialNamedReview) {
     const isValidCommit = await parser.validateCommit(initialSelection.targetCommitish);
     if (!isValidCommit) {
       throw new Error(`Invalid or non-existent commit: ${initialSelection.targetCommitish}`);
@@ -278,7 +322,18 @@ export async function startServer(options: ServerOptions): Promise<{
 
   // Generate initial diff data for isEmpty check
   let initialDiffData: DiffResponse;
-  if (options.stdinDiff) {
+  function parseNamedDiff(review: NamedReviewState): DiffResponse {
+    return {
+      ...parser.parseStdinDiff(review.capture.patch),
+      commit: `Review: ${review.metadata.name}`,
+      baseCommitish: review.metadata.baseCommit,
+      targetCommitish: '.',
+      capture: review.metadata,
+    };
+  }
+  if (initialNamedReview) {
+    initialDiffData = parseNamedDiff(initialNamedReview);
+  } else if (options.stdinDiff) {
     // Parse stdin diff directly
     initialDiffData = parser.parseStdinDiff(options.stdinDiff);
   } else {
@@ -310,6 +365,8 @@ export async function startServer(options: ServerOptions): Promise<{
   );
   // Ensure agents can discover the initial review even before a comment is posted.
   conversation?.getSummary(currentCommentSelection);
+  if (initialNamedReview)
+    conversation?.setCapture(currentCommentSelection, initialNamedReview.metadata);
   // Capture the initial review before listening; requests during later startup can change selection.
   const launchReview = conversation
     ?.snapshot()
@@ -350,7 +407,19 @@ export async function startServer(options: ServerOptions): Promise<{
   }
 
   const commentSessions = new Map<string, CommentSessionState>();
-  const initialCommentThreads = mergeCommentImports([], initialCommentImports).threads;
+  const initialCommentThreads = mergeCommentImports([], initialCommentImports).threads.map(
+    (thread) => ({
+      ...thread,
+      ...(initialNamedReview
+        ? {
+            capture: {
+              version: initialNamedReview.metadata.version,
+              patchDigest: initialNamedReview.metadata.patchDigest,
+            },
+          }
+        : {}),
+    }),
+  );
   if (initialCommentThreads.length > 0) {
     commentSessions.set(createCommentSessionKey(currentCommentSelection), {
       threads: initialCommentThreads,
@@ -360,6 +429,11 @@ export async function startServer(options: ServerOptions): Promise<{
   }
 
   function getCommentSelectionFromQuery(query: Record<string, unknown>): DiffSelection {
+    if (typeof query.review === 'string') {
+      const review = namedReviews.get(query.review);
+      if (!review) throw new NamedReviewError('Named review not found', 404);
+      return review.selection;
+    }
     const hasBase = typeof query.base === 'string';
     const hasTarget = typeof query.target === 'string';
     const hasBaseMode = typeof query.baseMode === 'string';
@@ -378,6 +452,102 @@ export async function startServer(options: ServerOptions): Promise<{
           : currentCommentSelection.baseMode,
     );
   }
+
+  // Never silently fall back to another task for a misspelled review name.
+  app.use('/api', (req, res, next) => {
+    if (req.query.review !== undefined) {
+      try {
+        if (typeof req.query.review !== 'string')
+          throw new NamedReviewError('Expected one review name', 400);
+        if (!namedReviews.get(req.query.review))
+          throw new NamedReviewError('Named review not found', 404);
+      } catch (error) {
+        res
+          .status(error instanceof NamedReviewError ? error.status : 400)
+          .json({ error: error instanceof Error ? error.message : 'Invalid review name' });
+        return;
+      }
+    }
+    next();
+  });
+
+  function describeNamedReview(review: NamedReviewState) {
+    const snapshot = conversation
+      ?.snapshot()
+      .reviews.find((entry) => diffSelectionsEqual(entry.selection, review.selection));
+    return { reviewId: snapshot?.id, ...review.metadata };
+  }
+
+  function reviewError(res: express.Response, error: unknown) {
+    res.status(error instanceof NamedReviewError ? error.status : 400).json({
+      error: error instanceof Error ? error.message : 'Invalid capture',
+      ...(error instanceof NamedReviewError && error.current ? { current: error.current } : {}),
+    });
+  }
+
+  app.get('/api/reviews/:name', (req, res) => {
+    try {
+      const version = req.query.version === undefined ? undefined : Number(req.query.version);
+      const review = namedReviews.get(req.params.name, version);
+      if (!review) throw new NamedReviewError('Named review capture not found', 404);
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ ...describeNamedReview(review), files: review.capture.files });
+    } catch (error) {
+      reviewError(res, error);
+    }
+  });
+
+  app.post('/api/reviews', (req, res) => {
+    try {
+      if (!conversation) throw new NamedReviewError('Named reviews require conversation mode', 400);
+      const input = req.body as { name?: unknown; capture?: unknown } | null;
+      if (!input || typeof input.name !== 'string')
+        throw new NamedReviewError('Expected review name and capture', 400);
+      const capture = validateCapture(input.capture);
+      parser.parseStdinDiff(capture.patch);
+      const review = namedReviews.create(input.name, capture);
+      conversation.setCapture(review.selection, review.metadata);
+      res.json({ ...describeNamedReview(review), updated: true });
+      fileWatcher.broadcast({
+        type: 'reviewCaptureChanged',
+        reviewName: review.metadata.name,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      reviewError(res, error);
+    }
+  });
+
+  app.post('/api/reviews/:name/capture', (req, res) => {
+    try {
+      const input = req.body as { expectedVersion?: unknown; capture?: unknown } | null;
+      if (!input || typeof input.expectedVersion !== 'number')
+        throw new NamedReviewError('Expected expectedVersion and capture', 400);
+      const capture = validateCapture(input.capture);
+      parser.parseStdinDiff(capture.patch);
+      const { review, changed } = namedReviews.update(
+        req.params.name,
+        input.expectedVersion,
+        capture,
+      );
+      if (changed) {
+        conversation?.setCapture(review.selection, review.metadata);
+        if (currentSelection.reviewName === review.metadata.name) {
+          currentSelection = review.selection;
+          currentCommentSelection = review.selection;
+        }
+        fileWatcher.broadcast({
+          type: 'reviewCaptureChanged',
+          reviewName: review.metadata.name,
+          timestamp: new Date().toISOString(),
+        });
+        fileWatcher.broadcast({ type: 'approvalChanged', timestamp: new Date().toISOString() });
+      }
+      res.json({ ...describeNamedReview(review), updated: changed });
+    } catch (error) {
+      reviewError(res, error);
+    }
+  });
 
   function getOrCreateCommentSession(selection: DiffSelection): CommentSessionState {
     const key = createCommentSessionKey(selection);
@@ -399,21 +569,31 @@ export async function startServer(options: ServerOptions): Promise<{
     const hasBase = typeof req.query.base === 'string';
     const hasTarget = typeof req.query.target === 'string';
     const hasBaseMode = typeof req.query.baseMode === 'string';
-    const requestedSelection = createDiffSelection(
-      hasBase ? (req.query.base as string) : currentSelection.baseCommitish,
-      hasTarget ? (req.query.target as string) : currentSelection.targetCommitish,
-      hasBaseMode
-        ? parseBaseMode(req.query.baseMode)
-        : hasBase || hasTarget
-          ? undefined
-          : currentSelection.baseMode,
-    );
+    const namedReview =
+      typeof req.query.review === 'string'
+        ? namedReviews.get(req.query.review)
+        : !hasBase && !hasTarget && !hasBaseMode && currentSelection.reviewName
+          ? namedReviews.get(currentSelection.reviewName)
+          : undefined;
+    const requestedSelection =
+      namedReview?.selection ??
+      createDiffSelection(
+        hasBase ? (req.query.base as string) : currentSelection.baseCommitish,
+        hasTarget ? (req.query.target as string) : currentSelection.targetCommitish,
+        hasBaseMode
+          ? parseBaseMode(req.query.baseMode)
+          : hasBase || hasTarget
+            ? undefined
+            : currentSelection.baseMode,
+      );
     const shouldIncludeCommentImports =
       initialCommentImports.length > 0 &&
       (Boolean(options.stdinDiff) || diffSelectionsEqual(requestedSelection, initialSelection));
 
     let responseDiffData = initialDiffData;
-    if (!options.stdinDiff) {
+    if (namedReview) {
+      responseDiffData = parseNamedDiff(namedReview);
+    } else if (!options.stdinDiff) {
       // Retained reviews already have a resolved base. Keep their original
       // mode for comment identity while calculating the saved comparison directly.
       const calculationSelection =
@@ -485,6 +665,10 @@ export async function startServer(options: ServerOptions): Promise<{
   });
 
   app.get(/^\/api\/generated-status\/(.*)$/, async (req, res) => {
+    if (typeof req.query.review === 'string') {
+      res.status(404).json({ error: 'Generated status is not available for a frozen capture' });
+      return;
+    }
     if (options.stdinDiff) {
       res.status(400).json({ error: 'Generated status is not available for stdin diff' });
       return;
@@ -527,6 +711,10 @@ export async function startServer(options: ServerOptions): Promise<{
 
   // Get available revisions for revision selector
   app.get('/api/revisions', async (_req, res) => {
+    if (currentSelection.reviewName && currentSelection.baseCommitish === 'unborn') {
+      res.json({ specialOptions: [], branches: [], commits: [] } satisfies RevisionsResponse);
+      return;
+    }
     if (options.stdinDiff) {
       res.status(400).json({ error: 'Revision selection not available for stdin diff' });
       return;
@@ -561,6 +749,10 @@ export async function startServer(options: ServerOptions): Promise<{
 
   app.get(/^\/api\/line-count\/(.*)$/, async (req, res) => {
     try {
+      if (typeof req.query.review === 'string') {
+        res.status(404).json({ error: 'Extra context is not available for a frozen capture' });
+        return;
+      }
       if (options.stdinDiff) {
         res.status(404).json({ error: 'Line count not available for stdin diff' });
         return;
@@ -609,6 +801,10 @@ export async function startServer(options: ServerOptions): Promise<{
 
   app.get(/^\/api\/blob\/(.*)$/, async (req, res) => {
     try {
+      if (typeof req.query.review === 'string') {
+        res.status(404).json({ error: 'Blob content is not available for a frozen capture' });
+        return;
+      }
       // If using stdin diff, blob content is not available
       if (options.stdinDiff) {
         res.status(404).json({ error: 'Blob content not available for stdin diff' });
@@ -727,6 +923,7 @@ export async function startServer(options: ServerOptions): Promise<{
         messages: thread.messages,
         resolution: thread.resolution,
         isQuestion: thread.isQuestion,
+        capture: thread.capture,
       };
     }
     if ('filePath' in thread && 'position' in thread) {
@@ -765,6 +962,7 @@ export async function startServer(options: ServerOptions): Promise<{
 
     return {
       id: threadId,
+      capture: thread.capture,
       resolution: thread.resolution,
       isQuestion: thread.isQuestion,
       filePath:
@@ -827,13 +1025,39 @@ export async function startServer(options: ServerOptions): Promise<{
     selection: DiffSelection,
     nextThreads: DiffCommentThread[],
     origin: 'user' | 'agent' = 'user',
+    anchorCapture?: DiffCommentThread['capture'],
   ): boolean {
-    // Progress is process-local agent state, never restored or overwritten by browser payloads.
-    nextThreads = nextThreads.map((thread) => ({
-      ...thread,
-      messages: thread.messages.map((message) => ({ ...message, progress: undefined })),
-    }));
     const session = getOrCreateCommentSession(selection);
+    const capture = selection.reviewName
+      ? namedReviews.get(selection.reviewName)?.metadata
+      : undefined;
+    // Progress is process-local agent state, never restored or overwritten by browser payloads.
+    nextThreads = nextThreads.map((thread) => {
+      let threadCapture: DiffCommentThread['capture'];
+      if (capture && selection.reviewName) {
+        threadCapture = session.threads.find((existing) => existing.id === thread.id)?.capture;
+        if (!threadCapture) {
+          threadCapture = thread.capture ??
+            anchorCapture ?? {
+              version: capture.version,
+              patchDigest: capture.patchDigest,
+            };
+          const original = namedReviews.get(selection.reviewName, threadCapture.version);
+          if (!original || original.metadata.patchDigest !== threadCapture.patchDigest) {
+            throw new Error('Comment capture is unavailable');
+          }
+          threadCapture = {
+            version: original.metadata.version,
+            patchDigest: original.metadata.patchDigest,
+          };
+        }
+      }
+      return {
+        ...thread,
+        capture: threadCapture,
+        messages: thread.messages.map((message) => ({ ...message, progress: undefined })),
+      };
+    });
     const previous = JSON.stringify(session.threads);
     const next = JSON.stringify(nextThreads);
     const previousThreads = session.threads;
@@ -966,6 +1190,20 @@ export async function startServer(options: ServerOptions): Promise<{
         typeof req.body === 'string' ? (JSON.parse(req.body) as unknown) : req.body;
       const nextThreads = parseCommentsPayload(body);
       const baseVersion = parseBaseVersion(body);
+      let anchorCapture: DiffCommentThread['capture'];
+      if (selection.reviewName && body && typeof body === 'object') {
+        const input = body as { captureVersion?: unknown; patchDigest?: unknown };
+        if (input.captureVersion !== undefined || input.patchDigest !== undefined) {
+          if (typeof input.captureVersion !== 'number' || typeof input.patchDigest !== 'string') {
+            throw new Error('Expected captureVersion and patchDigest');
+          }
+          const original = namedReviews.get(selection.reviewName, input.captureVersion);
+          if (!original || original.metadata.patchDigest !== input.patchDigest) {
+            throw new Error('Comment capture is unavailable');
+          }
+          anchorCapture = { version: input.captureVersion, patchDigest: input.patchDigest };
+        }
+      }
       const session = getOrCreateCommentSession(selection);
 
       // Stale baseVersion means another writer (e.g. an agent) changed comments since the
@@ -975,7 +1213,7 @@ export async function startServer(options: ServerOptions): Promise<{
         ? mergeCommentThreads(session.threads, nextThreads).threads
         : nextThreads;
 
-      updateCommentSession(selection, resolvedThreads);
+      updateCommentSession(selection, resolvedThreads, 'user', anchorCapture);
 
       res.json({
         success: true,
@@ -1236,7 +1474,12 @@ export async function startServer(options: ServerOptions): Promise<{
         res.status(415).json({ error: 'Approval requires application/json' });
         return;
       }
-      const input = req.body as { approved?: unknown; summaryVersion?: unknown } | null;
+      const input = req.body as {
+        approved?: unknown;
+        summaryVersion?: unknown;
+        captureVersion?: unknown;
+        patchDigest?: unknown;
+      } | null;
       if (!input || typeof input.approved !== 'boolean') {
         res.status(400).json({ error: 'Expected approved: true or false' });
         return;
@@ -1252,6 +1495,23 @@ export async function startServer(options: ServerOptions): Promise<{
       }
       const selection = getCommentSelectionFromQuery(req.query as Record<string, unknown>);
       const summary = getReviewSummary(selection);
+      const capture = selection.reviewName
+        ? namedReviews.get(selection.reviewName)?.metadata
+        : undefined;
+      if (
+        input.approved &&
+        capture &&
+        (input.captureVersion !== capture.version ||
+          input.patchDigest !== capture.patchDigest ||
+          input.summaryVersion !== summary.version)
+      ) {
+        res.status(409).json({
+          error: 'Review capture or summary changed; reload before approving',
+          current: capture,
+          summary,
+        });
+        return;
+      }
       if (input.approved && (input.summaryVersion ?? 0) !== summary.version) {
         res.status(409).json({
           error: 'Review summary changed; read its latest version before approving',
@@ -1284,6 +1544,12 @@ export async function startServer(options: ServerOptions): Promise<{
         return;
       }
       const selection = getCommentSelectionFromQuery(req.query as Record<string, unknown>);
+      if (selection.reviewName) {
+        res
+          .status(409)
+          .json({ error: 'Named reviews require capture-bound approval through /api/approval' });
+        return;
+      }
       res.on('finish', async () => {
         conversation?.setApproval(selection, true);
         await fileWatcher.stop();
@@ -1385,7 +1651,7 @@ export async function startServer(options: ServerOptions): Promise<{
     options.preferredPort ?? 4966,
     options.host || 'localhost',
   );
-  const launchUrl = `${url}#${EDITOR_SESSION_FRAGMENT_KEY}=${editorSessionToken}`;
+  const launchUrl = `${url}${initialNamedReview ? `?review=${encodeURIComponent(initialNamedReview.metadata.name)}` : ''}#${EDITOR_SESSION_FRAGMENT_KEY}=${editorSessionToken}`;
 
   let shutdownEmitted = false;
   function outputShutdown(reason: ServerShutdownEvent['reason']) {
@@ -1422,7 +1688,7 @@ export async function startServer(options: ServerOptions): Promise<{
   }
 
   // Start file watcher
-  if (options.diffMode) {
+  if (options.diffMode && !initialNamedReview) {
     try {
       await fileWatcher.start(options.diffMode, repositoryPath, 300, invalidateCache);
     } catch (error) {
@@ -1455,6 +1721,7 @@ export async function startServer(options: ServerOptions): Promise<{
       reviewContext,
       selection: { ...launchReview.selection },
       reviewId: launchReview.id,
+      ...(launchReview.capture ? { capture: launchReview.capture } : {}),
       timestamp: new Date().toISOString(),
     });
   }

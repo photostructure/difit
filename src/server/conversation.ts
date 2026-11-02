@@ -11,8 +11,10 @@ import type {
 } from '../types/conversation.js';
 import type { CommentProgress, DiffCommentThread, DiffSelection } from '../types/diff.js';
 import { getDiffSelectionKey } from '../utils/diffSelection.js';
+import type { NamedReviewMetadata } from '../types/review.js';
 
 interface Review {
+  capture?: NamedReviewMetadata;
   id: string;
   selection: DiffSelection;
   threads: DiffCommentThread[];
@@ -53,6 +55,23 @@ export class Conversation {
     return { ...this.getReview(selection).approval };
   }
 
+  setCapture(selection: DiffSelection, capture: NamedReviewMetadata): void {
+    const review = this.getReview(selection);
+    review.selection = { ...selection };
+    review.capture = { ...capture };
+    if (review.approval.approved) this.setApproval(selection, false, 'agent');
+    this.sequence += 1;
+    this.emit({
+      type: 'review.capture',
+      origin: 'agent',
+      cursor: this.cursor,
+      reviewId: review.id,
+      selection: { ...selection },
+      capture: { ...capture },
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   getSummary(selection: DiffSelection): ReviewSummary {
     return { ...this.getReview(selection).summary };
   }
@@ -68,6 +87,7 @@ export class Conversation {
       reviewId: review.id,
       selection: { ...selection },
       summary: { ...summary },
+      ...(review.capture ? { capture: { ...review.capture } } : {}),
       timestamp: new Date().toISOString(),
     });
   }
@@ -81,7 +101,18 @@ export class Conversation {
     if (review.approval.approved === approved) return { ...review.approval };
     this.sequence += 1;
     const timestamp = new Date().toISOString();
-    review.approval = { approved, cursor: this.cursor, updatedAt: timestamp };
+    review.approval = {
+      approved,
+      cursor: this.cursor,
+      updatedAt: timestamp,
+      ...(review.capture
+        ? {
+            captureVersion: review.capture.version,
+            patchDigest: review.capture.patchDigest,
+            summaryVersion: review.summary.version,
+          }
+        : {}),
+    };
     this.emit({
       type: 'review.approval',
       origin,
@@ -89,6 +120,8 @@ export class Conversation {
       reviewId: review.id,
       selection: { ...selection },
       approved,
+      ...(review.capture ? { summaryVersion: review.summary.version } : {}),
+      ...(review.capture ? { capture: { ...review.capture } } : {}),
       timestamp,
     });
     return { ...review.approval };
@@ -143,6 +176,8 @@ export class Conversation {
           body: message.body,
           author: message.author,
           codeSnapshot: thread.codeSnapshot ? { ...thread.codeSnapshot } : undefined,
+          ...(review.capture ? { capture: { ...review.capture } } : {}),
+          ...(thread.capture ? { anchorCapture: { ...thread.capture } } : {}),
           timestamp: new Date().toISOString(),
         });
       }
@@ -213,6 +248,7 @@ export class Conversation {
         threads: structuredClone(this.withProgress(review.selection, review.threads)),
         approval: { ...review.approval },
         summary: { ...review.summary },
+        ...(review.capture ? { capture: { ...review.capture } } : {}),
       })),
     };
   }

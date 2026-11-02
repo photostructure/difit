@@ -23,3 +23,21 @@ export interface CapturedHunk {
   newStart: number;
   newLines: number;
 }
+
+export interface NamedReviewMetadata {
+  name: string;
+  version: number;
+  patchDigest: string;
+  baseCommit: string;
+  repositoryId: string;
+}
+
+export interface NamedReviewStart {
+  name: string;
+  capture: ReviewCapture;
+}
+
+export interface ReviewCaptureUpdate {
+  expectedVersion: number;
+  capture: ReviewCapture;
+}

@@ -15,6 +15,7 @@ export function TextDiffViewer({
   fileIndex,
   mergedChunks,
   isExpandLoading,
+  canExpandHiddenLines = true,
   expandHiddenLines,
   expandAllBetweenChunks,
   onAddComment,
@@ -36,6 +37,15 @@ export function TextDiffViewer({
     firstOriginalIndex: number,
     lastOriginalIndex: number,
   ) => {
+    if (!canExpandHiddenLines) {
+      const hiddenLines =
+        position === 'bottom' ? mergedChunk.hiddenLinesAfter : mergedChunk.hiddenLinesBefore;
+      return hiddenLines > 0 ? (
+        <div className="border-y border-github-border bg-github-bg-tertiary px-3 py-1.5 text-xs text-github-text-muted">
+          {hiddenLines} {hiddenLines === 1 ? 'line' : 'lines'} outside this patch
+        </div>
+      ) : null;
+    }
     if (position === 'top' && mergedChunk.hiddenLinesBefore > 0) {
       return (
         <ExpandButton

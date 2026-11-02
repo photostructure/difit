@@ -54,6 +54,44 @@ vi.stubGlobal('console', {
 });
 
 describe('useFileWatch', () => {
+  it('keeps one stream across callback changes and dispatches to the latest callbacks', async () => {
+    const first = Array.from({ length: 4 }, () => vi.fn(async () => {}));
+    const latest = Array.from({ length: 4 }, () => vi.fn(async () => {}));
+    const { rerender } = renderHook(({ callbacks }) => useFileWatch(undefined, ...callbacks), {
+      initialProps: { callbacks: first },
+    });
+    await waitFor(() => expect(first[3]).toHaveBeenCalledTimes(1));
+    const stream = MockEventSource.instances[0];
+    expect(stream).toBeDefined();
+    rerender({ callbacks: latest });
+    expect(MockEventSource.instances).toHaveLength(1);
+    expect(stream?.close).not.toHaveBeenCalled();
+    act(() => {
+      for (const type of [
+        'commentsChanged',
+        'approvalChanged',
+        'reviewSummaryChanged',
+        'reviewCaptureChanged',
+      ]) {
+        stream?.dispatchMessage(JSON.stringify({ type, reviewName: 'task-b' }));
+      }
+    });
+    for (const callback of latest) expect(callback).toHaveBeenCalledTimes(1);
+    expect(latest[3]).toHaveBeenCalledWith('task-b');
+  });
+
+  it('reloads named captures on reconnect and forwards the changed review name', async () => {
+    const onCaptureChanged = vi.fn(async (_reviewName?: string) => {});
+    renderHook(() => useFileWatch(undefined, undefined, undefined, undefined, onCaptureChanged));
+    await waitFor(() => expect(onCaptureChanged).toHaveBeenCalledExactlyOnceWith());
+    act(() =>
+      MockEventSource.instances
+        .at(-1)
+        ?.dispatchMessage(JSON.stringify({ type: 'reviewCaptureChanged', reviewName: 'task-a' })),
+    );
+    expect(onCaptureChanged).toHaveBeenLastCalledWith('task-a');
+  });
+
   it('refreshes the summary on reconnect and remote summary edits', async () => {
     const onSummaryChanged = vi.fn(async () => {});
     renderHook(() => useFileWatch(undefined, undefined, undefined, onSummaryChanged));

@@ -13,6 +13,7 @@ import { type CursorPosition } from '../hooks/keyboardNavigation';
 import { type MergedChunk } from '../hooks/useExpandedLines';
 import { useFileLevelTokens } from '../hooks/useFileLevelTokens';
 import { isWholeFileHighlightExtension } from '../utils/languageDetection';
+import { TextDiffViewer } from '../viewers/TextDiffViewer';
 import { getViewerForFile } from '../viewers/registry';
 import type { DiffViewerBodyProps } from '../viewers/types';
 
@@ -26,6 +27,7 @@ interface DiffViewerProps {
   showAuthorBadges?: boolean;
   diffMode: DiffViewMode;
   reviewedFiles: Set<string>;
+  viewedStateReady?: boolean;
   isChangedSinceViewed?: boolean;
   onToggleReviewed: (path: string) => void;
   collapsedFiles: Set<string>;
@@ -55,6 +57,7 @@ interface DiffViewerProps {
   syntaxTheme?: AppearanceSettings['syntaxTheme'];
   baseCommitish?: string;
   targetCommitish?: string;
+  contextUnavailable?: boolean;
   cursor?: CursorPosition | null;
   isFocused?: boolean;
   fileIndex?: number;
@@ -192,6 +195,7 @@ export const DiffViewer = memo(function DiffViewer({
   showAuthorBadges = false,
   diffMode,
   reviewedFiles,
+  viewedStateReady = true,
   isChangedSinceViewed = false,
   onToggleReviewed,
   collapsedFiles,
@@ -209,6 +213,7 @@ export const DiffViewer = memo(function DiffViewer({
   syntaxTheme,
   baseCommitish,
   targetCommitish,
+  contextUnavailable = false,
   cursor = null,
   isFocused = false,
   fileIndex = 0,
@@ -227,7 +232,8 @@ export const DiffViewer = memo(function DiffViewer({
   const [isVisible, setIsVisible] = useState(false);
 
   const viewer = getViewerForFile(file);
-  const hasBlobContent = baseCommitish !== 'stdin' && targetCommitish !== 'stdin';
+  const hasBlobContent =
+    !contextUnavailable && baseCommitish !== 'stdin' && targetCommitish !== 'stdin';
   const canExpandHiddenLines = hasBlobContent && (viewer.canExpandHiddenLines?.(file) ?? false);
   // Tokenize the whole file so embedded blocks (e.g. <script>/<style>) are
   // highlighted by their own language instead of line-by-line, which can't see
@@ -345,14 +351,14 @@ export const DiffViewer = memo(function DiffViewer({
 
   const fileLevelTokens = useFileLevelTokens({
     file,
-    enabled: wholeFileHighlight,
+    enabled: wholeFileHighlight && !contextUnavailable,
     baseCommitish,
     targetCommitish,
     reloadKey: diffVersion,
   });
 
   const lineNumberWidth = '4em';
-  const ViewerComponent = viewer.Component;
+  const ViewerComponent = contextUnavailable ? TextDiffViewer : viewer.Component;
   const viewerProps: DiffViewerBodyProps = {
     file,
     threads,
@@ -365,6 +371,7 @@ export const DiffViewer = memo(function DiffViewer({
     fileIndex,
     mergedChunks,
     isExpandLoading,
+    canExpandHiddenLines,
     expandHiddenLines: expandLines,
     expandAllBetweenChunks,
     onAddComment: handleAddComment,
@@ -392,6 +399,7 @@ export const DiffViewer = memo(function DiffViewer({
         isCollapsed={isCollapsed}
         isFocused={isFocused}
         isReviewed={reviewedFiles.has(file.path)}
+        viewedStateReady={viewedStateReady}
         isChangedSinceViewed={isChangedSinceViewed}
         onToggleCollapsed={onToggleCollapsed}
         onToggleAllCollapsed={onToggleAllCollapsed}

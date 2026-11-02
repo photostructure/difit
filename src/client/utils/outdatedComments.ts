@@ -1,4 +1,5 @@
 import type { DiffCommentThread, DiffFile } from '../../types/diff';
+import type { NamedReviewMetadata } from '../../types/review';
 
 export interface FileLineIndex {
   old: Map<number, string>;
@@ -34,8 +35,15 @@ export function buildFileLineIndex(file: DiffFile): FileLineIndex {
 export function isThreadOutdated(
   thread: DiffCommentThread,
   index: FileLineIndex | undefined,
+  capture?: Pick<NamedReviewMetadata, 'version' | 'patchDigest'>,
 ): boolean {
   if (thread.scope === 'review') return false;
+  if (
+    capture &&
+    (thread.capture?.version !== capture.version ||
+      thread.capture.patchDigest !== capture.patchDigest)
+  )
+    return true;
   const snapshot = thread.codeSnapshot?.content;
   if (snapshot === undefined) return false;
 

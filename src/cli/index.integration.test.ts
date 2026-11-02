@@ -1,11 +1,23 @@
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
-import { chmod, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { watch } from 'node:fs';
 import { devNull, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import type { ServerEvent } from '../types/events.js';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 let directory: string;
@@ -123,6 +135,324 @@ async function stop(child: ChildProcess): Promise<void> {
 }
 
 describe('actual CLI launch protocol', () => {
+  it('rejects an explicitly empty named review instead of opening an ordinary comparison', async () => {
+    // Ground truth: the documented 1–80 character name contract requires rejection of
+    // node <compiled-cli> --review '' --host 127.0.0.1 --port 0 --no-open --keep-alive.
+    const fixture = launch(
+      ['--review', '', '--host', '127.0.0.1', '--port', '0', '--no-open', '--keep-alive'],
+      'SIGTERM',
+    );
+    try {
+      expect(await fixture.closed).toBe(1);
+      expect(fixture.output().stdout).toBe('');
+      expect(fixture.output().stderr).toContain('Review name must be 1–80');
+    } finally {
+      await stop(fixture.child);
+    }
+  }, 15000);
+
+  it.each([
+    {
+      label: 'a pathspec without a review',
+      args: ['--pathspec', 'fixture.txt'],
+      error: 'require --review',
+    },
+    {
+      label: 'an empty capture without a review',
+      args: ['--capture', ''],
+      error: 'require --review',
+    },
+    {
+      label: 'a selector without a review',
+      args: ['--select', 'file-id'],
+      error: 'require --review',
+    },
+    {
+      label: 'a named review with a revision argument',
+      args: ['--review', 'task', 'HEAD'],
+      error: 'Git revision arguments are not supported',
+    },
+    {
+      label: 'background stdin for a named review',
+      args: ['-', '--review', 'task', '--background'],
+      error: 'A background review cannot read stdin',
+    },
+  ])(
+    'rejects $label before starting a server',
+    async ({ args, error }) => {
+      // Ground truth: each command is forbidden by difit --help's named capture contract.
+      const fixture = launch(
+        [...args, '--host', '127.0.0.1', '--port', '0', '--no-open', '--keep-alive'],
+        'SIGTERM',
+      );
+      try {
+        expect(await fixture.closed).toBe(1);
+        expect(fixture.output().stdout).toBe('');
+        expect(fixture.output().stderr).toContain(error);
+      } finally {
+        await stop(fixture.child);
+      }
+    },
+    15000,
+  );
+
+  it('rejects named reviews with explicitly disabled conversation mode', async () => {
+    // Ground truth: node <compiled-cli> --review task --no-conversation --no-jsonl must not expose conversation APIs.
+    const fixture = launch([
+      '--review',
+      'task',
+      '--no-conversation',
+      '--no-jsonl',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      '0',
+      '--no-open',
+      '--keep-alive',
+    ]);
+    let requestedShutdown = false;
+    fixture.child.stderr!.on('data', () => {
+      // Let the unfixed human-output server stop so this rejection regression cannot leak it.
+      if (!requestedShutdown && fixture.output().stderr.includes('difit server started on')) {
+        requestedShutdown = true;
+        fixture.child.kill('SIGTERM');
+      }
+    });
+    try {
+      expect(await fixture.closed).toBe(1);
+      expect(fixture.output().stdout).toBe('');
+      expect(fixture.output().stderr).toContain('Named reviews require conversation mode');
+      expect(fixture.output().stderr).not.toContain('difit server started on');
+    } finally {
+      await stop(fixture.child);
+    }
+  }, 15000);
+
+  it('warns when a named capture has no differences while keeping the task available', async () => {
+    // Ground truth: named empty captures share the ordinary CLI's nonfatal no-differences notice.
+    const fixture = launch(
+      [
+        '--review',
+        'empty-task',
+        '--pathspec',
+        'missing-file',
+        '--host',
+        '127.0.0.1',
+        '--port',
+        '0',
+        '--no-open',
+        '--keep-alive',
+      ],
+      'SIGTERM',
+    );
+    try {
+      expect(await fixture.closed).toBe(0);
+      expect(fixture.output().stdout).toContain('"type":"server.ready"');
+      expect(fixture.output().stdout).toContain('"name":"empty-task"');
+      expect(fixture.output().stderr).toContain(
+        'No differences found. Browser will not open automatically.',
+      );
+    } finally {
+      await stop(fixture.child);
+    }
+  }, 15000);
+
+  it('starts a native named review from a subdirectory while stdin stays an open pipe', async () => {
+    // Ground truth: node <compiled-cli> --review pipe-task --pathspec fixture.txt starts without consuming stdin unless - is explicit.
+    const nested = join(directory, 'named-pipe-nested');
+    await mkdir(nested, { recursive: true });
+    const child = spawn(
+      process.execPath,
+      [
+        entrypoint,
+        '--review',
+        'pipe-task',
+        '--pathspec',
+        'fixture.txt',
+        '--host',
+        '127.0.0.1',
+        '--port',
+        '0',
+        '--no-open',
+        '--keep-alive',
+      ],
+      {
+        cwd: nested,
+        env: {
+          ...withoutGitEnvironment(process.env),
+          GIT_CONFIG_GLOBAL: devNull,
+          GIT_CONFIG_SYSTEM: devNull,
+        },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    );
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    let stdout = '';
+    let stderr = '';
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    try {
+      const ready = await new Promise<Extract<ServerEvent, { type: 'server.ready' }>>(
+        (resolveReady, rejectReady) => {
+          deadline = setTimeout(
+            () => rejectReady(new Error('Named review waited for stdin instead of starting')),
+            10000,
+          );
+          child.once('error', rejectReady);
+          child.once('close', (code) =>
+            rejectReady(new Error(`CLI exited before readiness (${code}): ${stderr}`)),
+          );
+          child.stdout.on('data', (chunk: string) => {
+            stdout += chunk;
+            const line = stdout
+              .split('\n')
+              .slice(0, -1)
+              .find((entry) => entry.includes('"type":"server.ready"'));
+            if (line)
+              resolveReady(JSON.parse(line) as Extract<ServerEvent, { type: 'server.ready' }>);
+          });
+        },
+      );
+      expect(ready.selection.reviewName).toBe('pipe-task');
+      expect(ready.capture?.name).toBe('pipe-task');
+      expect(ready.reviewContext.repositoryPath).toBe(await realpath(directory));
+      expect(child.stdin.destroyed).toBe(false);
+    } finally {
+      if (deadline) clearTimeout(deadline);
+      await stop(child);
+    }
+  }, 15000);
+
+  it.each([
+    {
+      label: 'root named launch',
+      args: [
+        '-',
+        '--review',
+        'raw-task',
+        '--host',
+        '127.0.0.1',
+        '--port',
+        '0',
+        '--no-open',
+        '--keep-alive',
+      ],
+    },
+    { label: 'named create', args: ['review', 'create', 'raw-task', '-', '--port', '1'] },
+    {
+      label: 'named update',
+      args: ['review', 'update', 'raw-task', '-', '--port', '1', '--expected-version', '1'],
+    },
+  ])(
+    'rejects non-UTF-8 patch bytes before $label can publish a capture',
+    async ({ args }) => {
+      // Ground truth: the immutable capture must preserve supplied bytes; Latin-1 0xE9 is not UTF-8.
+      const patch = Buffer.concat([
+        Buffer.from(
+          'diff --git a/fixture.txt b/fixture.txt\n--- a/fixture.txt\n+++ b/fixture.txt\n@@ -1 +1 @@\n-before\n+caf',
+        ),
+        Buffer.from([0xe9]),
+        Buffer.from('\n'),
+      ]);
+      const child = spawn(process.execPath, [entrypoint, ...args], {
+        cwd: directory,
+        env: {
+          ...withoutGitEnvironment(process.env),
+          GIT_CONFIG_GLOBAL: devNull,
+          GIT_CONFIG_SYSTEM: devNull,
+        },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      child.stdout.setEncoding('utf8');
+      child.stderr.setEncoding('utf8');
+      let stdout = '';
+      let stderr = '';
+      let signalled = false;
+      child.stdout.on('data', (chunk: string) => {
+        stdout += chunk;
+        if (!signalled && stdout.includes('"type":"server.ready"')) {
+          signalled = true;
+          child.kill('SIGTERM');
+        }
+      });
+      child.stderr.on('data', (chunk: string) => {
+        stderr += chunk;
+      });
+      const closed = new Promise<number | null>((resolveClose, rejectClose) => {
+        child.once('error', rejectClose);
+        child.once('close', resolveClose);
+      });
+      child.stdin.end(patch);
+      try {
+        expect(await closed).toBe(1);
+        expect(stdout).toBe('');
+        expect(stderr).toContain('valid UTF-8');
+      } finally {
+        await stop(child);
+      }
+    },
+    15000,
+  );
+
+  it.each(['create', 'update'])(
+    'reports the serialized transport budget before %s contacts the server',
+    async (action) => {
+      const patch =
+        '--- a/fixture.txt\n+++ b/fixture.txt\n@@ -1 +1 @@\n-before\n+' +
+        '\u0001'.repeat(3 * 1024 * 1024) +
+        '\n';
+      const child = spawn(
+        process.execPath,
+        [
+          entrypoint,
+          'review',
+          action,
+          'large-task',
+          '-',
+          '--port',
+          '1',
+          ...(action === 'update' ? ['--expected-version', '1'] : []),
+        ],
+        {
+          cwd: directory,
+          env: {
+            ...withoutGitEnvironment(process.env),
+            GIT_CONFIG_GLOBAL: devNull,
+            GIT_CONFIG_SYSTEM: devNull,
+          },
+          stdio: ['pipe', 'pipe', 'pipe'],
+        },
+      );
+      child.stdout.setEncoding('utf8');
+      child.stderr.setEncoding('utf8');
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (chunk: string) => {
+        stdout += chunk;
+      });
+      child.stderr.on('data', (chunk: string) => {
+        stderr += chunk;
+      });
+      const closed = new Promise<number | null>((resolveClose, rejectClose) => {
+        child.once('error', rejectClose);
+        child.once('close', resolveClose);
+      });
+      child.stdin.end(patch);
+      try {
+        expect(await closed).toBe(1);
+        expect(stdout).toBe('');
+        expect(stderr).toContain('16 MiB serialized JSON limit');
+        expect(stderr).not.toContain('Cannot connect');
+      } finally {
+        await stop(child);
+      }
+    },
+    15000,
+  );
+
   // Ground truth: node <compiled-cli> <target-sha> <base-sha> --host 127.0.0.1 --port 0 --no-open --keep-alive.
   // Windows process.kill does not deliver these catchable POSIX signals; rejection coverage still runs there.
   it.skipIf(process.platform === 'win32').each(['SIGINT', 'SIGTERM'] as const)(

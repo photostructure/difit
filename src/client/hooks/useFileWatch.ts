@@ -16,7 +16,20 @@ export function useFileWatch(
   onCommentsChanged?: () => Promise<void>,
   onApprovalChanged?: () => Promise<void>,
   onSummaryChanged?: () => Promise<void>,
+  onCaptureChanged?: (reviewName?: string) => Promise<void>,
 ): FileWatchHook {
+  const callbacksRef = useRef({
+    onCommentsChanged,
+    onApprovalChanged,
+    onSummaryChanged,
+    onCaptureChanged,
+  });
+  callbacksRef.current = {
+    onCommentsChanged,
+    onApprovalChanged,
+    onSummaryChanged,
+    onCaptureChanged,
+  };
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef(0);
@@ -53,8 +66,9 @@ export function useFileWatch(
         reconnectAttemptsRef.current = 0;
         setError(null);
         // Recover approval changes missed while this browser was disconnected.
-        void onApprovalChanged?.();
-        void onSummaryChanged?.();
+        void callbacksRef.current.onApprovalChanged?.();
+        void callbacksRef.current.onSummaryChanged?.();
+        void callbacksRef.current.onCaptureChanged?.();
       };
 
       eventSource.onmessage = (event) => {
@@ -88,15 +102,16 @@ export function useFileWatch(
               break;
 
             case 'commentsChanged':
-              if (onCommentsChanged) {
-                void onCommentsChanged();
-              }
+              void callbacksRef.current.onCommentsChanged?.();
               break;
             case 'approvalChanged':
-              void onApprovalChanged?.();
+              void callbacksRef.current.onApprovalChanged?.();
+              break;
+            case 'reviewCaptureChanged':
+              void callbacksRef.current.onCaptureChanged?.(data.reviewName);
               break;
             case 'reviewSummaryChanged':
-              void onSummaryChanged?.();
+              void callbacksRef.current.onSummaryChanged?.();
               break;
           }
         } catch (parseError) {
@@ -142,13 +157,7 @@ export function useFileWatch(
       console.error('Failed to connect to file watch service:', connectionError);
       setError('Failed to connect to file watch service');
     }
-  }, [
-    maxReconnectAttempts,
-    onCommentsChanged,
-    onApprovalChanged,
-    onSummaryChanged,
-    reconnectDelay,
-  ]);
+  }, [maxReconnectAttempts, reconnectDelay]);
 
   const handleReload = useCallback(async () => {
     if (watchState.isReloading) {

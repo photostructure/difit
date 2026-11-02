@@ -37,6 +37,7 @@ export interface UseKeyboardNavigationProps {
   comments: CommentNavigationItem[];
   viewMode?: DiffViewMode;
   reviewedFiles: Set<string>;
+  viewedStateReady?: boolean;
   onToggleReviewed: (filePath: string) => void;
   onCreateComment?: () => void;
   onCopyAllComments?: () => void;

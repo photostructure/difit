@@ -1,3 +1,4 @@
+import type { NamedReviewMetadata } from './review.js';
 import type {
   DiffCommentCodeSnapshot,
   DiffCommentPosition,
@@ -8,6 +9,8 @@ import type {
 } from './diff.js';
 
 export interface ConversationEvent {
+  capture?: NamedReviewMetadata;
+  anchorCapture?: Pick<NamedReviewMetadata, 'version' | 'patchDigest'>;
   type: 'comment.created' | 'comment.updated';
   cursor: string;
   origin: 'user' | 'agent';
@@ -27,6 +30,9 @@ export interface ConversationEvent {
 }
 
 export interface ReviewApproval {
+  captureVersion?: number;
+  patchDigest?: string;
+  summaryVersion?: number;
   approved: boolean;
   updatedAt?: string;
   cursor?: string;
@@ -40,6 +46,7 @@ export interface ReviewSummary {
 }
 
 interface ReviewSummaryEvent {
+  capture?: NamedReviewMetadata;
   type: 'review.summary';
   origin: 'user' | 'agent';
   cursor: string;
@@ -50,8 +57,10 @@ interface ReviewSummaryEvent {
 }
 
 interface ReviewApprovalEvent {
+  capture?: NamedReviewMetadata;
   type: 'review.approval';
   origin: 'user' | 'agent';
+  summaryVersion?: number;
   cursor: string;
   reviewId: string;
   selection: DiffSelection;
@@ -67,6 +76,7 @@ export interface ConversationSnapshot {
     threads: DiffCommentThread[];
     approval: ReviewApproval;
     summary: ReviewSummary;
+    capture?: NamedReviewMetadata;
   }[];
 }
 
@@ -104,7 +114,18 @@ interface CommentDeletedEvent {
   timestamp: string;
 }
 
+interface ReviewCaptureEvent {
+  type: 'review.capture';
+  origin: 'agent';
+  cursor: string;
+  reviewId: string;
+  selection: DiffSelection;
+  capture: NamedReviewMetadata;
+  timestamp: string;
+}
+
 export type ConversationStreamEvent =
+  | ReviewCaptureEvent
   | ConversationEvent
   | CommentDeletedEvent
   | ReviewApprovalEvent
