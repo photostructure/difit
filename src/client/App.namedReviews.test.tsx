@@ -355,11 +355,9 @@ describe('named captures in the browser', () => {
 
   it('does not collapse another task when its delayed viewed action was canceled', async () => {
     const user = userEvent.setup();
-    const savedViews = vi.spyOn(storageService, 'saveViewedFiles');
     fixture();
     renderApp();
     const viewed = await screen.findByRole('button', { name: 'Viewed' });
-    await waitFor(() => expect(savedViews).toHaveBeenCalled());
     await waitFor(() => expect(viewed).toBeEnabled());
     const digest = crypto.subtle.digest.bind(crypto.subtle);
     let release: (() => void) | undefined;
@@ -437,11 +435,10 @@ describe('named captures in the browser', () => {
   });
 
   it('reopens changed viewed content after a capture update and remembers the new content hash', async () => {
-    const savedViews = vi.spyOn(storageService, 'saveViewedFiles');
     const state = fixture();
     renderApp();
     const viewed = await screen.findByRole('button', { name: 'Viewed' });
-    await waitFor(() => expect(savedViews).toHaveBeenCalled());
+    await waitFor(() => expect(viewed).toBeEnabled());
     fireEvent.click(viewed);
     await waitFor(() => expect(viewed).toHaveAttribute('title', 'Mark as not reviewed'));
     state.addedLine = 'const updated = true;';

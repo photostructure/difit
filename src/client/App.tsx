@@ -175,6 +175,8 @@ function App() {
   }, []);
   const [diffData, setDiffData] = useState<DiffResponse | null>(null);
   const [diffDataVersion, setDiffDataVersion] = useState(0);
+  // Bumped only by an explicit reload, not by display toggles that refetch the diff
+  const [reloadVersion, setReloadVersion] = useState(0);
   const [diffMode, setDiffMode] = useState<DiffViewMode>(getInitialDiffViewMode);
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -480,9 +482,33 @@ function App() {
     settings.autoViewedPatterns,
     storageSelection?.baseMode,
     commentsCaptureKey ?? undefined,
+    reloadVersion,
   );
 
   const viewedStateReady = !diffData?.capture || hasLoadedInitialViewedFiles;
+  // Storage keeps a viewed record for a path even after it leaves the diff
+  // (renamed away, or the change reverted), so review progress counts only the
+  // files the current diff still has.
+  const viewedFilesInDiffCount = useMemo(
+    () => (diffData?.files ?? []).filter((file) => viewedFiles.has(file.path)).length,
+    [diffData, viewedFiles],
+  );
+
+  // Expand files un-viewed on reload because their diff changed since they were viewed
+  const previousViewedFilesRef = useRef(viewedFiles);
+  useEffect(() => {
+    const previousViewedFiles = previousViewedFilesRef.current;
+    previousViewedFilesRef.current = viewedFiles;
+    const unviewedChangedFiles = [...changedSinceViewedFiles].filter(
+      (filePath) => previousViewedFiles.has(filePath) && !viewedFiles.has(filePath),
+    );
+    if (unviewedChangedFiles.length === 0) return;
+    setCollapsedFiles((prev) => {
+      const newSet = new Set(prev);
+      unviewedChangedFiles.forEach((filePath) => newSet.delete(filePath));
+      return newSet;
+    });
+  }, [viewedFiles, changedSinceViewedFiles]);
 
   // Reset initialization flag when diff context changes
   useEffect(() => {
@@ -762,6 +788,7 @@ function App() {
   const fetchDiffDataRef = useRef<((selection?: ReviewSelection) => Promise<void>) | null>(null);
   const handleWatchReload = useCallback(async () => {
     await fetchDiffDataRef.current?.();
+    setReloadVersion((prev) => prev + 1);
     await refreshApproval();
     await refreshSummary();
   }, [refreshApproval, refreshSummary]);
@@ -1307,11 +1334,11 @@ function App() {
   useEffect(() => {
     if (diffData) {
       // Reset the trigger flag when not all files are viewed
-      if (viewedFiles.size < diffData.files.length) {
+      if (viewedFilesInDiffCount < diffData.files.length) {
         setHasTriggeredSparkles(false);
       }
       // Show sparkles when all files are viewed and not already triggered
-      else if (viewedFiles.size === diffData.files.length && !hasTriggeredSparkles) {
+      else if (viewedFilesInDiffCount === diffData.files.length && !hasTriggeredSparkles) {
         setShowSparkles(true);
         setHasTriggeredSparkles(true);
         // Hide sparkles after animation completes
@@ -1320,7 +1347,7 @@ function App() {
         }, 1000);
       }
     }
-  }, [viewedFiles.size, diffData, hasTriggeredSparkles]);
+  }, [viewedFilesInDiffCount, diffData, hasTriggeredSparkles]);
 
   // Send comments to server whenever they change and before page unload
   useEffect(() => {
@@ -1697,9 +1724,9 @@ function App() {
               )}
               <div className="flex flex-col gap-1 items-center">
                 <div className="text-xs relative">
-                  {viewedFiles.size === diffData.files.length
+                  {viewedFilesInDiffCount === diffData.files.length
                     ? 'All diffs difit-ed!'
-                    : `${viewedFiles.size} / ${diffData.files.length} files viewed`}
+                    : `${viewedFilesInDiffCount} / ${diffData.files.length} files viewed`}
                   <SparkleAnimation isActive={showSparkles} />
                 </div>
                 <div
@@ -1712,10 +1739,11 @@ function App() {
                   <div
                     className="absolute top-0 right-0 h-full transition-all duration-300 ease-out"
                     style={{
-                      width: `${((diffData.files.length - viewedFiles.size) / diffData.files.length) * 100}%`,
+                      width: `${((diffData.files.length - viewedFilesInDiffCount) / diffData.files.length) * 100}%`,
                       backgroundColor: (() => {
                         const remainingPercent =
-                          ((diffData.files.length - viewedFiles.size) / diffData.files.length) *
+                          ((diffData.files.length - viewedFilesInDiffCount) /
+                            diffData.files.length) *
                           100;
                         if (remainingPercent > 50) return 'var(--color-github-accent)'; // green
                         if (remainingPercent > 20) return 'var(--color-github-warning)'; // yellow

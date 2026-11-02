@@ -4,7 +4,6 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { DiffFile } from '../../types/diff';
 
 import { generateDiffHash, getDiffContentForHashing } from '../utils/diffUtils';
-import { storageService } from '../services/StorageService';
 
 import { useViewedFiles } from './useViewedFiles';
 
@@ -141,7 +140,6 @@ it('keeps a new A load pending and rejects the old A action after A to B to A', 
   const x = file('shared.txt', 'shared');
   const y = file('second.txt', 'second');
   const z = file('other.txt', 'other');
-  const saved = vi.spyOn(storageService, 'saveViewedFiles');
   const { result, rerender } = renderHook(
     ({ task, files }) =>
       useViewedFiles(
@@ -196,7 +194,7 @@ it('keeps a new A load pending and rejects the old A action after A to B to A', 
     rerender({ task: 'a', files: [x, y] });
     const readyBeforeNewLoad = result.current.hasLoadedInitialViewedFiles;
     await act(async () => releaseNewA?.());
-    await waitFor(() => expect(saved).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.hasLoadedInitialViewedFiles).toBe(true));
     await act(async () => result.current.setFilesViewed([y], true));
     expect(result.current.viewedFiles.has(y.path)).toBe(true);
     await act(async () => {
@@ -212,6 +210,5 @@ it('keeps a new A load pending and rejects the old A action after A to B to A', 
     releaseB?.();
     releaseNewA?.();
     spy.mockRestore();
-    saved.mockRestore();
   }
 });
