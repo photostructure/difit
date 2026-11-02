@@ -839,6 +839,168 @@ describe('App Component - Initial file collapsing', () => {
     mockHasLoadedInitialViewedFiles = false;
   });
 
+  it.each([false, true])(
+    'expands a selected sidebar file without toggling its viewed state (initially viewed: %s)',
+    async (initiallyViewed) => {
+      mockViewedFiles = new Set(initiallyViewed ? ['test.ts'] : []);
+      mockHasLoadedInitialViewedFiles = true;
+      mockFetch({
+        ...mockDiffResponse,
+        files: [
+          {
+            ...mockDiffResponse.files[0]!,
+            chunks: [
+              {
+                header: '@@ -0,0 +1 @@',
+                oldStart: 0,
+                oldLines: 0,
+                newStart: 1,
+                newLines: 1,
+                lines: [{ type: 'add', content: 'selected_file_content', newLineNumber: 1 }],
+              },
+            ],
+          },
+        ],
+      });
+      const { container } = renderApp();
+      if (!initiallyViewed) {
+        fireEvent.click(await screen.findByTitle('Collapse file (Alt+Click to collapse all)'));
+      }
+      await screen.findByTitle('Expand file (Alt+Click to expand all)');
+      expect(container.querySelector('[data-diff-line-row="true"]')).toBeNull();
+
+      const fileRow = await screen.findByTitle('test.ts');
+      fireEvent.click(fileRow.closest('[data-file-row]')!);
+      await screen.findByTitle('Collapse file (Alt+Click to collapse all)');
+      await waitFor(() => {
+        expect(container.querySelector('[data-diff-line-row="true"]')).not.toBeNull();
+      });
+
+      fireEvent.click(fileRow.closest('[data-file-row]')!);
+      expect(screen.getByTitle('Collapse file (Alt+Click to collapse all)')).toBeInTheDocument();
+      expect(mockViewedFiles.has('test.ts')).toBe(initiallyViewed);
+      expect(mockToggleFileViewed).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Viewed' })).toHaveAttribute(
+        'title',
+        initiallyViewed ? 'Mark as not reviewed' : 'Mark as reviewed',
+      );
+    },
+  );
+
+  it.each([
+    { selectedViewed: true, collapseAfterSelection: false },
+    { selectedViewed: true, collapseAfterSelection: true },
+    { selectedViewed: false, collapseAfterSelection: false },
+    { selectedViewed: false, collapseAfterSelection: true },
+  ])(
+    'retains sidebar intent through viewed hydration ($selectedViewed, later collapse: $collapseAfterSelection)',
+    async ({ selectedViewed, collapseAfterSelection }) => {
+      const files = ['selected.ts', 'other-viewed.ts'];
+      mockFetch({
+        ...mockDiffResponse,
+        files: files.map((path) => ({ ...mockDiffResponse.files[0]!, path })),
+      });
+      const view = renderApp();
+      await screen.findByRole('heading', { name: 'selected.ts' });
+      const selectedSection = screen
+        .getByRole('heading', { name: 'selected.ts' })
+        .closest('[data-file-path]')!;
+      const otherSection = screen
+        .getByRole('heading', { name: 'other-viewed.ts' })
+        .closest('[data-file-path]')!;
+      // Start collapsed, then select through the real sidebar while hydration is pending.
+      fireEvent.click(
+        selectedSection.querySelector('button[title="Collapse file (Alt+Click to collapse all)"]')!,
+      );
+      fireEvent.click(screen.getByTitle('selected.ts').closest('[data-file-row]')!);
+      expect(
+        selectedSection.querySelector('button[title="Collapse file (Alt+Click to collapse all)"]'),
+      ).toBeInTheDocument();
+      if (collapseAfterSelection) {
+        fireEvent.click(
+          selectedSection.querySelector(
+            'button[title="Collapse file (Alt+Click to collapse all)"]',
+          )!,
+        );
+      }
+
+      act(() => {
+        mockViewedFiles = new Set(selectedViewed ? files : ['other-viewed.ts']);
+        mockHasLoadedInitialViewedFiles = true;
+        view.rerender(
+          <HotkeysProvider initiallyActiveScopes={['navigation']}>
+            <App />
+          </HotkeysProvider>,
+        );
+      });
+
+      await waitFor(() => {
+        expect(
+          otherSection.querySelector('button[title="Expand file (Alt+Click to expand all)"]'),
+        ).toBeInTheDocument();
+        expect(
+          selectedSection.querySelector(
+            `button[title="${collapseAfterSelection ? 'Expand file (Alt+Click to expand all)' : 'Collapse file (Alt+Click to collapse all)'}"]`,
+          ),
+        ).toBeInTheDocument();
+      });
+      expect(mockToggleFileViewed).not.toHaveBeenCalled();
+      expect(selectedSection.querySelector('button[title="Mark as not reviewed"]') !== null).toBe(
+        selectedViewed,
+      );
+    },
+  );
+
+  it.each(['comparison', 'capture'] as const)(
+    'clears pending sidebar intent when the %s context changes',
+    async (context) => {
+      const first: DiffResponse = {
+        ...mockDiffResponse,
+        ...(context === 'capture'
+          ? {
+              capture: {
+                name: 'task',
+                version: 1,
+                patchDigest: 'a'.repeat(64),
+                baseCommit: 'base',
+                repositoryId: 'repo',
+              },
+            }
+          : {}),
+      };
+      if (context === 'capture') window.history.replaceState(null, '', '/?review=task');
+      mockFetch(first);
+      const view = renderApp();
+      fireEvent.click((await screen.findByTitle('test.ts')).closest('[data-file-row]')!);
+      expect(screen.getByTitle('Collapse file (Alt+Click to collapse all)')).toBeInTheDocument();
+
+      mockFetch({
+        ...first,
+        ...(context === 'capture'
+          ? { capture: { ...first.capture!, version: 2, patchDigest: 'b'.repeat(64) } }
+          : { commit: 'different-commit' }),
+      });
+      const refresh = vi.mocked(useFileWatch).mock.calls.at(-1)?.[0];
+      await act(async () => refresh?.());
+      await waitFor(() => {
+        const current = vi.mocked(useDiffComments).mock.calls.at(-1);
+        if (context === 'capture') expect(current?.[6]?.version).toBe(2);
+        else expect(current?.[2]).toBe('different-commit');
+      });
+      act(() => {
+        mockViewedFiles = new Set(['test.ts']);
+        mockHasLoadedInitialViewedFiles = true;
+        view.rerender(
+          <HotkeysProvider initiallyActiveScopes={['navigation']}>
+            <App />
+          </HotkeysProvider>,
+        );
+      });
+      await screen.findByTitle('Expand file (Alt+Click to expand all)');
+      expect(mockToggleFileViewed).not.toHaveBeenCalled();
+    },
+  );
+
   it('collapses initially viewed files after viewed state finishes loading', async () => {
     const view = renderApp();
 
@@ -1377,7 +1539,8 @@ describe('App Component - Mobile sidebar auto-close', () => {
     vi.mocked(useViewport).mockReturnValue({ isMobile: false, isDesktop: true });
   });
 
-  it('closes the sidebar when a file is selected on mobile', async () => {
+  it('expands the selected file and closes the sidebar on mobile', async () => {
+    mockViewedFiles = new Set(['test.ts']);
     mockFetch(mockDiffResponse);
     renderApp();
 
@@ -1385,6 +1548,7 @@ describe('App Component - Mobile sidebar auto-close', () => {
     const toggleButton = await screen.findByRole('button', { name: /toggle file tree panel/i });
     expect(toggleButton).toHaveAttribute('aria-expanded', 'true');
 
+    await screen.findByTitle('Expand file (Alt+Click to expand all)');
     // Wait for file list to render, then click the file row
     const fileRow = await screen.findByTitle('test.ts');
     fireEvent.click(fileRow.closest('[data-file-row]')!);
@@ -1392,7 +1556,9 @@ describe('App Component - Mobile sidebar auto-close', () => {
     // Sidebar should now be closed on mobile
     await waitFor(() => {
       expect(toggleButton).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.getByTitle('Collapse file (Alt+Click to collapse all)')).toBeInTheDocument();
     });
+    expect(mockToggleFileViewed).not.toHaveBeenCalled();
   });
 });
 

@@ -182,6 +182,7 @@ function App() {
   const [isRevisionModalOpen, setIsRevisionModalOpen] = useState(false);
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
   const collapsedInitializedRef = useRef(false);
+  const pendingSidebarSelectionsRef = useRef(new Set<string>());
   const diffScrollContainerRef = useRef<HTMLElement | null>(null);
 
   // Revision selector state
@@ -464,12 +465,23 @@ function App() {
   // Reset initialization flag when diff context changes
   useEffect(() => {
     collapsedInitializedRef.current = false;
+    pendingSidebarSelectionsRef.current.clear();
   }, [diffData?.repositoryId, resolvedSelectionKey, diffData?.commit, commentsCaptureKey]);
 
   // Initialize collapsed files from viewed files (only once per diff)
   useEffect(() => {
     if (!collapsedInitializedRef.current && hasLoadedInitialViewedFiles) {
-      setCollapsedFiles(new Set(viewedFiles));
+      const pendingSelections = new Set(pendingSidebarSelectionsRef.current);
+      pendingSidebarSelectionsRef.current.clear();
+      setCollapsedFiles((current) => {
+        const nextCollapsedFiles = new Set(viewedFiles);
+        // Preserve sidebar selections and any later manual collapse while loading.
+        for (const filePath of pendingSelections) {
+          if (current.has(filePath)) nextCollapsedFiles.add(filePath);
+          else nextCollapsedFiles.delete(filePath);
+        }
+        return nextCollapsedFiles;
+      });
       collapsedInitializedRef.current = true;
     }
   }, [viewedFiles, hasLoadedInitialViewedFiles]);
@@ -492,6 +504,20 @@ function App() {
     setDiffData,
     isScrollContextCurrent,
   });
+
+  const handleSidebarFileSelected = useCallback(
+    (filePath: string) => {
+      if (!collapsedInitializedRef.current) pendingSidebarSelectionsRef.current.add(filePath);
+      setCollapsedFiles((previous) => {
+        if (!previous.has(filePath)) return previous;
+        const nextCollapsedFiles = new Set(previous);
+        nextCollapsedFiles.delete(filePath);
+        return nextCollapsedFiles;
+      });
+      scrollFileIntoDiffContainer(filePath);
+    },
+    [scrollFileIntoDiffContainer],
+  );
 
   const toggleFileReviewed = useCallback(
     async (filePath: string) => {
@@ -1792,7 +1818,7 @@ function App() {
                 <FileList
                   files={diffData.files}
                   reviewContext={diffData.reviewContext}
-                  onScrollToFile={scrollFileIntoDiffContainer}
+                  onScrollToFile={handleSidebarFileSelected}
                   onFileSelected={isMobile ? handleMobileFileSelected : undefined}
                   comments={normalizedThreads}
                   reviewedFiles={viewedFiles}
