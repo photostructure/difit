@@ -58,7 +58,7 @@ export const DiffViewerHeader = ({
         isFocused ? 'keyboard-focused-file-header' : ''
       }`}
     >
-      <div className="flex items-center gap-2 flex-1 min-w-0">
+      <div className="flex items-start gap-2 flex-[1_1_16rem] min-w-0">
         <button
           onClick={(e) => {
             if (e.altKey) {
@@ -68,7 +68,7 @@ export const DiffViewerHeader = ({
               onToggleCollapsed(file.path);
             }
           }}
-          className="text-github-text-muted hover:text-github-text-primary transition-colors cursor-pointer"
+          className="mt-0.5 shrink-0 text-github-text-muted hover:text-github-text-primary transition-colors cursor-pointer"
           title={
             isCollapsed
               ? 'Expand file (Alt+Click to expand all)'
@@ -77,36 +77,40 @@ export const DiffViewerHeader = ({
         >
           {isCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
         </button>
-        {getFileIcon(file.status)}
-        <h2 className="text-sm font-mono text-github-text-primary m-0 overflow-hidden text-ellipsis whitespace-nowrap">
-          {file.path}
-        </h2>
-        <button
-          className={`bg-transparent border-none cursor-pointer px-1.5 py-1 rounded text-sm transition-all hover:bg-github-bg-tertiary ${
-            isCopied
-              ? 'text-github-accent'
-              : 'text-github-text-secondary hover:text-github-text-primary'
-          }`}
-          onClick={() => {
-            void copyTextToClipboard(file.path)
-              .then(() => {
-                console.log('File path copied to clipboard:', file.path);
-                setIsCopied(true);
-                setTimeout(() => setIsCopied(false), 2000);
-              })
-              .catch((err) => {
-                console.error('Failed to copy file path:', err);
-              });
-          }}
-          title="Copy file path"
-        >
-          {isCopied ? <Check size={14} /> : <Copy size={14} />}
-        </button>
-        {file.oldPath && file.oldPath !== file.path && (
-          <span className="text-xs text-github-text-muted italic">
-            (renamed from {file.oldPath})
-          </span>
-        )}
+        <span className="mt-0.5 shrink-0">{getFileIcon(file.status)}</span>
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <h2 className="text-sm font-mono text-github-text-primary m-0 overflow-hidden text-ellipsis whitespace-nowrap">
+              {file.path}
+            </h2>
+            <button
+              className={`shrink-0 bg-transparent border-none cursor-pointer px-1.5 py-1 rounded text-sm transition-all hover:bg-github-bg-tertiary ${
+                isCopied
+                  ? 'text-github-accent'
+                  : 'text-github-text-secondary hover:text-github-text-primary'
+              }`}
+              onClick={() => {
+                void copyTextToClipboard(file.path)
+                  .then(() => {
+                    console.log('File path copied to clipboard:', file.path);
+                    setIsCopied(true);
+                    setTimeout(() => setIsCopied(false), 2000);
+                  })
+                  .catch((err) => {
+                    console.error('Failed to copy file path:', err);
+                  });
+              }}
+              title="Copy file path"
+            >
+              {isCopied ? <Check size={14} /> : <Copy size={14} />}
+            </button>
+          </div>
+          {file.oldPath && file.oldPath !== file.path && (
+            <div className="mt-0.5 text-xs text-github-text-muted">
+              Renamed from <span className="font-mono break-all">{file.oldPath}</span>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="flex items-center gap-3">
