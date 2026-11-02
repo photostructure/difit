@@ -93,6 +93,22 @@ describe('useAppearanceSettings', () => {
         syntaxTheme: 'github',
       });
     });
+
+    it('applies the selected font to --mono-font-family', () => {
+      setMatchMedia(false);
+
+      const { result } = renderHook(() => useAppearanceSettings());
+      const menlo = 'Menlo, Monaco, "Courier New", monospace';
+
+      act(() => {
+        result.current.updateSettings({
+          ...result.current.settings,
+          fontFamily: menlo,
+        });
+      });
+
+      expect(document.documentElement.style.getPropertyValue('--mono-font-family')).toBe(menlo);
+    });
   });
 
   describe('legacy editor storage', () => {
@@ -109,6 +125,26 @@ describe('useAppearanceSettings', () => {
       const { result } = renderHook(() => useAppearanceSettings());
 
       expect(result.current.settings).not.toHaveProperty('editor');
+    });
+  });
+
+  describe('settings normalization', () => {
+    beforeEach(() => {
+      setMatchMedia(false);
+    });
+
+    it('falls back to the default font when fontFamily is unknown', () => {
+      localStorage.setItem(
+        APPEARANCE_STORAGE_KEY,
+        JSON.stringify({
+          theme: 'dark',
+          fontFamily: 'Comic Sans MS, cursive',
+        }),
+      );
+
+      const { result } = renderHook(() => useAppearanceSettings());
+
+      expect(result.current.settings.fontFamily).toMatch(/^ui-monospace/);
     });
   });
 
