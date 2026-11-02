@@ -4,6 +4,7 @@ import {
   offset,
   flip,
   shift,
+  size,
   useClick,
   useHover,
   useDismiss,
@@ -143,7 +144,17 @@ export function DiffQuickMenu({
       if (!open) setQuery('');
     },
     placement: 'bottom-end',
-    middleware: [offset(6), flip(), shift({ padding: 8 })],
+    middleware: [
+      offset(6),
+      flip(),
+      shift({ padding: 8 }),
+      size({
+        padding: 8,
+        apply({ availableWidth, elements }) {
+          elements.floating.style.maxWidth = `${Math.max(0, availableWidth)}px`;
+        },
+      }),
+    ],
     whileElementsMounted: autoUpdate,
   });
 
@@ -169,7 +180,17 @@ export function DiffQuickMenu({
       setIsCommitMenuOpen(open);
     },
     placement: 'left-start',
-    middleware: [offset(0), flip(), shift({ padding: 8 })],
+    middleware: [
+      offset(0),
+      flip(),
+      shift({ padding: 8, crossAxis: true }),
+      size({
+        padding: 8,
+        apply({ availableWidth, elements }) {
+          elements.floating.style.maxWidth = `${Math.max(0, availableWidth)}px`;
+        },
+      }),
+    ],
     whileElementsMounted: autoUpdate,
   });
 
