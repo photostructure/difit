@@ -1,4 +1,5 @@
 import { promises as fs } from 'fs';
+import { createServer } from 'node:net';
 import { hostname, tmpdir } from 'os';
 import { join, resolve } from 'path';
 import express from 'express';
@@ -48,23 +49,28 @@ const { fetch } = await import('undici');
 globalThis.fetch = fetch as any;
 const parserInstances = vi.hoisted(() => [] as any[]);
 
-// Helper function to get available port
+// Reserve a loopback port instead of probing HTTP: other review servers can
+// occupy the preferred range, and startup tests send requests before readiness.
 async function getAvailablePort(preferredPort: number): Promise<number> {
-  let port = preferredPort;
-  const maxAttempts = 10;
-
-  for (let i = 0; i < maxAttempts; i++) {
-    try {
-      await fetch(`http://localhost:${port}`);
-      // If we get here, port is in use, try next one
-      port++;
-    } catch {
-      // Port is available
-      return port;
-    }
+  const reserve = (port: number) =>
+    new Promise<number>((resolvePort, reject) => {
+      const probe = createServer();
+      probe.once('error', reject);
+      probe.listen(port, '127.0.0.1', () => {
+        const address = probe.address();
+        if (!address || typeof address === 'string') {
+          probe.close(() => reject(new Error('Expected a TCP port')));
+          return;
+        }
+        probe.close((error) => (error ? reject(error) : resolvePort(address.port)));
+      });
+    });
+  try {
+    return await reserve(preferredPort);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error;
+    return reserve(0);
   }
-
-  return port;
 }
 
 // Mock GitDiffParser
