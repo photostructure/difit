@@ -96,6 +96,12 @@ export class FileWatcherService {
 
     for (const watchPath of modeConfig.watchPaths) {
       let fullPath = join(basePath, watchPath);
+      // Ignored directories are excluded natively by @parcel/watcher, so a build writing into
+      // them neither reaches the per-event .gitignore check nor overflows the event stream.
+      const ignore =
+        watchPath === '.'
+          ? [...modeConfig.ignore, ...(await this.ignoredDirectories())]
+          : modeConfig.ignore;
 
       // Resolve git worktree path for .git directory
       if (watchPath === '.git') {
@@ -108,6 +114,8 @@ export class FileWatcherService {
           async (err, events) => {
             if (err) {
               console.error(`Watch error for ${watchPath}:`, err);
+              // Events may have been dropped (e.g. an FSEvents overflow), so the diff may be stale.
+              this.debouncedBroadcast();
               return;
             }
 
@@ -139,9 +147,7 @@ export class FileWatcherService {
               this.debouncedBroadcast();
             }
           },
-          {
-            ignore: modeConfig.ignore,
-          },
+          { ignore },
         )) as { unsubscribe: () => Promise<void> };
 
         this.subscriptions.push(subscription);
@@ -305,6 +311,26 @@ export class FileWatcherService {
         return 'file'; // Both file and staging changes, default to file
       default:
         return 'file';
+    }
+  }
+
+  private async ignoredDirectories(): Promise<string[]> {
+    if (!this.git) return [];
+
+    try {
+      const output = await this.git.raw([
+        'ls-files',
+        '--others',
+        '--ignored',
+        '--exclude-standard',
+        '--directory',
+      ]);
+      return output
+        .split('\n')
+        .filter((line) => line.endsWith('/'))
+        .map((line) => line.slice(0, -1));
+    } catch {
+      return [];
     }
   }
 
