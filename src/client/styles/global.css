@@ -1,5 +1,15 @@
 @import "tailwindcss";
 
+/* A native range crosses table cells in DOM order. Exclude the other side,
+ * including syntax tokens with explicit select-text, when selecting split code. */
+.split-diff-selection[data-selection-side="old"] [data-diff-side="new"],
+.split-diff-selection[data-selection-side="old"] [data-diff-side="new"] *,
+.split-diff-selection[data-selection-side="new"] [data-diff-side="old"],
+.split-diff-selection[data-selection-side="new"] [data-diff-side="old"] * {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
 @theme {
   --font-mono: var(--mono-font-family);
 

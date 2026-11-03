@@ -711,6 +711,7 @@ export function SideBySideDiffChunk({
                       )}
                   </td>
                   <td
+                    data-diff-side="old"
                     className={`w-1/2 p-0 align-top border-r border-github-border relative ${getSideBySideLineClass(sideLine.oldLine, isExpandedLine(sideLine.oldLine))} ${getSelectedLineStyle('old', sideLine)} ${highlightOldCell ? cellHighlightClass : ''}`}
                   >
                     {sideLine.oldLine && (
@@ -770,6 +771,7 @@ export function SideBySideDiffChunk({
                       )}
                   </td>
                   <td
+                    data-diff-side="new"
                     className={`w-1/2 p-0 align-top relative ${getSideBySideLineClass(sideLine.newLine, isExpandedLine(sideLine.newLine))} ${getSelectedLineStyle('new', sideLine)} ${highlightNewCell ? cellHighlightClass : ''}`}
                   >
                     {sideLine.newLine && (

@@ -95,7 +95,22 @@ export function TextDiffViewer({
   };
 
   return (
-    <>
+    <div
+      className="split-diff-selection"
+      onPointerDownCapture={(event) => {
+        // Apply before the browser starts its native text selection. Keep the
+        // opposite column unselectable across every hunk in this file.
+        const cell =
+          event.target instanceof Element
+            ? event.target.closest<HTMLElement>('[data-diff-side]')
+            : null;
+        if (cell?.dataset.diffSide) {
+          event.currentTarget.dataset.selectionSide = cell.dataset.diffSide;
+        } else {
+          delete event.currentTarget.dataset.selectionSide;
+        }
+      }}
+    >
       {mergedChunks.map((mergedChunk, mergedIndex) => {
         const isFirstMerged = mergedIndex === 0;
         const isLastMerged = mergedIndex === mergedChunks.length - 1;
@@ -151,6 +166,6 @@ export function TextDiffViewer({
           </React.Fragment>
         );
       })}
-    </>
+    </div>
   );
 }
