@@ -233,8 +233,37 @@ Editor configuration (set before starting difit):
         process.exit(1);
       }
 
+      // Check if we should read from stdin
+      const readFromStdin =
+        !options.pr &&
+        (options.review !== undefined
+          ? commitish === '-'
+          : shouldReadStdin({
+              commitish,
+              hasPositionalArgs: program.args.length > 0,
+              hasPrOption: Boolean(options.pr),
+            }));
+
+      if (readFromStdin) {
+        if (options.context !== undefined) {
+          console.error('Error: --context option cannot be used with stdin diff');
+          process.exit(1);
+        }
+        if (options.mergeBase) {
+          console.error('Error: --merge-base option cannot be used with stdin diff');
+          process.exit(1);
+        }
+        // Read unified diff from stdin
+        stdinDiff =
+          options.review !== undefined ? await readStdin({ strictUtf8: true }) : await readStdin();
+        if (!stdinDiff.trim()) {
+          console.error('Error: No diff content received from stdin');
+          process.exit(1);
+        }
+      }
+
       if (options.background && !isBackgroundChild) {
-        await startBackgroundProcess();
+        await startBackgroundProcess(undefined, stdinDiff);
         return;
       }
 
@@ -286,36 +315,6 @@ Editor configuration (set before starting difit):
           console.warn(
             `Warning: Failed to load PR review comments: ${error instanceof Error ? error.message : 'Unknown error'}`,
           );
-        }
-      } else {
-        // Check if we should read from stdin
-        const readFromStdin =
-          options.review !== undefined
-            ? commitish === '-'
-            : shouldReadStdin({
-                commitish,
-                hasPositionalArgs: program.args.length > 0,
-                hasPrOption: false,
-              });
-
-        if (readFromStdin) {
-          if (options.context !== undefined) {
-            console.error('Error: --context option cannot be used with stdin diff');
-            process.exit(1);
-          }
-          if (options.mergeBase) {
-            console.error('Error: --merge-base option cannot be used with stdin diff');
-            process.exit(1);
-          }
-          // Read unified diff from stdin
-          stdinDiff =
-            options.review !== undefined
-              ? await readStdin({ strictUtf8: true })
-              : await readStdin();
-          if (!stdinDiff.trim()) {
-            console.error('Error: No diff content received from stdin');
-            process.exit(1);
-          }
         }
       }
 

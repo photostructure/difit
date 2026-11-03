@@ -15,9 +15,12 @@ import { devNull, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { fetch } from 'undici';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { ServerEvent } from '../types/events.js';
+import type { DiffResponse } from '../types/diff.js';
+import type { BackgroundServerInfo } from './background.js';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 let directory: string;
@@ -87,6 +90,7 @@ function launch(
   args: string[],
   readySignal?: 'SIGINT' | 'SIGTERM',
   environment: Record<string, string> = {},
+  input?: string,
 ) {
   const child = spawn(process.execPath, [entrypoint, ...args], {
     cwd: directory,
@@ -96,14 +100,14 @@ function launch(
       GIT_CONFIG_SYSTEM: devNull,
       ...environment,
     },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
   });
   let stdout = '';
   let stderr = '';
-  child.stdout.setEncoding('utf8');
-  child.stderr.setEncoding('utf8');
+  child.stdout!.setEncoding('utf8');
+  child.stderr!.setEncoding('utf8');
   let signalled = false;
-  child.stdout.on('data', (chunk: string) => {
+  child.stdout!.on('data', (chunk: string) => {
     stdout += chunk;
     // Signal from the complete readiness record, without a polling or timer grace period.
     if (
@@ -118,13 +122,14 @@ function launch(
       child.kill(readySignal);
     }
   });
-  child.stderr.on('data', (chunk: string) => {
+  child.stderr!.on('data', (chunk: string) => {
     stderr += chunk;
   });
   const closed = new Promise<number | null>((resolveClose, reject) => {
     child.once('error', reject);
     child.once('close', resolveClose);
   });
+  if (input !== undefined) child.stdin!.end(input);
   return { child, closed, output: () => ({ stdout, stderr }) };
 }
 
@@ -135,6 +140,55 @@ async function stop(child: ChildProcess): Promise<void> {
 }
 
 describe('actual CLI launch protocol', () => {
+  it.each([
+    { label: 'explicit stdin', args: ['-'] },
+    { label: 'automatically detected stdin', args: [] },
+  ])(
+    'preserves $label when launching in the background',
+    async ({ args }) => {
+      const patch = [
+        'diff --git a/background.txt b/background.txt',
+        '--- a/background.txt',
+        '+++ b/background.txt',
+        '@@ -1 +1 @@',
+        '-before',
+        '+background café',
+        '',
+      ].join('\n');
+      const fixture = launch(
+        [...args, '--background', '--host', '127.0.0.1', '--port', '0', '--no-open'],
+        undefined,
+        {},
+        patch,
+      );
+      let background: BackgroundServerInfo | undefined;
+      try {
+        const exitCode = await fixture.closed;
+        const output = fixture.output().stdout.trim();
+        if (output) background = JSON.parse(output) as BackgroundServerInfo;
+        expect(exitCode, fixture.output().stderr).toBe(0);
+        expect(background).toMatchObject({
+          type: 'server.background',
+          port: expect.any(Number),
+          pid: expect.any(Number),
+        });
+        const response = await fetch(new URL('/api/diff', background!.url));
+        const diff = (await response.json()) as DiffResponse;
+        expect(response.ok).toBe(true);
+        expect(diff.reviewContext?.source).toBe('stdin');
+        expect(diff.files).toHaveLength(1);
+        expect(diff.files[0]?.path).toBe('background.txt');
+        expect(diff.files[0]?.chunks[0]?.lines).toContainEqual(
+          expect.objectContaining({ type: 'add', content: 'background café' }),
+        );
+      } finally {
+        if (background) process.kill(background.pid, 'SIGKILL');
+        await stop(fixture.child);
+      }
+    },
+    15000,
+  );
+
   it('rejects an explicitly empty named review instead of opening an ordinary comparison', async () => {
     // Ground truth: the documented 1–80 character name contract requires rejection of
     // node <compiled-cli> --review '' --host 127.0.0.1 --port 0 --no-open --keep-alive.
