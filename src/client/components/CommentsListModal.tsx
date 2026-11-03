@@ -3,6 +3,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 
 import type { CommentIntent, CommentThread } from '../../types/diff';
+import { hasActiveTextSelection } from '../utils/domUtils';
 
 import { CommentForm, type CommentSubmitOptions } from './CommentForm';
 import { CommentThreadCard } from './CommentThreadCard';
@@ -283,6 +284,9 @@ export function CommentsListModal({
                         syntaxTheme={syntaxTheme}
                         onClick={(e) => {
                           e.stopPropagation();
+                          // Selecting text inside a card fires a click as well; do not
+                          // treat it as a request to navigate and close the modal.
+                          if (hasActiveTextSelection()) return;
                           setSelectedIndex(index);
                           handleThreadClick(thread);
                         }}
