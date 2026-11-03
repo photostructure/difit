@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
 import { HotkeysProvider } from 'react-hotkeys-hook';
@@ -123,8 +123,11 @@ describe('CommentsListModal', () => {
       screen.getByPlaceholderText('Comment or ask about this review…'),
       'How does this work?',
     );
-    await user.click(screen.getByRole('radio', { name: 'Question' }));
-    await user.click(screen.getByRole('button', { name: 'Send' }));
+    const composer = within(
+      screen.getByPlaceholderText('Comment or ask about this review…').closest('form')!,
+    );
+    await user.click(composer.getByRole('radio', { name: 'Question' }));
+    await user.click(composer.getByRole('button', { name: 'Send' }));
     expect(onAddGeneralComment).toHaveBeenCalledWith('How does this work?', {
       isQuestion: true,
       intent: 'question',
@@ -294,10 +297,39 @@ describe('CommentsListModal', () => {
       { wrapper },
     );
 
-    await user.click(screen.getAllByRole('button', { name: 'Write a reply...' })[0]!);
-    await user.click(screen.getByPlaceholderText('Write a reply...'));
+    const reply = screen.getAllByPlaceholderText('Write a reply...')[0]!;
+    await user.click(reply);
 
-    expect(screen.getByText('Reply to thread')).toBeInTheDocument();
+    expect(within(reply.closest('form')!).getByText('Reply to thread')).toBeInTheDocument();
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('toggles a thread from its filename without closing or navigating', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const onNavigate = vi.fn();
+    render(
+      <CommentsListModal
+        isOpen
+        onClose={onClose}
+        onNavigate={onNavigate}
+        comments={mockThreads}
+        onToggleThreadResolved={mockRemoveThread}
+        onGenerateThreadPrompt={mockGenerateThreadPrompt}
+        onReplyToThread={mockReplyToThread}
+        onRemoveMessage={mockRemoveMessage}
+        onUpdateMessage={mockUpdateMessage}
+      />,
+      { wrapper },
+    );
+
+    const heading = screen.getByText(`${mockThreads[0]!.file}:${mockThreads[0]!.line}`);
+    const disclosure = heading.closest('button')!;
+    await user.click(heading);
+    expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    await user.click(heading);
+    expect(disclosure).toHaveAttribute('aria-expanded', 'true');
     expect(onNavigate).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
   });

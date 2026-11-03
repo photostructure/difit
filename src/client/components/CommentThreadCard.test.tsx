@@ -1,5 +1,6 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { CommentThread } from '../../types/diff';
@@ -416,70 +417,6 @@ describe('CommentThreadCard', () => {
     expect(screen.queryByLabelText('Outdated comment')).not.toBeInTheDocument();
   });
 
-  it('always shows an inline reply trigger below the last message', () => {
-    render(
-      <CommentThreadCard
-        thread={mockThread}
-        onGeneratePrompt={() => 'thread prompt'}
-        onToggleThreadResolved={vi.fn()}
-        onReplyToThread={vi.fn().mockResolvedValue(undefined)}
-        onRemoveMessage={vi.fn()}
-        onUpdateMessage={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByRole('button', { name: 'Write a reply...' })).toBeInTheDocument();
-  });
-
-  it('expands the reply trigger into a reply form and submits a reply', async () => {
-    const user = userEvent.setup();
-    const onReplyToThread = vi.fn().mockResolvedValue(undefined);
-
-    render(
-      <CommentThreadCard
-        thread={mockThread}
-        onGeneratePrompt={() => 'thread prompt'}
-        onToggleThreadResolved={vi.fn()}
-        onReplyToThread={onReplyToThread}
-        onRemoveMessage={vi.fn()}
-        onUpdateMessage={vi.fn()}
-      />,
-    );
-
-    await user.click(screen.getByRole('button', { name: 'Write a reply...' }));
-
-    const textarea = screen.getByPlaceholderText('Write a reply...');
-    expect(textarea).toHaveFocus();
-
-    await user.type(textarea, 'A new reply');
-    await user.click(screen.getByRole('button', { name: 'Send' }));
-
-    expect(onReplyToThread).toHaveBeenCalledWith('thread-1', 'A new reply', 'comment');
-    // Collapses back to the trigger after submitting
-    expect(screen.getByRole('button', { name: 'Write a reply...' })).toBeInTheDocument();
-  });
-
-  it('collapses the reply form back to the trigger on Escape', async () => {
-    const user = userEvent.setup();
-
-    render(
-      <CommentThreadCard
-        thread={mockThread}
-        onGeneratePrompt={() => 'thread prompt'}
-        onToggleThreadResolved={vi.fn()}
-        onReplyToThread={vi.fn().mockResolvedValue(undefined)}
-        onRemoveMessage={vi.fn()}
-        onUpdateMessage={vi.fn()}
-      />,
-    );
-
-    await user.click(screen.getByRole('button', { name: 'Write a reply...' }));
-    await user.keyboard('{Escape}');
-
-    expect(screen.queryByPlaceholderText('Write a reply...')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Write a reply...' })).toBeInTheDocument();
-  });
-
   it('shows an inline confirmation before deleting a user-authored reply', async () => {
     const user = userEvent.setup();
     const onRemoveMessage = vi.fn();
@@ -560,15 +497,16 @@ describe('CommentThreadCard', () => {
         onUpdateMessage={onUpdateMessage}
       />,
     );
-    expect(screen.getAllByText('Question')).toHaveLength(1);
+    expect(screen.getByText('Question', { selector: 'span' })).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Change to a normal comment' }),
     ).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     await user.click(screen.getByTitle('Edit message'));
-    expect(screen.getByRole('radio', { name: 'Question' })).toBeChecked();
-    await user.click(screen.getByRole('radio', { name: 'Comment' }));
-    await user.click(screen.getByRole('button', { name: 'Save' }));
+    const editForm = within(screen.getByPlaceholderText('Edit your message...').closest('form')!);
+    expect(editForm.getByRole('radio', { name: 'Question' })).toBeChecked();
+    await user.click(editForm.getByRole('radio', { name: 'Comment' }));
+    await user.click(editForm.getByRole('button', { name: 'Save' }));
     expect(onUpdateMessage).toHaveBeenCalledWith('thread-1', root.id, root.body, 'comment');
   });
 });
@@ -638,5 +576,133 @@ describe('reply copy actions', () => {
     );
 
     expect(screen.queryByTitle('Copy message')).not.toBeInTheDocument();
+  });
+});
+
+describe('thread disclosure and persistent replies', () => {
+  function renderThread(props: Partial<ComponentProps<typeof CommentThreadCard>> = {}) {
+    return render(
+      <>
+        <button type="button">Outside thread</button>
+        <CommentThreadCard
+          thread={mockThread}
+          onGeneratePrompt={() => 'thread prompt'}
+          onToggleThreadResolved={vi.fn()}
+          onReplyToThread={vi.fn().mockResolvedValue(undefined)}
+          onRemoveMessage={vi.fn()}
+          onUpdateMessage={vi.fn()}
+          {...props}
+        />
+      </>,
+    );
+  }
+
+  it('shows the actual reply form without taking focus', () => {
+    renderThread();
+
+    const reply = screen.getByRole('textbox', { name: '' });
+    expect(reply).toHaveAttribute('placeholder', 'Write a reply...');
+    expect(reply).not.toHaveFocus();
+    expect(screen.queryByRole('button', { name: 'Write a reply...' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+  });
+
+  it('keeps the reply form visible and clears it after sending', async () => {
+    const user = userEvent.setup();
+    const onReplyToThread = vi.fn().mockResolvedValue(undefined);
+    const onClick = vi.fn();
+    renderThread({ onReplyToThread, onClick });
+
+    const reply = screen.getByPlaceholderText('Write a reply...');
+    await user.type(reply, 'A new reply');
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(onReplyToThread).toHaveBeenCalledWith('thread-1', 'A new reply', 'comment');
+    expect(reply).toBeInTheDocument();
+    expect(reply).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('preserves a reply draft across Escape and outside clicks', async () => {
+    const user = userEvent.setup();
+    renderThread();
+
+    const reply = screen.getByPlaceholderText('Write a reply...');
+    await user.type(reply, 'Keep this draft');
+    await user.click(screen.getByRole('radio', { name: 'Question' }));
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('button', { name: 'Outside thread' }));
+
+    expect(reply).toBeVisible();
+    expect(reply).toHaveValue('Keep this draft');
+    expect(screen.getByRole('radio', { name: 'Question' })).toBeChecked();
+    expect(reply.closest('form')).toHaveAttribute('data-dismiss-on-outside-click', 'false');
+  });
+
+  it.each([
+    { thread: mockThread, heading: `${mockThread.file}:80` },
+    {
+      thread: {
+        id: 'review-thread',
+        scope: 'review' as const,
+        createdAt: mockThread.createdAt,
+        updatedAt: mockThread.updatedAt,
+        messages: mockThread.messages,
+      },
+      heading: 'Review conversation',
+    },
+  ])(
+    'toggles the full $heading heading without invoking card navigation',
+    async ({ thread, heading }) => {
+      const user = userEvent.setup();
+      const onClick = vi.fn();
+      renderThread({ thread, onClick });
+
+      const disclosure = screen.getByRole('button', { name: 'Collapse thread' });
+      const contentId = disclosure.getAttribute('aria-controls')!;
+      expect(document.getElementById(contentId)).toContainElement(
+        screen.getByText('Reply comment'),
+      );
+      await user.click(screen.getByText(heading));
+
+      expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+      expect(document.getElementById(contentId)).not.toBeVisible();
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+      expect(onClick).not.toHaveBeenCalled();
+
+      await user.click(screen.getByText(heading));
+      expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByPlaceholderText('Write a reply...')).toBeVisible();
+      expect(onClick).not.toHaveBeenCalled();
+    },
+  );
+
+  it('supports Enter and Space on the heading without stealing focus', async () => {
+    const user = userEvent.setup();
+    renderThread();
+
+    const disclosure = screen.getByRole('button', { name: 'Collapse thread' });
+    disclosure.focus();
+    await user.keyboard('{Enter}');
+    expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    await user.keyboard(' ');
+    expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+    expect(disclosure).toHaveFocus();
+  });
+
+  it('keeps Copy Prompt independent from disclosure and navigation', async () => {
+    const user = userEvent.setup();
+    const onClick = vi.fn();
+    renderThread({ onClick });
+
+    await user.click(screen.getByRole('button', { name: 'Copy Prompt' }));
+
+    expect(copyTextToClipboard).toHaveBeenCalledWith('thread prompt');
+    expect(screen.getByRole('button', { name: 'Collapse thread' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    expect(onClick).not.toHaveBeenCalled();
   });
 });

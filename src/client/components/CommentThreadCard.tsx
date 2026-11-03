@@ -8,7 +8,7 @@ import {
   MessageSquare,
   Trash2,
 } from 'lucide-react';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 
 import { type CommentIntent, type CommentThread, type DiffCommentMessage } from '../../types/diff';
 import { useClickOutside } from '../hooks/useClickOutside';
@@ -318,7 +318,7 @@ export function CommentThreadCard({
   syntaxTheme,
 }: CommentThreadCardProps) {
   const [isCopied, setIsCopied] = useState(false);
-  const [isReplying, setIsReplying] = useState(false);
+  const contentId = useId();
   const [isCollapsed, setIsCollapsed] = useState(Boolean(thread.resolution?.resolved));
   useEffect(() => {
     setIsCollapsed(Boolean(thread.resolution?.resolved));
@@ -356,17 +356,18 @@ export function CommentThreadCard({
       onClick={onClick}
     >
       <div className={`flex items-center justify-between gap-3 ${isCollapsed ? '' : 'mb-3'}`}>
-        <div className="flex min-w-0 flex-1 items-center gap-2 text-xs text-github-text-secondary">
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            aria-expanded={!isCollapsed}
-            aria-label={isCollapsed ? 'Expand thread' : 'Collapse thread'}
-            title={isCollapsed ? 'Expand thread' : 'Collapse thread'}
-            className="shrink-0 rounded p-0.5 text-github-text-secondary transition-colors hover:bg-github-bg-primary hover:text-github-text-primary"
-          >
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          aria-expanded={!isCollapsed}
+          aria-controls={contentId}
+          aria-label={isCollapsed ? 'Expand thread' : 'Collapse thread'}
+          title={isCollapsed ? 'Expand thread' : 'Collapse thread'}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded p-0.5 text-left text-xs text-github-text-secondary transition-colors hover:bg-github-bg-primary hover:text-github-text-primary"
+        >
+          <span className="shrink-0">
             {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-          </button>
+          </span>
           <span
             className="font-mono px-1 py-0.5 rounded overflow-hidden text-ellipsis whitespace-nowrap"
             style={{
@@ -376,21 +377,7 @@ export function CommentThreadCard({
           >
             {thread.scope === 'review' ? 'Review conversation' : `${thread.file}:${lineLabel}`}
           </span>
-          {thread.resolution?.resolved && (
-            <>
-              <span className="text-github-text-muted">Resolved</span>
-              <button
-                type="button"
-                className="text-github-accent"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onToggleThreadResolved(thread.id);
-                }}
-              >
-                Reopen
-              </button>
-            </>
-          )}
+          {thread.resolution?.resolved && <span className="text-github-text-muted">Resolved</span>}
           {thread.isOutdated && (
             <span
               className="inline-flex h-5 shrink-0 items-center rounded-full border border-github-text-muted px-2 text-[10px] font-medium text-github-text-muted"
@@ -401,12 +388,7 @@ export function CommentThreadCard({
             </span>
           )}
           {isCollapsed && (
-            <button
-              type="button"
-              onClick={toggleCollapsed}
-              className="flex min-w-0 flex-1 items-center gap-2 text-left"
-              title="Expand thread"
-            >
+            <span className="flex min-w-0 flex-1 items-center gap-2">
               <span className="min-w-0 flex-1 truncate text-github-text-secondary">
                 {rootMessage.body.split('\n')[0]}
               </span>
@@ -417,107 +399,114 @@ export function CommentThreadCard({
                 <MessageSquare size={12} />
                 {thread.messages.length}
               </span>
-            </button>
+            </span>
           )}
-        </div>
-        {!isCollapsed && (
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleCopyThread}
-              className="whitespace-nowrap rounded px-2 py-1 text-xs transition-all"
-              style={{
-                backgroundColor: 'var(--color-yellow-btn-bg)',
-                color: 'var(--color-yellow-btn-text)',
-                border: '1px solid var(--color-yellow-btn-border)',
-              }}
-              title="Copy thread prompt for AI coding agent"
-            >
-              <span className="inline-flex items-center gap-1">
-                <Copy size={12} />
-                {isCopied ? 'Copied!' : 'Copy Prompt'}
-              </span>
-            </button>
+        </button>
+        {(thread.resolution?.resolved || !isCollapsed) && (
+          <div className="flex shrink-0 items-center gap-2">
+            {thread.resolution?.resolved && (
+              <button
+                type="button"
+                className="text-xs text-github-accent"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onToggleThreadResolved(thread.id);
+                }}
+              >
+                Reopen
+              </button>
+            )}
+            {!isCollapsed && (
+              <button
+                type="button"
+                onClick={handleCopyThread}
+                className="whitespace-nowrap rounded px-2 py-1 text-xs transition-all"
+                style={{
+                  backgroundColor: 'var(--color-yellow-btn-bg)',
+                  color: 'var(--color-yellow-btn-text)',
+                  border: '1px solid var(--color-yellow-btn-border)',
+                }}
+                title="Copy thread prompt for AI coding agent"
+              >
+                <span className="inline-flex items-center gap-1">
+                  <Copy size={12} />
+                  {isCopied ? 'Copied!' : 'Copy Prompt'}
+                </span>
+              </button>
+            )}
           </div>
         )}
       </div>
 
-      {!isCollapsed && (
-        <div className="space-y-3">
-          <ThreadMessageItem
-            message={{
-              ...rootMessage,
-              intent: rootMessage.intent ?? (thread.isQuestion ? 'question' : undefined),
-            }}
-            isRootMessage={true}
-            showAuthorBadge={showAuthorBadges}
-            syntaxTheme={syntaxTheme}
-            filename={thread.file}
-            originalCode={thread.codeContent}
-            onUpdate={(newBody, intent) =>
-              onUpdateMessage(thread.id, rootMessage.id, newBody, intent)
-            }
-            onResolveOrDelete={() => onToggleThreadResolved(thread.id)}
-            actionLabel={thread.resolution?.resolved ? 'Reopen thread' : 'Resolve thread'}
-            confirmLabel={thread.resolution?.resolved ? 'Reopen' : 'Resolve'}
-            confirmPrompt={
-              confirmRootAction ? (thread.resolution?.resolved ? 'Reopen?' : 'Resolve?') : undefined
-            }
-            onDelete={onRemoveThread ? () => onRemoveThread(thread.id) : undefined}
-          />
+      <div id={contentId} hidden={isCollapsed} className="space-y-3">
+        {!isCollapsed && (
+          <>
+            <ThreadMessageItem
+              message={{
+                ...rootMessage,
+                intent: rootMessage.intent ?? (thread.isQuestion ? 'question' : undefined),
+              }}
+              isRootMessage={true}
+              showAuthorBadge={showAuthorBadges}
+              syntaxTheme={syntaxTheme}
+              filename={thread.file}
+              originalCode={thread.codeContent}
+              onUpdate={(newBody, intent) =>
+                onUpdateMessage(thread.id, rootMessage.id, newBody, intent)
+              }
+              onResolveOrDelete={() => onToggleThreadResolved(thread.id)}
+              actionLabel={thread.resolution?.resolved ? 'Reopen thread' : 'Resolve thread'}
+              confirmLabel={thread.resolution?.resolved ? 'Reopen' : 'Resolve'}
+              confirmPrompt={
+                confirmRootAction
+                  ? thread.resolution?.resolved
+                    ? 'Reopen?'
+                    : 'Resolve?'
+                  : undefined
+              }
+              onDelete={onRemoveThread ? () => onRemoveThread(thread.id) : undefined}
+            />
 
-          {thread.messages.slice(1).map((message) => (
-            <div key={message.id} className="ml-4 border-l border-github-border pl-3">
-              <ThreadMessageItem
-                message={message}
-                showAuthorBadge={showAuthorBadges}
-                syntaxTheme={syntaxTheme}
-                filename={thread.file}
-                originalCode={thread.codeContent}
-                onUpdate={(newBody, intent) =>
-                  onUpdateMessage(thread.id, message.id, newBody, intent)
-                }
-                onResolveOrDelete={() => onRemoveMessage(thread.id, message.id)}
-                actionLabel="Delete reply"
-                confirmLabel="Delete"
-                confirmPrompt="Delete?"
-              />
-            </div>
-          ))}
+            {thread.messages.slice(1).map((message) => (
+              <div key={message.id} className="ml-4 border-l border-github-border pl-3">
+                <ThreadMessageItem
+                  message={message}
+                  showAuthorBadge={showAuthorBadges}
+                  syntaxTheme={syntaxTheme}
+                  filename={thread.file}
+                  originalCode={thread.codeContent}
+                  onUpdate={(newBody, intent) =>
+                    onUpdateMessage(thread.id, message.id, newBody, intent)
+                  }
+                  onResolveOrDelete={() => onRemoveMessage(thread.id, message.id)}
+                  actionLabel="Delete reply"
+                  confirmLabel="Delete"
+                  confirmPrompt="Delete?"
+                />
+              </div>
+            ))}
 
-          <div
-            className="ml-4 border-l border-github-border pl-3"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {isReplying ? (
+            <div
+              className="ml-4 border-l border-github-border pl-3"
+              onClick={(e) => e.stopPropagation()}
+            >
               <CommentForm
-                onSubmit={async (body, options) => {
-                  await onReplyToThread(thread.id, body, options.intent);
-                  setIsReplying(false);
-                }}
-                onCancel={() => setIsReplying(false)}
+                onSubmit={(body, options) => onReplyToThread(thread.id, body, options.intent)}
+                onCancel={() => undefined}
                 selectedCode={thread.codeContent}
                 syntaxTheme={syntaxTheme}
                 filename={thread.file}
                 embedded={true}
+                autoFocus={false}
+                dismissOnOutsideClick={false}
                 title="Reply to thread"
                 submitLabel="Send"
                 placeholder="Write a reply..."
               />
-            ) : (
-              <button
-                type="button"
-                data-reply-trigger="true"
-                onFocus={() => setIsReplying(true)}
-                onClick={() => setIsReplying(true)}
-                className="w-full cursor-text rounded border border-github-border bg-github-bg-secondary px-3 py-1.5 text-left text-sm text-github-text-muted transition-colors hover:border-github-text-secondary"
-              >
-                Write a reply...
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
