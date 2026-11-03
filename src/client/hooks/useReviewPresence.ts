@@ -9,8 +9,10 @@ export function useReviewPresence(): ReviewPresenceSnapshot | null {
   useEffect(() => {
     const tab = createId();
     let stream: EventSource | undefined;
+    let stopped = false;
     const reportVisibility = () => {
-      void fetch(resolveEventSourceUrl('/api/presence'), {
+      if (stopped) return;
+      void fetch('/api/presence', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tab, visible: document.visibilityState === 'visible' }),
@@ -38,14 +40,19 @@ export function useReviewPresence(): ReviewPresenceSnapshot | null {
           setPresence(null);
         }
       };
-      // EventSource reconnects automatically. A broken connection is unknown presence.
-      stream.onerror = () => setPresence(null);
+      // A reused port may now serve another review. Require a reload after disconnect.
+      stream.onerror = () => {
+        stopped = true;
+        stream?.close();
+        setPresence(null);
+      };
     };
     connect();
     document.addEventListener('visibilitychange', reportVisibility);
     return () => {
+      if (!stopped) stream?.close();
+      stopped = true;
       document.removeEventListener('visibilitychange', reportVisibility);
-      stream?.close();
     };
   }, []);
   return presence;

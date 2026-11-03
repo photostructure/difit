@@ -30,6 +30,7 @@ describe('review listener indicator', () => {
     expect(vi.mocked(copyTextToClipboard).mock.lastCall?.[0]).toContain(
       'End the turn when caught up',
     );
+    expect(vi.mocked(copyTextToClipboard).mock.lastCall?.[0]).not.toContain('/home/mrm/');
   });
 
   it('distinguishes an attached listener from message consumption', () => {

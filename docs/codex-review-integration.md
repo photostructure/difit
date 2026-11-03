@@ -10,7 +10,8 @@ This workflow needs no external controller and starts no model turns while the
 human is away:
 
 1. From the reviewed repository's Git root, launch the source build using
-   `/home/mrm/.local/bin/difit` with `--background`. Save its API port, review ID,
+   the difit launcher prescribed by the checkout's instructions with `--background`.
+   Save its API port, review ID,
    browser URL, capture/summary versions, and pending message revisions. Use a
    named review when the patch must remain frozen.
 2. Send any explicit receipts only after recording the corresponding work. Hand
@@ -75,3 +76,8 @@ end the turn; it must not trigger a new polling cycle. Host deadlines can still
 wake the model regardless of CLI silence. The
 [Claude handoff](claude-review-wait-handoff.md) requires checking the actual host
 and separately addresses enforcement against custom polling scripts.
+
+If the host cannot provide this lifetime and completion delivery, hand back the
+review URL and end the turn. The reviewer can use **Copy resume prompt** to resume
+the owning chat with a feedback batch. Do not substitute a Monitor or a polling
+script that wakes the model on a timer.

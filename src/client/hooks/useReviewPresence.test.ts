@@ -17,11 +17,13 @@ class Stream {
 describe('browser presence connection', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
     Stream.instances = [];
   });
 
   it('receives listener state and reports visibility without opening another stream', async () => {
+    vi.stubEnv('VITE_DIFIT_API_URL', 'http://localhost:4966');
     vi.stubGlobal('EventSource', Stream);
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response('{}'));
     vi.stubGlobal('fetch', fetchMock);
@@ -42,8 +44,11 @@ describe('browser presence connection', () => {
     );
     act(() => stream.onerror?.());
     expect(result.current).toBeNull();
-    expect(stream.close).not.toHaveBeenCalled();
-    unmount();
     expect(stream.close).toHaveBeenCalledOnce();
+    fetchMock.mockClear();
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    expect(fetchMock).not.toHaveBeenCalled();
+    unmount();
+    expect(stream.close).toHaveBeenCalled();
   });
 });

@@ -80,5 +80,8 @@ start work. Unsupported presence reporting is a terminal error, not permission
 to invent a polling script. A periodically expiring Monitor is a timed wake.
 See the [waiting guide](../../../docs/waiting-for-review.md) and
 [Claude integration handoff](../../../docs/claude-review-wait-handoff.md).
+If the host cannot provide that lifetime and completion delivery, hand back the
+review URL and end the turn. The reviewer can use **Copy resume prompt** to resume
+the owning chat with a feedback batch. Do not substitute timed model checks.
 Subagents return ownership and pending work after accounting for server lifetime.
 Details: [conversation protocol](../../../docs/agent-conversations.md).

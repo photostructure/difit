@@ -13,7 +13,7 @@ Codex restored the bounded conversation event journal and
    their uncommitted edits separately. Use only `/home/mrm/.local/bin/difit`,
    from each reviewed repository's Git root. Read `difit wait --help`.
 
-2. Inventory the existing reviews: repository, API port, review ID, browser URL,
+2. Inventory the existing reviews: repository, API host and port, review ID, browser URL,
    proposed summary, approval/capture versions, and process ownership. Save their
    conversation snapshots and pending work before changing anything. Do not
    stop, restart or replace the existing review servers as part of this handoff.
@@ -25,6 +25,12 @@ Codex restored the bounded conversation event journal and
    preserve their state, and report the concrete migration needed. Do not loop
    on unsupported-server errors or replace frozen reviews with a new working-tree
    diff. Approval from an old server is not approval of a new server's capture.
+
+   Companion commands now accept `--host`: use the hostname or IP and API port
+   from the actual server URL for `comment snapshot`, `comment status`,
+   `comment reply`, and `wait`. A server bound to `10.1.1.24` is reachable with
+   `--host 10.1.1.24`; localhost is only the default. Rebuilding the CLI is enough
+   for this client-side address fix and requires no server restart.
 
 3. Account for every outstanding human message, including replies and edits.
    Preserve each review/thread/message ID and exact revision cursor in the
@@ -43,7 +49,7 @@ Codex restored the bounded conversation event journal and
 5. For servers that support the endpoint, reconcile an initial snapshot and keep
    its cursor for each port. Start exactly one Bash command using
    `run_in_background: true`, with no timeout wrapper or overall deadline. The
-   command is `/home/mrm/.local/bin/difit wait` with repeated `--port` and
+   command is `/home/mrm/.local/bin/difit wait --host <actual-host>` with repeated `--port` and
    `--after port=cursor` arguments for the actual ports and saved cursors. Let the
    harness deliver task completion. Do not run a foreground polling loop, add a
    periodically expiring Monitor, repeatedly query TaskOutput, or issue scheduled
@@ -56,6 +62,8 @@ Codex restored the bounded conversation event journal and
    a background deadline, report the exact limit once and leave a handoff. Do
    not install a waiter that will expire and repeatedly wake the model. A
    two-hour timeout and automatic restart do not meet the requested target.
+   Without the required host support, end the turn with the review URL and let
+   Matthew resume the main session with the browser's **Copy resume prompt**.
 
 6. On exit 0, read the single `wait.events` JSON result. Save that port's returned
    stream cursor and retain the other ports' checkpoints. Record the batch as
