@@ -88,7 +88,7 @@ afterAll(async () => {
 
 function launch(
   args: string[],
-  readySignal?: 'SIGINT' | 'SIGTERM',
+  readySignal?: 'SIGINT' | 'SIGTERM' | 'SIGHUP',
   environment: Record<string, string> = {},
   input?: string,
 ) {
@@ -509,7 +509,7 @@ describe('actual CLI launch protocol', () => {
 
   // Ground truth: node <compiled-cli> <target-sha> <base-sha> --host 127.0.0.1 --port 0 --no-open --keep-alive.
   // Windows process.kill does not deliver these catchable POSIX signals; rejection coverage still runs there.
-  it.skipIf(process.platform === 'win32').each(['SIGINT', 'SIGTERM'] as const)(
+  it.skipIf(process.platform === 'win32').each(['SIGINT', 'SIGTERM', 'SIGHUP'] as const)(
     'keeps immutable-comparison stdout JSONL through %s',
     async (signal) => {
       const fixture = launch(
@@ -528,6 +528,43 @@ describe('actual CLI launch protocol', () => {
         expect(events.at(-1)).toMatchObject({ type: 'server.shutdown', reason: signal });
         expect(events.filter((event) => event.type === 'server.shutdown')).toHaveLength(1);
         expect(fixture.output().stderr).toContain('File watching disabled');
+      } finally {
+        await stop(fixture.child);
+      }
+    },
+    15000,
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'flushes human-readable comments on SIGHUP',
+    async () => {
+      const fixture = launch([
+        ...revisions,
+        '--host',
+        '127.0.0.1',
+        '--port',
+        '0',
+        '--no-open',
+        '--keep-alive',
+        '--no-jsonl',
+        '--comment',
+        JSON.stringify({
+          type: 'thread',
+          filePath: 'fixture.txt',
+          position: { side: 'new', line: 1 },
+          body: 'Keep this comment after a terminal hangup',
+        }),
+      ]);
+      let signalled = false;
+      fixture.child.stderr?.on('data', () => {
+        if (!signalled && fixture.output().stderr.includes('difit server started on')) {
+          signalled = true;
+          fixture.child.kill('SIGHUP');
+        }
+      });
+      try {
+        expect(await fixture.closed).toBe(0);
+        expect(fixture.output().stdout).toContain('Keep this comment after a terminal hangup');
       } finally {
         await stop(fixture.child);
       }

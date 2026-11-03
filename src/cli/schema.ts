@@ -320,7 +320,7 @@ const definitions: Record<string, Schema> = {
   }),
   ServerShutdownEvent: object({
     type: { const: 'server.shutdown' },
-    reason: enumeration('closed', 'client-disconnected', 'approved', 'SIGINT', 'SIGTERM'),
+    reason: enumeration('closed', 'client-disconnected', 'approved', 'SIGINT', 'SIGTERM', 'SIGHUP'),
     pid: { type: 'integer', minimum: 1 },
     timestamp,
   }),

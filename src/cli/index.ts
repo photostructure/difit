@@ -514,12 +514,12 @@ Comment JSON events include type, reviewId, threadId, messageId, cursor, and bod
 void program.parseAsync();
 
 function registerShutdownHandlers(
-  shutdown: (reason: 'SIGINT' | 'SIGTERM') => Promise<void>,
+  shutdown: (reason: 'SIGINT' | 'SIGTERM' | 'SIGHUP') => Promise<void>,
   port: number,
   jsonl: boolean,
 ): void {
   let closing = false;
-  const stop = async (signal: 'SIGINT' | 'SIGTERM') => {
+  const stop = async (signal: 'SIGINT' | 'SIGTERM' | 'SIGHUP') => {
     if (closing) return;
     closing = true;
     console.error('\n👋 Shutting down difit server...');
@@ -550,6 +550,9 @@ function registerShutdownHandlers(
   });
   process.on('SIGTERM', () => {
     void stop('SIGTERM');
+  });
+  process.on('SIGHUP', () => {
+    void stop('SIGHUP');
   });
 }
 
