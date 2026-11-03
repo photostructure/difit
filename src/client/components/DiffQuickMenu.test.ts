@@ -48,6 +48,28 @@ describe('getPreviousCommitPreset', () => {
 });
 
 describe('DiffQuickMenu', () => {
+  it.each([40, 64])(
+    'abbreviates unlisted %i-character commit hashes without losing their refs',
+    (length) => {
+      const base = 'a'.repeat(length);
+      const target = 'b'.repeat(length);
+      const onSelectDiff = vi.fn();
+      render(
+        createElement(DiffQuickMenu, {
+          options: { ...options, commits: [] },
+          selection: { baseCommitish: base, targetCommitish: target },
+          onSelectDiff,
+          onOpenAdvanced: vi.fn(),
+        }),
+      );
+
+      const trigger = screen.getByRole('button', { name: 'Revision menu: aaaaaaaa...bbbbbbbb' });
+      expect(trigger).toHaveTextContent('aaaaaaaa...bbbbbbbb');
+      expect(trigger).toHaveAttribute('title', expect.stringContaining(`${base}...${target}`));
+      expect(onSelectDiff).not.toHaveBeenCalled();
+    },
+  );
+
   it('shows and searches named captures even when no comments or proposal exist', () => {
     const onSelectReview = vi.fn();
     const selection = { baseCommitish: 'old-base', targetCommitish: '.', reviewName: 'task-b' };

@@ -77,7 +77,8 @@ const matchesCommitish = (value: string | undefined, commit: CommitInfo) => {
 };
 
 const getCommitLabel = (commit: CommitInfo, withCaret: boolean) => {
-  return withCaret ? `${commit.shortHash}^` : commit.shortHash;
+  const shortHash = commit.shortHash.slice(0, 8);
+  return withCaret ? `${shortHash}^` : shortHash;
 };
 
 const resolveDisplayLabel = (
@@ -113,6 +114,9 @@ const resolveDisplayLabel = (
     if (resolvedCommit) return getCommitLabel(resolvedCommit, false);
   }
 
+  if (/^[a-f0-9]{9,64}$/i.test(baseValue)) {
+    return `${baseValue.slice(0, 8)}${caret ? '^' : ''}`;
+  }
   return value;
 };
 
@@ -222,7 +226,7 @@ export function DiffQuickMenu({
     });
 
     if (commitMatch) {
-      return `${commitMatch.shortHash} ${commitMatch.message}`;
+      return `${getCommitLabel(commitMatch, false)} ${commitMatch.message}`;
     }
 
     const baseLabel = resolveDisplayLabel(options, selection.baseCommitish, resolvedBaseRevision);
@@ -235,6 +239,14 @@ export function DiffQuickMenu({
       normalizeBaseMode(selection.baseMode) === 'merge-base' ? ' (merge-base)' : '';
     return `${baseLabel}...${targetLabel}${mergeBaseSuffix}`;
   }, [options, selection, resolvedBaseRevision, resolvedTargetRevision]);
+
+  const fullSelectionLabel = selection.reviewName
+    ? currentLabel
+    : `${selection.baseCommitish}...${selection.targetCommitish}${
+        normalizeBaseMode(selection.baseMode) === 'merge-base' ? ' (merge-base)' : ''
+      }`;
+  const currentTitle =
+    currentLabel === fullSelectionLabel ? currentLabel : `${currentLabel}\n${fullSelectionLabel}`;
 
   const mainBranch = useMemo(
     () =>
@@ -403,15 +415,15 @@ export function DiffQuickMenu({
   };
 
   return (
-    <div className="relative">
+    <div className="relative min-w-0 max-w-full">
       <button
         ref={refs.setReference}
         type="button"
-        className="flex items-center gap-1.5 cursor-pointer group"
+        className="flex max-w-full items-center gap-1.5 cursor-pointer group"
         aria-haspopup="menu"
         aria-expanded={isOpen}
         aria-label={`Revision menu: ${currentLabel}`}
-        title={currentLabel}
+        title={currentTitle}
         {...getReferenceProps()}
       >
         {isCompact ? (
@@ -423,8 +435,10 @@ export function DiffQuickMenu({
             />
           </div>
         ) : (
-          <div className="flex items-center gap-1 px-2 py-1 bg-github-bg-tertiary border border-github-border rounded hover:border-github-text-secondary transition-colors">
-            <code className="text-xs text-github-text-primary">{currentLabel}</code>
+          <div className="flex min-w-0 max-w-full items-center gap-1 px-2 py-1 bg-github-bg-tertiary border border-github-border rounded hover:border-github-text-secondary transition-colors">
+            <code className="min-w-0 max-w-[24ch] truncate text-xs text-github-text-primary">
+              {currentLabel}
+            </code>
             <ChevronDown
               size={12}
               className="text-github-text-secondary group-hover:text-github-text-primary transition-colors"
