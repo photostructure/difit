@@ -12,6 +12,8 @@ import {
 import type { NamedReviewStart, ReviewCapture, ReviewCaptureUpdate } from '../types/review.js';
 import { validateReviewName } from '../utils/review-name.js';
 
+import { serverUrl } from './server-url.js';
+
 import { detectStdinSource, readStdin } from './utils.js';
 
 interface NamedReviewOptions {
@@ -31,6 +33,7 @@ interface CaptureOptions {
 }
 
 interface SourceOptions extends CaptureOptions {
+  host: string;
   capture?: string;
   select?: string[];
   port: number;
@@ -132,6 +135,7 @@ function addCaptureOptions(command: Command): Command {
 
 function addSourceOptions(command: Command): Command {
   return addCaptureOptions(command)
+    .option('--host <host>', 'server hostname or IP address', 'localhost')
     .argument('[patch-source]', 'use - to read a unified diff from stdin')
     .option('--capture <file>', 'load a saved capture artifact')
     .option(
@@ -211,10 +215,13 @@ async function readResponse(response: Response, name: string): Promise<unknown> 
   throw new Error(message ?? `Named review request failed (${response.status})`);
 }
 
-function reportError(error: unknown, port?: number): void {
+function reportError(error: unknown, port?: number, host?: string): void {
   const message =
-    port !== undefined && error instanceof TypeError && error.message.includes('fetch failed')
-      ? `Cannot connect to difit server on port ${port}. Is the server running?`
+    port !== undefined &&
+    host !== undefined &&
+    error instanceof TypeError &&
+    error.message.includes('fetch failed')
+      ? `Cannot connect to difit server at ${serverUrl(host, port, '/')}. Check --host and --port.`
       : error instanceof Error
         ? error.message
         : 'Named review request failed';
@@ -266,7 +273,7 @@ export function createReviewCommand(): Command {
   ).action(async (name: string, patchSource: string | undefined, options: SourceOptions) => {
     try {
       const namedReview = await resolveCommandReview(name, patchSource, options);
-      const response = await fetch(`http://localhost:${options.port}/api/reviews`, {
+      const response = await fetch(serverUrl(options.host, options.port, '/api/reviews'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: serializeReviewRequest(namedReview),
@@ -274,7 +281,7 @@ export function createReviewCommand(): Command {
       });
       console.log(JSON.stringify(await readResponse(response, namedReview.name)));
     } catch (error) {
-      reportError(error, options.port);
+      reportError(error, options.port, options.host);
     }
   });
 
@@ -293,7 +300,11 @@ export function createReviewCommand(): Command {
       try {
         const namedReview = await resolveCommandReview(name, patchSource, options);
         const response = await fetch(
-          `http://localhost:${options.port}/api/reviews/${encodeURIComponent(namedReview.name)}/capture`,
+          serverUrl(
+            options.host,
+            options.port,
+            `/api/reviews/${encodeURIComponent(namedReview.name)}/capture`,
+          ),
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -306,7 +317,7 @@ export function createReviewCommand(): Command {
         );
         console.log(JSON.stringify(await readResponse(response, namedReview.name)));
       } catch (error) {
-        reportError(error, options.port);
+        reportError(error, options.port, options.host);
       }
     });
 

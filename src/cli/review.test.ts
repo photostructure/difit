@@ -259,6 +259,22 @@ describe('named review CLI', () => {
     expect(error).not.toHaveBeenCalled();
   });
 
+  it.each(['create', 'update'])('uses a selected interface for review %s', async (action) => {
+    fetchMock.mockResolvedValue(new Response('{}'));
+    await run(
+      action,
+      'task',
+      '--host',
+      '10.1.1.24',
+      '--port',
+      '4983',
+      ...(action === 'update' ? ['--expected-version', '3'] : []),
+    );
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      `http://10.1.1.24:4983/api/reviews${action === 'update' ? '/task/capture' : ''}`,
+    );
+  });
+
   it('updates the native uncommitted capture at the expected version', async () => {
     const result = { name: 'task', version: 4, patchDigest: capture.patchDigest, updated: true };
     fetchMock.mockResolvedValue(new Response(JSON.stringify(result)));
@@ -488,7 +504,7 @@ describe('named review CLI', () => {
     fetchMock.mockRejectedValue(new TypeError('fetch failed'));
     await run('update', 'task', '--port', '4983', '--expected-version', '1');
     expect(error).toHaveBeenCalledWith(
-      'Error: Cannot connect to difit server on port 4983. Is the server running?',
+      'Error: Cannot connect to difit server at http://localhost:4983/. Check --host and --port.',
     );
     expect(process.exitCode).toBe(1);
   });

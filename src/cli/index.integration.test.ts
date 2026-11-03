@@ -535,13 +535,16 @@ describe('actual CLI launch protocol', () => {
     15000,
   );
 
-  it.skipIf(process.platform === 'win32')(
-    'flushes human-readable comments on SIGHUP',
-    async () => {
+  // Linux routes 127/8 to loopback; the second address catches localhost-only shutdown fetches.
+  it
+    .skipIf(process.platform === 'win32')
+    .each(process.platform === 'linux' ? ['127.0.0.1', '127.0.0.2'] : ['127.0.0.1'])(
+    'flushes human-readable comments on SIGHUP from host %s',
+    async (host) => {
       const fixture = launch([
         ...revisions,
         '--host',
-        '127.0.0.1',
+        host,
         '--port',
         '0',
         '--no-open',

@@ -25,6 +25,41 @@ describe('conversation commands', () => {
     vi.resetAllMocks();
   });
 
+  it.each(['snapshot', 'reply', 'status', 'summary'])(
+    'uses an explicitly selected server host for %s',
+    async (action) => {
+      fetchMock.mockResolvedValue(new Response(JSON.stringify({ success: true })));
+      await createCommentCommand().parseAsync([
+        'node',
+        'difit',
+        action,
+        '--host',
+        '10.1.1.24',
+        '--port',
+        '4966',
+        ...(action === 'snapshot' ? [] : ['{}']),
+      ]);
+      expect(fetchMock).toHaveBeenCalledWith(
+        `http://10.1.1.24:4966/api/conversation/${action}`,
+        expect.anything(),
+      );
+    },
+  );
+
+  it('identifies the attempted interface when a connection fails', async () => {
+    fetchMock.mockRejectedValue(new TypeError('fetch failed'));
+    await createCommentCommand().parseAsync([
+      'node',
+      'difit',
+      'snapshot',
+      '--host',
+      '10.1.1.24',
+      '--port',
+      '4966',
+    ]);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('http://10.1.1.24:4966/'));
+  });
+
   it('omits watch from the comment help and command surface', () => {
     const command = createCommentCommand();
     expect(command.commands.map((subcommand) => subcommand.name())).not.toContain('watch');
@@ -236,7 +271,7 @@ describe('conversation commands', () => {
         ...(command === 'snapshot' ? [] : ['{}']),
       ]);
       expect(error).toHaveBeenCalledWith(
-        'Error: Cannot connect to difit server on port 4966. Is the server running?',
+        'Error: Cannot connect to difit server at http://localhost:4966/. Check --host and --port.',
       );
       expect(process.exitCode).toBe(1);
     },

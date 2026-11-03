@@ -22,6 +22,7 @@ import {
 } from './utils.js';
 import { createCommentCommand } from './comment.js';
 import { createSchemaCommand } from './schema.js';
+import { serverUrl } from './server-url.js';
 import { createWaitCommand } from './wait.js';
 import { createReviewCommand, resolveNamedReview } from './review.js';
 import { getPrPatch, getPrCommentImports } from './github.js';
@@ -343,7 +344,13 @@ Editor configuration (set before starting difit):
           jsonl: options.jsonl && !backgroundMode,
           onReady: backgroundMode
             ? undefined
-            : ({ shutdown, port }) => registerShutdownHandlers(shutdown, port, options.jsonl),
+            : ({ shutdown, port }) =>
+                registerShutdownHandlers(
+                  shutdown,
+                  port,
+                  options.jsonl,
+                  options.host || 'localhost',
+                ),
           commitMessage: options.commitMessage,
           why: options.why,
           keepAlive: options.keepAlive,
@@ -381,7 +388,13 @@ Editor configuration (set before starting difit):
           jsonl: options.jsonl && !backgroundMode,
           onReady: backgroundMode
             ? undefined
-            : ({ shutdown, port }) => registerShutdownHandlers(shutdown, port, options.jsonl),
+            : ({ shutdown, port }) =>
+                registerShutdownHandlers(
+                  shutdown,
+                  port,
+                  options.jsonl,
+                  options.host || 'localhost',
+                ),
           commitMessage: options.commitMessage,
           why: options.why,
           keepAlive: options.keepAlive,
@@ -449,7 +462,8 @@ Editor configuration (set before starting difit):
         jsonl: options.jsonl && !backgroundMode,
         onReady: backgroundMode
           ? undefined
-          : ({ shutdown, port }) => registerShutdownHandlers(shutdown, port, options.jsonl),
+          : ({ shutdown, port }) =>
+              registerShutdownHandlers(shutdown, port, options.jsonl, options.host || 'localhost'),
         commitMessage: options.commitMessage,
         why: options.why,
         keepAlive: options.keepAlive,
@@ -501,12 +515,13 @@ program.addHelpText(
   `
 Agent protocol:
   A foreground server emits JSONL on stdout; diagnostics and prompts use stderr.
-  Read server.ready for the actual API port, then consume review events directly.
+  Use the host and API port from server.ready.url for companion commands.
   difit schema                  JSON Schema for events and all protocol definitions
   difit schema summary          Commit-message/TLDR edit request schema
   difit comment reply --help    Exact-thread reply payload
   difit comment status --help   Explicit delivery and progress receipts
-  difit comment snapshot --port <port>  Recover the current review state
+  difit comment snapshot --host <host> --port <port>  Recover current review state
+  Address examples: docs/server-addresses.md
 
 Summary JSON: {"reviewId":"...","commitMessage":"fix: ...","rationale":"Short TLDR","baseVersion":0}
 Comment JSON events include type, reviewId, threadId, messageId, cursor, and body.
@@ -519,6 +534,7 @@ function registerShutdownHandlers(
   shutdown: (reason: 'SIGINT' | 'SIGTERM' | 'SIGHUP') => Promise<void>,
   port: number,
   jsonl: boolean,
+  host: string,
 ): void {
   let closing = false;
   const stop = async (signal: 'SIGINT' | 'SIGTERM' | 'SIGHUP') => {
@@ -528,7 +544,7 @@ function registerShutdownHandlers(
     let exitCode = 0;
     if (!jsonl) {
       try {
-        const response = await fetch(`http://localhost:${port}/api/comments-output`, {
+        const response = await fetch(serverUrl(host, port, '/api/comments-output'), {
           signal: AbortSignal.timeout(3000),
         });
         if (response.ok) {

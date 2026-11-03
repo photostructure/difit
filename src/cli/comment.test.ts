@@ -16,6 +16,29 @@ describe('createCommentCommand', () => {
     expect(subcommandNames).toContain('resolve');
   });
 
+  it.each(['add', 'get', 'resolve', 'reopen', 'delete'])(
+    'rejects bad ports before connecting for %s',
+    async (action) => {
+      for (const port of ['abc', '0', '99999', '4966suffix']) {
+        const command = createCommentCommand();
+        command.commands
+          .find((child) => child.name() === action)!
+          .exitOverride()
+          .configureOutput({ writeErr: vi.fn() });
+        await expect(
+          command.parseAsync([
+            'node',
+            'difit',
+            action,
+            '--port',
+            port,
+            ...(['add', 'get'].includes(action) ? [] : ['thread']),
+          ]),
+        ).rejects.toThrow('Expected an integer from 1 to 65535');
+      }
+    },
+  );
+
   describe('add subcommand', () => {
     const addCommand = command.commands.find((c) => c.name() === 'add')!;
 
@@ -130,6 +153,32 @@ describe('comment subcommand integration', () => {
     process.exit = originalProcessExit;
     vi.restoreAllMocks();
   });
+
+  it.each(['add', 'get', 'resolve', 'reopen', 'delete'])(
+    'uses a selected interface for comment %s',
+    async (action) => {
+      mockFetch.mockResolvedValue(jsonResponse({ success: true, threads: [] }));
+      const args =
+        action === 'add'
+          ? [
+              '{"type":"thread","filePath":"test.ts","position":{"side":"new","line":1},"body":"Test"}',
+            ]
+          : action === 'get'
+            ? []
+            : ['thread'];
+      await createCommentCommand().parseAsync([
+        'node',
+        'difit',
+        action,
+        '--host',
+        '10.1.1.24',
+        '--port',
+        '4966',
+        ...args,
+      ]);
+      expect(mockFetch.mock.calls[0]?.[0]).toMatch(/^http:\/\/10\.1\.1\.24:4966\/api\//);
+    },
+  );
 
   describe('add', () => {
     it('sends comment imports to the server', async () => {
