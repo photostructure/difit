@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ConversationStreamEvent } from '../types/conversation.js';
 import type { DiffCommentThread } from '../types/diff.js';
@@ -30,11 +30,58 @@ function observedConversation() {
 }
 
 describe('Conversation state and events', () => {
-  it('does not retain a replay API or event history', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('replays retained events without sharing mutable state or acknowledging delivery', () => {
     const journal = new Conversation();
-    expect(journal).not.toHaveProperty('read');
-    expect(journal).not.toHaveProperty('events');
-    expect(journal).not.toHaveProperty('capacity');
+    const before = journal.cursor;
+    journal.update(selection, [], [thread], 'user');
+    const batch = journal.read(before);
+    expect(batch.events).toHaveLength(1);
+    expect(batch.cursor).toBe(journal.cursor);
+    batch.events.length = 0;
+    expect(journal.read(before).events).toHaveLength(1);
+    expect(journal.snapshot().reviews[0]?.threads[0]?.messages[0]?.progress?.status).toBe('queued');
+  });
+
+  it('rejects expired, foreign, malformed and future cursors without discarding queued messages', () => {
+    const journal = new Conversation(undefined, 2);
+    const before = journal.cursor;
+    journal.update(selection, [], [thread], 'user');
+    journal.setApproval(selection, true);
+    journal.setApproval(selection, false);
+    expect(() => journal.read(before)).toThrow('expired');
+    expect(journal.read(`${before.split(':')[0]}:1`).events).toHaveLength(2);
+    for (const cursor of [
+      new Conversation().cursor,
+      `${journal.cursor}:extra`,
+      `${before.split(':')[0]}:99`,
+      `${before.split(':')[0]}:-1`,
+    ])
+      expect(() => journal.read(cursor)).toThrow('Invalid conversation cursor');
+    expect(journal.snapshot().reviews[0]?.threads[0]?.messages[0]?.body).toBe(
+      thread.messages[0]?.body,
+    );
+  });
+
+  it('releases every waiter on activity and cleans up timers on timeout and disconnect', async () => {
+    vi.useFakeTimers();
+    const journal = new Conversation();
+    const abort = new AbortController();
+    const first = journal.wait(journal.cursor, 25000, abort.signal);
+    const second = journal.wait(journal.cursor, 25000, abort.signal);
+    expect(vi.getTimerCount()).toBe(2);
+    journal.setApproval(selection, true);
+    expect((await first).events).toHaveLength(1);
+    expect((await second).events).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+    const timeout = journal.wait(journal.cursor, 25000, abort.signal);
+    await vi.advanceTimersByTimeAsync(25000);
+    expect((await timeout).events).toEqual([]);
+    const disconnected = journal.wait(journal.cursor, 25000, abort.signal);
+    abort.abort();
+    expect((await disconnected).events).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('emits a comment deletion when a reply is removed from a surviving thread', () => {

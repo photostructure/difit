@@ -390,10 +390,18 @@ comment and approval output goes to stdout. To disable conversations, use
 Keep the process handle and read new output between tool steps. `server.ready` identifies
 the actual API port, URL, PID, and review. Send replies and explicit Delivered/Read
 receipts with `comment reply` and `comment status` using that API port.
-`--background` has no live stdout. Recover current state with `comment snapshot`;
-events cannot be replayed or resumed by cursor. The separate `comment watch`
-command has been removed. See [the conversation protocol and
-agent workflow](docs/agent-conversations.md), including conditional LGTM approval.
+`--background` has no live stdout. Use `difit wait --port <port>` to wait silently
+for human activity on an existing server. Repeat `--port` to cover several servers
+with one waiter. It has no overall timeout and exits with one nonempty JSON batch;
+empty HTTP rounds and agent activity produce no output. Save each returned
+`port`/`cursor` and supply `--after port=cursor` on the next invocation to cover
+changes between waits. Queued messages are recovered on every attachment without
+being acknowledged. Replay retains 256 events per server process; expired cursors
+require explicit snapshot reconciliation. Use `difit schema wait` for the result
+contract. See [waiting for review](docs/waiting-for-review.md) and the
+[conversation protocol](docs/agent-conversations.md), including conditional LGTM
+approval. The waiting guide supersedes the older protocol's statements that event
+replay is unavailable.
 
 ## HTTPS and remote browsers
 

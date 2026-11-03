@@ -66,6 +66,8 @@ describe('schema command', () => {
     ['reply', 'ReplyRequest'],
     ['status', 'StatusRequest'],
     ['snapshot', 'SnapshotResponse'],
+    ['wait', 'WaitResult'],
+    ['batch', 'ConversationBatch'],
     ['comments', 'CommentsRequest'],
     ['import', 'CommentImportRequest'],
     ['approval', 'ApprovalRequest'],

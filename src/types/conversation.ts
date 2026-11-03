@@ -132,3 +132,14 @@ export type ConversationStreamEvent =
   | ReviewSummaryEvent
   | CommentProgressEvent
   | ThreadEvent;
+
+export interface ConversationBatch {
+  events: ConversationStreamEvent[];
+  cursor: string;
+}
+
+/** One nonempty batch from one of the servers passed to difit wait. */
+export interface WaitResult extends ConversationBatch {
+  type: 'wait.events';
+  port: number;
+}

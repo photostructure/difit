@@ -6,6 +6,7 @@ import type {
   ConversationEvent,
   ConversationStreamEvent,
   ConversationSnapshot,
+  ConversationBatch,
   ReviewApproval,
   ReviewSummary,
 } from '../types/conversation.js';
@@ -23,15 +24,71 @@ interface Review {
   summary: ReviewSummary;
 }
 
-/** Process-local review state and live events. Revision tokens change after server restart. */
+/** Process-local state and bounded replay. Cursors change after server restart. */
 export class Conversation {
   private readonly streamId = randomUUID();
   private sequence = 0;
   private readonly reviews = new Map<string, Review>();
-  constructor(private readonly onEvent?: (event: ConversationStreamEvent) => void) {}
+  private readonly events: ConversationStreamEvent[] = [];
+  private readonly listeners = new Set<() => void>();
+  constructor(
+    private readonly onEvent?: (event: ConversationStreamEvent) => void,
+    private readonly capacity = 256,
+  ) {
+    if (!Number.isSafeInteger(capacity) || capacity < 1)
+      throw new Error('Conversation capacity must be a positive integer');
+  }
 
   private emit(event: ConversationStreamEvent): void {
+    this.events.push(structuredClone(event));
+    if (this.events.length > this.capacity) this.events.shift();
+    for (const listener of this.listeners) listener();
     this.onEvent?.(event);
+  }
+
+  read(after?: string): ConversationBatch {
+    let sequence = 0;
+    if (after !== undefined) {
+      const [streamId, number, extra] = after.split(':');
+      sequence = Number(number);
+      if (
+        streamId !== this.streamId ||
+        extra !== undefined ||
+        !number ||
+        !/^\d+$/.test(number) ||
+        !Number.isSafeInteger(sequence) ||
+        sequence > this.sequence
+      ) {
+        throw new ConversationCursorError(
+          'Invalid conversation cursor or server restarted; reconcile with comment snapshot',
+        );
+      }
+    }
+    if (sequence < this.sequence - this.events.length)
+      throw new ConversationCursorError(
+        'Conversation cursor expired; reconcile with comment snapshot',
+      );
+    return {
+      events: structuredClone(this.events.slice(sequence - (this.sequence - this.events.length))),
+      cursor: this.cursor,
+    };
+  }
+
+  async wait(after: string, milliseconds: number, signal: AbortSignal): Promise<ConversationBatch> {
+    const batch = this.read(after);
+    if (batch.events.length || milliseconds === 0 || signal.aborted) return batch;
+    await new Promise<void>((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        this.listeners.delete(finish);
+        signal.removeEventListener('abort', finish);
+        resolve();
+      };
+      const timer = setTimeout(finish, milliseconds);
+      this.listeners.add(finish);
+      signal.addEventListener('abort', finish, { once: true });
+    });
+    return this.read(after);
   }
 
   private getReview(selection: DiffSelection): Review {
@@ -305,6 +362,8 @@ export class Conversation {
   }
 }
 
+class ConversationCursorError extends Error {}
+
 class ProgressError extends Error {
   constructor(
     readonly status: number,
@@ -322,6 +381,37 @@ export function registerConversationRoutes(
 ): void {
   app.get('/api/conversation/snapshot', (_req, res) => {
     res.json(conversation.snapshot());
+  });
+
+  app.get('/api/conversation/events', async (req, res) => {
+    const after = req.query.after;
+    const wait = req.query.wait ?? '25000';
+    if (
+      (after !== undefined && typeof after !== 'string') ||
+      typeof wait !== 'string' ||
+      !/^\d+$/.test(wait) ||
+      Number(wait) > 25000
+    ) {
+      res
+        .status(400)
+        .json({ error: 'Expected an optional after cursor and wait from 0 to 25000 milliseconds' });
+      return;
+    }
+    const abort = new AbortController();
+    const disconnect = () => abort.abort();
+    res.on('close', disconnect);
+    try {
+      const batch = conversation.read(after);
+      const result = batch.events.length
+        ? batch
+        : await conversation.wait(batch.cursor, Number(wait), abort.signal);
+      if (!abort.signal.aborted) res.json(result);
+    } catch (error) {
+      if (!(error instanceof ConversationCursorError)) throw error;
+      if (!abort.signal.aborted) res.status(409).json({ error: error.message });
+    } finally {
+      res.off('close', disconnect);
+    }
   });
 
   app.post('/api/conversation/status', (req, res) => {

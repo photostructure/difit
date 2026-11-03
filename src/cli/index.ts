@@ -22,6 +22,7 @@ import {
 } from './utils.js';
 import { createCommentCommand } from './comment.js';
 import { createSchemaCommand } from './schema.js';
+import { createWaitCommand } from './wait.js';
 import { createReviewCommand, resolveNamedReview } from './review.js';
 import { getPrPatch, getPrCommentImports } from './github.js';
 import {
@@ -114,6 +115,7 @@ program
   .enablePositionalOptions()
   .addCommand(createCommentCommand())
   .addCommand(createReviewCommand())
+  .addCommand(createWaitCommand())
   .argument(
     '[commit-ish]',
     'Git commit, tag, branch, HEAD~n reference, or "working"/"staged"/"."',

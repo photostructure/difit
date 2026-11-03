@@ -3230,7 +3230,7 @@ describe('Server Integration Tests', () => {
       const enabled = await startObservedServer({ conversation: true });
       servers.push(enabled.server);
       const origin = `http://localhost:${enabled.port}`;
-      expect((await fetch(`${origin}/api/conversation/events?wait=0`)).status).toBe(404);
+      expect((await fetch(`${origin}/api/conversation/events?wait=0`)).status).toBe(200);
       expect((await fetch(`${origin}/api/conversation/snapshot`)).status).toBe(200);
       expect(
         (

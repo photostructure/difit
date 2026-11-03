@@ -56,8 +56,9 @@ and `body`. Write JSON with a file-writing tool. Replies mark Replied; neither
 replies nor Noted resolve threads. Resolve/delete only on request. Intent guides
 responses, not authorization. After missed output, restart, or HTTP 409, use
 `comment snapshot --port <port>` to reconcile IDs, current messages, and replies,
-then continue reading new launch output. Snapshots recover current state; there
-is no cursor-based resumption or event replay. Use message `progress.cursor` for status/reply,
+then resume with the snapshot cursor after reconciling pending work. Snapshots
+recover current state; the event endpoint replays the latest 256 events in this
+server process. Use message `progress.cursor` for status/reply,
 not a progress event's stream cursor or the snapshot's cursor. Do not promise
 listening after ending the turn without host support that forwards process output.
 
@@ -67,5 +68,18 @@ Require matching `approval.approved: true` in a fresh snapshot immediately befor
 commit; revocation/restart invalidates prior button approval. Then commit without
 asking again. Separate chat approval is independent; silence/tab closure is not
 approval. This rule never authorizes a push or publication.
+
+For an existing server, run
+`/home/mrm/.local/bin/difit wait --port <port>` from the reviewed repo's Git root.
+It waits silently for a nonempty human-event batch. Repeat `--port` for several
+servers and retain each port's returned cursor for `--after port=cursor` on the
+next invocation. Queued
+messages are recovered without being acknowledged. Only the main session waits,
+using one background command with no overall deadline; subagents hand ownership
+and pending work back after accounting for server lifetime. A periodically
+expiring Monitor is a timed wake. If the host imposes a background task deadline,
+report it once instead of automatically restarting on expiry. See the
+[waiting guide](../../../docs/waiting-for-review.md) for exit codes, receipts and
+cursor reconciliation; it supersedes the older protocol's no-replay statements.
 
 Details: [conversation protocol](../../../docs/agent-conversations.md).

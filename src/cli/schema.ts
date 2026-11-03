@@ -408,6 +408,26 @@ const definitions: Record<string, Schema> = {
       'ReviewCaptureEvent',
     ].map(ref),
   },
+  ConversationBatch: object({ events: array(ref('ConversationEvent')), cursor }),
+  WaitResult: {
+    ...object({
+      type: { const: 'wait.events' },
+      port: { type: 'integer', minimum: 1, maximum: 65535 },
+      events: {
+        type: 'array',
+        minItems: 1,
+        items: {
+          allOf: [
+            { oneOf: ['CommentEvent', 'ReviewApprovalEvent', 'ReviewSummaryEvent'].map(ref) },
+            { properties: { origin: { const: 'user' } } },
+          ],
+        },
+      },
+      cursor,
+    }),
+    description:
+      'One nonempty batch from difit wait. Save port/cursor for the next --after; events retain their exact revision cursors. No delivery receipt is implied.',
+  },
   ServerEvent: {
     description:
       'One complete JSON object per stdout line. Newlines within strings are JSON escaped. Stdout delivery does not acknowledge comment progress; send an explicit StatusRequest.',
@@ -472,7 +492,7 @@ const definitions: Record<string, Schema> = {
     cursor: {
       ...cursor,
       description:
-        'Opaque state checkpoint captured with this snapshot. Equality with a concurrently buffered event cursor means that event is already reflected in the snapshot. Do not decode, sort, or use it for replay or message revision guards. Full-state reconciliation may ignore it.',
+        'Opaque stream checkpoint captured with this snapshot. Use it as --after only after reconciling current state; it does not acknowledge queued messages. Do not decode, sort, or use it as a message revision guard. Replay is bounded and process-local.',
     },
     reviews: array(
       object(
@@ -600,6 +620,8 @@ const roots = {
   reply: 'ReplyRequest',
   status: 'StatusRequest',
   snapshot: 'SnapshotResponse',
+  wait: 'WaitResult',
+  batch: 'ConversationBatch',
   comments: 'CommentsRequest',
   import: 'CommentImportRequest',
   approval: 'ApprovalRequest',

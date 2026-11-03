@@ -7,13 +7,15 @@ All notable changes to this project will be documented in this file.
 ### Added in the PhotoStructure fork
 
 - Discover launch events and agent JSON requests/responses through `difit schema` and command help.
+- Wait silently for human activity across review servers with `difit wait`; recover queued messages without implicit delivery receipts.
+- Restore the conversation event endpoint with cursor replay of the latest 256 events per server process.
 
 ### Changed in the PhotoStructure fork
 
 - Bind an OS-assigned port with `--port 0` and report it in `server.ready`; reject non-numeric ports instead of falling back to 4966.
 - Emit JSON Lines from the foreground launch process by default, with `--jsonl` and a `--no-jsonl` human-output opt-out.
 - Include server readiness, comment progress, and thread changes in launch output; require explicit Delivered receipts.
-- Remove the separate `comment watch` command and conversation event long-poll endpoint; retain snapshot recovery and companion commands.
+- Remove the separate `comment watch` command; retain snapshot recovery and companion commands.
 - Require `--no-jsonl --no-conversation` together to disable conversations; `--no-conversation` alone now exits with an error.
 - Route startup and disconnect diagnostics to stderr in both output modes; `--no-jsonl` uses human-readable comment and approval output on stdout.
 
