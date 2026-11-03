@@ -669,19 +669,19 @@ describe('App Component - Ship it', () => {
     renderApp();
 
     await screen.findByText('0 / 1 files viewed');
-    expect(screen.queryByRole('button', { name: 'LGTM' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
   });
 
-  it('keeps the LGTM image clickable and toggles approval on and off', async () => {
+  it('shows a plain approval button and toggles approval on and off', async () => {
     mockFetch({ ...mockDiffResponse, shipIt: true });
 
     renderApp();
-    const button = await screen.findByRole('button', { name: 'LGTM' });
+    const button = await screen.findByRole('button', { name: 'Approve' });
     await waitFor(() => expect(button).toBeEnabled());
-    const icon = button.querySelector('img');
-    expect(icon).not.toBeNull();
+    expect(button).toHaveTextContent(/^Approve$/);
+    expect(button.querySelector('img')).toBeNull();
     expect(button).toHaveAttribute('aria-pressed', 'false');
-    expect(button).toHaveClass('grayscale');
+    expect(button).toHaveAttribute('title', 'Approve this review');
     fireEvent.click(button);
 
     await waitFor(() => {
@@ -693,14 +693,16 @@ describe('App Component - Ship it', () => {
     });
     await waitFor(() => expect(button).toHaveAttribute('aria-pressed', 'true'));
     expect(button).toBeEnabled();
-    expect(button).toHaveClass('grayscale-0');
-    expect(button.querySelector('img')).toBe(icon);
+    expect(button).toHaveTextContent(/^Approved$/);
+    expect(button).toHaveAttribute('title', 'Revoke commit approval');
+    expect(button.querySelector('img')).toBeNull();
     expect(screen.queryByText('Shipped')).not.toBeInTheDocument();
     fireEvent.click(button);
     await waitFor(() => expect(button).toHaveAttribute('aria-pressed', 'false'));
-    expect(button).toHaveClass('grayscale');
+    expect(button).toHaveTextContent(/^Approve$/);
+    expect(button).toHaveAttribute('title', 'Approve this review');
     expect(button).toBeEnabled();
-    expect(button.querySelector('img')).toBe(icon);
+    expect(button.querySelector('img')).toBeNull();
     expect(global.fetch).toHaveBeenCalledWith('/api/approval?base=HEAD%5E&target=HEAD', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -711,7 +713,7 @@ describe('App Component - Ship it', () => {
   it('edits review intent and waits for the summary to be saved before approval', async () => {
     mockFetch({ ...mockDiffResponse, shipIt: true });
     renderApp();
-    const approval = await screen.findByRole('button', { name: 'LGTM' });
+    const approval = await screen.findByRole('button', { name: 'Approve' });
     await waitFor(() => expect(approval).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: /Change summary/ }));
     fireEvent.change(screen.getByLabelText('Why this change'), {
@@ -762,7 +764,7 @@ describe('App Component - Ship it delivery', () => {
 
     renderApp();
 
-    expect(await screen.findByRole('button', { name: 'LGTM' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Approve' })).toBeDisabled();
   });
 
   it('waits for a final comment save and approves the displayed selection', async () => {
@@ -784,7 +786,7 @@ describe('App Component - Ship it delivery', () => {
     });
 
     renderApp();
-    const button = await screen.findByRole('button', { name: 'LGTM' });
+    const button = await screen.findByRole('button', { name: 'Approve' });
     await waitFor(() => expect(button).toBeEnabled());
     fireEvent.click(button);
 
@@ -818,7 +820,7 @@ describe('App Component - Ship it delivery', () => {
     });
 
     renderApp();
-    const button = await screen.findByRole('button', { name: 'LGTM' });
+    const button = await screen.findByRole('button', { name: 'Approve' });
     await waitFor(() => expect(button).toBeEnabled());
     fireEvent.click(button);
 
@@ -827,7 +829,7 @@ describe('App Component - Ship it delivery', () => {
       expect.stringContaining('/api/approval'),
       expect.objectContaining({ method: 'POST' }),
     );
-    expect(screen.getByRole('button', { name: 'LGTM' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
   });
 
   it.each([{ failure: 'http' }, { failure: 'network' }])(
@@ -845,12 +847,12 @@ describe('App Component - Ship it delivery', () => {
       });
 
       renderApp();
-      const button = await screen.findByRole('button', { name: 'LGTM' });
+      const button = await screen.findByRole('button', { name: 'Approve' });
       await waitFor(() => expect(button).toBeEnabled());
       fireEvent.click(button);
 
       expect(await screen.findByRole('alert')).toHaveTextContent('Could not update approval');
-      expect(screen.getByRole('button', { name: 'LGTM' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
     },
   );
 });

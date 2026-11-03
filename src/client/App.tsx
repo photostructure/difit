@@ -1841,19 +1841,13 @@ function App() {
                           summary.dirty ||
                           summary.saving))
                     }
-                    aria-label="LGTM"
+                    aria-label="Approve"
                     aria-pressed={approval.approved}
                     aria-busy={isShipping}
                     title={approval.approved ? 'Revoke commit approval' : 'Approve this review'}
-                    className={`flex h-9 w-[76px] shrink-0 items-center justify-center overflow-hidden rounded px-2 py-1 text-xs font-medium text-github-text-primary ${approval.approved ? 'grayscale-0' : 'grayscale'} transition-[filter,opacity] duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-github-accent disabled:opacity-50`}
+                    className={`flex h-9 min-w-[76px] shrink-0 items-center justify-center rounded border px-3 py-1 text-xs font-medium ${approval.approved ? 'border-github-accent bg-github-accent/10 text-github-accent hover:bg-github-accent/20' : 'border-github-border bg-github-bg-primary text-github-text-primary hover:bg-github-bg-tertiary'} transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-github-accent disabled:opacity-50`}
                   >
-                    <img
-                      src="/lgtm.png"
-                      alt=""
-                      width={60}
-                      height={16}
-                      className="block h-auto w-full"
-                    />
+                    {approval.approved ? 'Approved' : 'Approve'}
                   </button>
                   {(shipItError || approval.error) && (
                     <span role="alert" className="text-xs text-github-danger">

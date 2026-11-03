@@ -518,7 +518,7 @@ describe('named captures in the browser', () => {
       state.capture.name = reviewName;
       window.history.replaceState(null, '', `/?review=${reviewName}`);
       renderApp();
-      await waitFor(() => expect(screen.getByRole('button', { name: 'LGTM' })).toBeEnabled());
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
       const posts = vi
         .mocked(fetch)
         .mock.calls.filter(
@@ -638,7 +638,7 @@ describe('named captures in the browser', () => {
   it('orders same-capture comment refreshes before updating threads and the next write version', async () => {
     const state = fixture([originalThread]);
     renderApp();
-    await waitFor(() => expect(screen.getByRole('button', { name: 'LGTM' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Conversation' }));
     const baseFetch = vi.mocked(fetch).getMockImplementation()!;
     let releaseOld: ((response: Response) => void) | undefined;
@@ -716,7 +716,7 @@ describe('named captures in the browser', () => {
   it('ignores prior-capture comment responses after fresh capture comments are loaded', async () => {
     const state = fixture([originalThread]);
     renderApp();
-    await waitFor(() => expect(screen.getByRole('button', { name: 'LGTM' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Conversation' }));
     const baseFetch = vi.mocked(fetch).getMockImplementation()!;
     let releaseOld: ((response: Response) => void) | undefined;
@@ -781,7 +781,7 @@ describe('named captures in the browser', () => {
     }
   });
 
-  it('loads a frozen capture by name and binds LGTM to the displayed capture and proposal', async () => {
+  it('loads a frozen capture by name and binds approval to the displayed capture and proposal', async () => {
     fixture();
     renderApp();
     const identity = await screen.findByRole('status', { name: 'Named review capture' });
@@ -791,7 +791,7 @@ describe('named captures in the browser', () => {
     expect(identity).toHaveClass('flex-wrap');
     expect(screen.queryByRole('button', { name: /Expand.*hidden lines/ })).not.toBeInTheDocument();
     expect(screen.getByText('1 line outside this patch')).toBeVisible();
-    const approve = screen.getByRole('button', { name: 'LGTM' });
+    const approve = screen.getByRole('button', { name: 'Approve' });
     await waitFor(() => expect(approve).toBeEnabled());
     fireEvent.click(approve);
     await waitFor(() => expect(approve).toHaveAttribute('aria-pressed', 'true'));
