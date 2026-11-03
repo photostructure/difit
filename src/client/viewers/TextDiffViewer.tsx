@@ -2,6 +2,7 @@ import React from 'react';
 
 import { DiffChunk } from '../components/DiffChunk';
 import { ExpandButton } from '../components/ExpandButton';
+import type { PresentationChunk } from '../utils/ignoreWhitespace';
 
 import type { DiffViewerBodyProps } from './types';
 
@@ -110,6 +111,11 @@ export function TextDiffViewer({
               renderExpandButton('middle', mergedChunk, firstOriginalIndex, lastOriginalIndex)}
 
             <div id={`chunk-${file.path.replace(/[^a-zA-Z0-9]/g, '-')}-${mergedIndex}`}>
+              {(mergedChunk as PresentationChunk).snapshotLines && (
+                <div className="border-y border-github-border bg-github-bg-tertiary px-3 py-1.5 text-xs text-github-text-muted">
+                  Whitespace-only changes hidden
+                </div>
+              )}
               <DiffChunk
                 chunk={mergedChunk}
                 chunkIndex={mergedIndex}

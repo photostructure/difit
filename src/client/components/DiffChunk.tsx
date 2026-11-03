@@ -25,7 +25,7 @@ import type { AppearanceSettings } from './SettingsModal';
 import { SideBySideDiffChunk } from './SideBySideDiffChunk';
 
 interface DiffChunkProps {
-  chunk: DiffChunkType;
+  chunk: DiffChunkType & { snapshotLines?: DiffLine[] };
   chunkIndex: number;
   threads: CommentThread[];
   showAuthorBadges?: boolean;
@@ -239,7 +239,7 @@ export const DiffChunk = memo(function DiffChunk({
     if (!commentingLine) return '';
 
     const { side, lineNumber } = commentingLine;
-    const lines = chunk.lines;
+    const lines = chunk.snapshotLines ?? chunk.lines;
 
     if (typeof lineNumber === 'number') {
       // Single line
@@ -256,7 +256,7 @@ export const DiffChunk = memo(function DiffChunk({
       });
       return selectedLines.map((l) => l.content ?? '').join('\n');
     }
-  }, [commentingLine, chunk.lines]);
+  }, [commentingLine, chunk.lines, chunk.snapshotLines]);
 
   const handleSubmitComment = useCallback(
     async (body: string, options: CommentSubmitOptions) => {

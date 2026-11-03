@@ -591,24 +591,48 @@ describe('named captures in the browser', () => {
     expect(window.location.search).toBe(search);
   });
 
-  it('shows captured whitespace without offering a no-op whitespace toggle', async () => {
+  it('toggles captured whitespace without changing capture identity, approval or viewed records', async () => {
     const state = fixture();
-    const content = '  const stable = true;  ';
+    const content = '  const stable = false;  ';
     state.addedLine = content;
+    state.approved = true;
     renderApp();
-    await screen.findByRole('status', { name: 'Named review capture' });
-    expect(screen.queryByRole('checkbox', { name: 'Ignore Whitespace' })).not.toBeInTheDocument();
-    expect(screen.getByText('Whitespace included')).toHaveAttribute(
-      'title',
-      'Captured patches include whitespace changes',
-    );
-    expect(
-      screen.getByText(
-        (_, element) =>
-          element?.textContent === content &&
-          !Array.from(element.children).some((child) => child.textContent === content),
+    const capture = await screen.findByRole('status', { name: 'Named review capture' });
+    const identity = capture.textContent;
+    const toggle = screen.getByRole('checkbox', { name: 'Ignore Whitespace' });
+    expect(toggle).toBeChecked();
+    await screen.findByText('Whitespace-only changes hidden');
+    expect(document.querySelectorAll('[data-diff-line-row="true"]')).toHaveLength(0);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Viewed' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Viewed' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Viewed' })).toHaveAttribute(
+        'title',
+        'Mark as not reviewed',
       ),
-    ).toBeVisible();
+    );
+    const saved = JSON.stringify(localStorage);
+    const requestCount = diffRequests().length;
+    // Expand the reviewed file, then reveal its original captured rows.
+    fireEvent.click(screen.getByRole('button', { name: 'Expand file (Alt+Click to expand all)' }));
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-diff-line-row="true"]')).toHaveLength(1),
+    );
+    expect(document.querySelector('[data-diff-line-row="true"]')?.textContent).toContain(
+      'const stable = false;',
+    );
+    expect(screen.getByRole('status', { name: 'Named review capture' }).textContent).toBe(identity);
+    expect(screen.getByRole('button', { name: 'Viewed' })).toHaveAttribute(
+      'title',
+      'Mark as not reviewed',
+    );
+    expect(JSON.stringify(localStorage)).toBe(saved);
+    expect(state.approved).toBe(true);
+    expect(diffRequests()).toHaveLength(requestCount);
+    fireEvent.click(toggle);
+    await screen.findByText('Whitespace-only changes hidden');
+    expect(document.querySelectorAll('[data-diff-line-row="true"]')).toHaveLength(0);
   });
 
   it('orders same-capture comment refreshes before updating threads and the next write version', async () => {

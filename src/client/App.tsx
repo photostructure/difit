@@ -79,6 +79,7 @@ import {
 } from './utils/mergedChunks';
 import { buildFileLineIndex, isThreadOutdated } from './utils/outdatedComments';
 import { getFallbackSyntaxTheme } from './utils/themeLoader';
+import { hideWhitespaceChanges, remapWhitespaceCursor } from './utils/ignoreWhitespace';
 
 const EMPTY_COMMENT_THREADS: CommentThread[] = [];
 const EMPTY_MERGED_CHUNKS: MergedChunk[] = [];
@@ -734,7 +735,7 @@ function App() {
   }, [diffData, diffDataVersion, filesByPath, renderedFilePaths, lastUpdatedAt]);
 
   // Create files with merged chunks for keyboard navigation
-  const navigableFiles = useMemo(() => {
+  const canonicalFiles = useMemo(() => {
     if (!diffData) return [];
     return diffData.files.map((file) => ({
       ...file,
@@ -745,11 +746,11 @@ function App() {
 
   const fileLineIndexByPath = useMemo(() => {
     const map = new Map<string, ReturnType<typeof buildFileLineIndex>>();
-    navigableFiles.forEach((file) => {
+    canonicalFiles.forEach((file) => {
       map.set(file.path, buildFileLineIndex(file));
     });
     return map;
-  }, [navigableFiles]);
+  }, [canonicalFiles]);
 
   const normalizedThreads = useMemo<CommentThread[]>(
     () =>
@@ -778,6 +779,40 @@ function App() {
     });
     return map;
   }, [normalizedThreads]);
+
+  // Keep the captured patch canonical for viewed hashes and comment snapshots;
+  // rendering and keyboard navigation share only this presentation projection.
+  const navigableFiles = useMemo(
+    () =>
+      canonicalFiles.map((file) => ({
+        ...file,
+        chunks:
+          diffData?.capture && ignoreWhitespace
+            ? hideWhitespaceChanges(
+                file.chunks,
+                threadsByFile.get(file.path) ?? EMPTY_COMMENT_THREADS,
+              )
+            : file.chunks,
+      })),
+    [canonicalFiles, diffData?.capture, ignoreWhitespace, threadsByFile],
+  );
+  const presentationChunksByPath = useMemo(() => {
+    const map = new Map<string, MergedChunk[]>();
+    navigableFiles.forEach((file) => {
+      const canonicalChunks = getMergedChunksForVersion(
+        mergedChunksState,
+        diffDataVersion,
+        file.path,
+      );
+      if (canonicalChunks) {
+        map.set(
+          file.path,
+          canonicalChunks.map((chunk, index) => ({ ...chunk, ...file.chunks[index] })),
+        );
+      }
+    });
+    return map;
+  }, [navigableFiles, mergedChunksState, diffDataVersion]);
 
   // State to trigger comment creation from keyboard
   const [commentTrigger, setCommentTrigger] = useState<{
@@ -876,6 +911,28 @@ function App() {
         reload();
       },
     });
+
+  const previousPresentationRef = useRef({
+    files: navigableFiles,
+    ignoreWhitespace,
+    captureKey: commentsCaptureKey,
+  });
+  useEffect(() => {
+    const previous = previousPresentationRef.current;
+    previousPresentationRef.current = {
+      files: navigableFiles,
+      ignoreWhitespace,
+      captureKey: commentsCaptureKey,
+    };
+    if (
+      cursor &&
+      commentsCaptureKey &&
+      previous.captureKey === commentsCaptureKey &&
+      previous.ignoreWhitespace !== ignoreWhitespace
+    ) {
+      setCursorPosition(remapWhitespaceCursor(previous.files, navigableFiles, cursor));
+    }
+  }, [navigableFiles, ignoreWhitespace, commentsCaptureKey, cursor, setCursorPosition]);
 
   // Viewed button in the diff header: silently remember the toggled file as
   // the navigation position, so keyboard navigation resumes from it without
@@ -1063,9 +1120,15 @@ function App() {
   );
   fetchDiffDataRef.current = fetchDiffData;
 
+  const previousIgnoreWhitespaceRef = useRef(ignoreWhitespace);
   useEffect(() => {
+    const whitespaceChanged = previousIgnoreWhitespaceRef.current !== ignoreWhitespace;
+    previousIgnoreWhitespaceRef.current = ignoreWhitespace;
+    // Captures use a local projection; refetching would only rebuild the same
+    // immutable patch and temporarily discard the merged display chunks.
+    if (whitespaceChanged && selectedRevisionRef.current.reviewName !== undefined) return;
     void fetchDiffData();
-  }, [fetchDiffData]);
+  }, [fetchDiffData, ignoreWhitespace]);
 
   useEffect(() => {
     return () => {
@@ -1465,7 +1528,7 @@ function App() {
   const handleNavigateToComment = (thread: CommentThread) => {
     if (!diffData) return;
 
-    const position = findCommentPosition(thread, diffData.files);
+    const position = findCommentPosition(thread, navigableFiles);
     if (position) {
       setCursorPosition(position);
     }
@@ -1644,22 +1707,13 @@ function App() {
                   </button>
                 </div>
               )}
-              {diffData.capture ? (
-                <span
-                  className="text-sm text-github-text-primary"
-                  title="Captured patches include whitespace changes"
-                >
-                  Whitespace included
-                </span>
-              ) : (
-                <Checkbox
-                  checked={ignoreWhitespace}
-                  onChange={setIgnoreWhitespace}
-                  label="Ignore Whitespace"
-                  className="text-sm!"
-                  title={ignoreWhitespace ? 'Show whitespace changes' : 'Ignore whitespace changes'}
-                />
-              )}
+              <Checkbox
+                checked={ignoreWhitespace}
+                onChange={setIgnoreWhitespace}
+                label="Ignore Whitespace"
+                className="text-sm!"
+                title={ignoreWhitespace ? 'Show whitespace changes' : 'Ignore whitespace changes'}
+              />
               {/* File Watch Reload Button */}
               <ReloadButton
                 shouldReload={shouldReload}
@@ -1916,9 +1970,7 @@ function App() {
           >
             {diffData.files.map((file, fileIndex) => {
               const fileThreads = threadsByFile.get(file.path) ?? EMPTY_COMMENT_THREADS;
-              const mergedChunks =
-                getMergedChunksForVersion(mergedChunksState, diffDataVersion, file.path) ??
-                EMPTY_MERGED_CHUNKS;
+              const mergedChunks = presentationChunksByPath.get(file.path) ?? EMPTY_MERGED_CHUNKS;
               const isRendered = renderedFilePaths.has(file.path);
               return (
                 <div
