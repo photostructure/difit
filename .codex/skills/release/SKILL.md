@@ -32,8 +32,9 @@ files before releasing; never publish the unscoped upstream package.
 - Automatic release preparation needs the maintainer-configured signing secrets
   `SSH_SIGNING_KEY`, `GIT_USER_NAME` and `GIT_USER_EMAIL`. It never needs an npm token.
 - If a maintainer explicitly chooses to sign locally instead, run the full gate,
-  stamp `CHANGELOG.md` as `build.yml` does (`release-changelog.mjs stamp` in
-  `.github/scripts/` with the version, the UTC date and the tag's release URL),
+  stamp `CHANGELOG.md` as `build.yml` does (rename the Unreleased heading to
+  `## [X.Y.Z] - <UTC date>`, add an empty `## [Unreleased]` above it, and add the
+  `[X.Y.Z]: <tag's release URL>` link definition),
   sign the exact tested release commit and annotated `v<version>` tag, push only
   the authorized refs, then dispatch `publish.yaml` at that exact tag.
 - `publish.yaml` validates the tag and package identity, builds and packs the exact
@@ -48,8 +49,8 @@ files before releasing; never publish the unscoped upstream package.
 ## How the release works
 
 - `build.yml` (**Build & Prepare Release**) runs the `ci.yml` test and package
-  acceptance jobs. Alongside them, its `changelog` job runs
-  `node .github/scripts/release-changelog.mjs bump`, which fails the run, explaining
+  acceptance jobs. Alongside them, its `changelog` job runs the `bump` command of
+  `photostructure/changelog-release-action`, which fails the run, explaining
   the fix, unless `CHANGELOG.md` has one `## [Unreleased (patch|minor|major)]`
   heading with notes under it. The `release` job then runs `npm version` with that
   bump, renames the heading to `## [X.Y.Z] - YYYY-MM-DD` with an empty
@@ -60,7 +61,7 @@ files before releasing; never publish the unscoped upstream package.
   exact source tarball, and stages it with `npm stage publish` in its `stage` job.
   Its `github-release` job then starts `github-release.yaml` at the same tag and
   finishes.
-- npm validates a staged package, which can take 10 to 30 minutes, then holds it
+- npm validates a staged package, which takes 5 to 20 minutes, then holds it
   until a maintainer approves it with 2FA.
 - `github-release.yaml` (**Publish GitHub Release after npm approval**) checks npm
   in its `validate` job 10, 20, 35 and 55 minutes after it starts, then every 30
