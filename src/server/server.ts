@@ -1422,6 +1422,8 @@ export async function startServer(options: ServerOptions): Promise<{
     }
 
     const launched = await new Promise<boolean>((resolvePromise) => {
+      // No windowsHide here, unlike the git/gh calls elsewhere: a console editor
+      // (vim, nano) needs its window on Windows.
       const child = spawn(spawnSpec.command, [...spawnSpec.args], {
         stdio: 'ignore',
         detached: true,
