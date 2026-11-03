@@ -166,3 +166,35 @@ describe('FileList', () => {
     expect(onToggleFolderReviewed).toHaveBeenCalledWith('src', false);
   });
 });
+
+it('makes the comment count a separate action and preserves mobile file selection', () => {
+  const onScrollToFile = vi.fn();
+  const onScrollToFirstComment = vi.fn();
+  const onFileSelected = vi.fn();
+  render(
+    <FileList
+      files={[createFile('test.ts')]}
+      comments={[
+        {
+          id: 'thread',
+          file: 'test.ts',
+          line: 10,
+          createdAt: '2026-11-02',
+          updatedAt: '2026-11-02',
+          messages: [],
+        },
+      ]}
+      onScrollToFile={onScrollToFile}
+      onScrollToFirstComment={onScrollToFirstComment}
+      onFileSelected={onFileSelected}
+      reviewedFiles={new Set()}
+      onToggleReviewed={vi.fn()}
+      onToggleFolderReviewed={vi.fn()}
+      selectedFileIndex={null}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Jump to first comment in test.ts' }));
+  expect(onScrollToFirstComment).toHaveBeenCalledWith('test.ts');
+  expect(onScrollToFile).not.toHaveBeenCalled();
+  expect(onFileSelected).toHaveBeenCalledOnce();
+});

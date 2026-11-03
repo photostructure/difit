@@ -558,7 +558,7 @@ function App() {
   });
 
   const handleSidebarFileSelected = useCallback(
-    (filePath: string) => {
+    (filePath: string, target?: 'first-comment') => {
       if (!collapsedInitializedRef.current) pendingSidebarSelectionsRef.current.add(filePath);
       setCollapsedFiles((previous) => {
         if (!previous.has(filePath)) return previous;
@@ -566,7 +566,7 @@ function App() {
         nextCollapsedFiles.delete(filePath);
         return nextCollapsedFiles;
       });
-      scrollFileIntoDiffContainer(filePath);
+      scrollFileIntoDiffContainer(filePath, target);
     },
     [scrollFileIntoDiffContainer],
   );
@@ -1932,6 +1932,9 @@ function App() {
                   files={diffData.files}
                   reviewContext={diffData.reviewContext}
                   onScrollToFile={handleSidebarFileSelected}
+                  onScrollToFirstComment={(path) =>
+                    handleSidebarFileSelected(path, 'first-comment')
+                  }
                   onFileSelected={isMobile ? handleMobileFileSelected : undefined}
                   comments={normalizedThreads}
                   reviewedFiles={viewedFiles}

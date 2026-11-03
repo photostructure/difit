@@ -208,6 +208,62 @@ describe('useLazyDiffRendering', () => {
       vi.unstubAllGlobals();
     });
 
+    it('waits for lazy rendering and jumps to the first live thread below the sticky header', () => {
+      vi.useFakeTimers();
+      try {
+        vi.stubGlobal('CSS', { supports: () => true });
+        const frames: FrameRequestCallback[] = [];
+        vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) =>
+          frames.push(callback),
+        );
+        const container = document.createElement('main');
+        container.scrollTop = 200;
+        const scrollTo = vi.fn();
+        container.scrollTo = scrollTo;
+        stubRect(container, 100);
+        const file = document.createElement('div');
+        file.id = getFileElementId('file-19.ts');
+        file.dataset.rendered = 'false';
+        const header = document.createElement('div');
+        header.dataset.diffViewerHeader = 'true';
+        header.getBoundingClientRect = () => ({ height: 80 }) as DOMRect;
+        file.append(header);
+        const deleted = document.createElement('div');
+        deleted.dataset.commentThreadId = 'deleted';
+        deleted.dataset.commentDeleted = 'true';
+        file.append(deleted);
+        const first = document.createElement('div');
+        first.dataset.commentThreadId = 'first';
+        first.tabIndex = -1;
+        stubRect(first, 600);
+        const second = document.createElement('div');
+        second.dataset.commentThreadId = 'second';
+        second.tabIndex = -1;
+        stubRect(second, 900);
+        file.append(first, second);
+        container.append(file);
+        document.body.append(container);
+        const { result, unmount } = renderHook(() =>
+          useLazyDiffRendering({
+            diffData,
+            diffScrollContainerRef: { current: container },
+            setDiffData: () => {},
+          }),
+        );
+        act(() => result.current.scrollFileIntoDiffContainer('file-19.ts', 'first-comment'));
+        act(() => frames.shift()!(0));
+        expect(scrollTo).not.toHaveBeenCalled();
+        file.dataset.rendered = 'true';
+        act(() => frames.shift()!(0));
+        expect(first).toHaveFocus();
+        expect(scrollTo).toHaveBeenLastCalledWith({ top: 608 });
+        unmount();
+        vi.clearAllTimers();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('renders only the target file when the browser supports scroll anchoring', () => {
       vi.stubGlobal('CSS', { supports: () => true });
 

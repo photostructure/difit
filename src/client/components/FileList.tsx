@@ -28,6 +28,7 @@ interface FileListProps {
   reviewContext?: ReviewContextData;
   files: DiffFile[];
   onScrollToFile: (path: string) => void;
+  onScrollToFirstComment?: (path: string) => void;
   onFileSelected?: () => void;
   comments: CommentThread[];
   reviewedFiles: Set<string>;
@@ -164,6 +165,7 @@ export const FileList = memo(function FileList({
   reviewContext,
   files,
   onScrollToFile,
+  onScrollToFirstComment,
   onFileSelected,
   comments,
   reviewedFiles,
@@ -451,10 +453,20 @@ export const FileList = memo(function FileList({
             {node.name}
           </span>
           {commentCount > 0 && (
-            <span className="text-github-warning text-sm font-medium ml-auto flex items-center gap-1">
-              <MessageSquare size={14} />
+            <button
+              type="button"
+              className="text-github-warning text-sm font-medium ml-auto flex items-center gap-1 rounded px-1 -mr-1 hover:bg-github-bg-primary focus-visible:outline-2 focus-visible:outline-github-accent"
+              title={`Jump to first comment in ${file.path}`}
+              aria-label={`Jump to first comment in ${file.path}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                (onScrollToFirstComment ?? onScrollToFile)(file.path);
+                onFileSelected?.();
+              }}
+            >
+              <MessageSquare size={14} aria-hidden="true" />
               {commentCount}
-            </span>
+            </button>
           )}
         </div>
       );

@@ -2394,3 +2394,61 @@ describe('App Component - Committed review summaries', () => {
     ).toBeNull();
   });
 });
+
+describe('sidebar comment jumps', () => {
+  it('opens a viewed file and focuses its first displayed message, even if that thread is resolved', async () => {
+    mockHasLoadedInitialViewedFiles = true;
+    mockViewedFiles = new Set(['test.ts']);
+    const first = createMockThread({
+      id: 'first-message',
+      filePath: 'test.ts',
+      line: 1,
+      body: 'First message',
+    });
+    first.resolution = { resolved: true, updatedAt: first.updatedAt };
+    mockComments = [
+      createMockThread({
+        id: 'later-message',
+        filePath: 'test.ts',
+        line: 2,
+        body: 'Later message',
+      }),
+      first,
+    ];
+    mockFetch({
+      ...mockDiffResponse,
+      files: [
+        {
+          ...mockDiffResponse.files[0]!,
+          chunks: [
+            {
+              header: '@@ -0,0 +1,2 @@',
+              oldStart: 0,
+              oldLines: 0,
+              newStart: 1,
+              newLines: 2,
+              lines: [
+                { type: 'add', content: 'line one', newLineNumber: 1 },
+                { type: 'add', content: 'line two', newLineNumber: 2 },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    renderApp();
+    await screen.findByTitle('Expand file (Alt+Click to expand all)');
+    fireEvent.click(screen.getByRole('button', { name: 'Jump to first comment in test.ts' }));
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAttribute('id', 'comment-thread-first-message'),
+    );
+    expect(screen.getByTitle('Collapse file (Alt+Click to collapse all)')).toBeInTheDocument();
+    expect(
+      document
+        .getElementById('comment-thread-first-message')
+        ?.querySelector('button[aria-expanded]'),
+    ).toHaveAttribute('aria-expanded', 'true');
+    expect(mockViewedFiles.has('test.ts')).toBe(true);
+    expect(mockToggleFileViewed).not.toHaveBeenCalled();
+  });
+});

@@ -276,6 +276,12 @@ export function CommentThreadCard({
   return (
     <div
       id={`comment-thread-${thread.id}`}
+      data-comment-thread-id={thread.id}
+      data-comment-deleted={thread.deleted || undefined}
+      tabIndex={-1}
+      onFocus={(event) => {
+        if (event.target === event.currentTarget && !thread.deleted) setIsCollapsed(false);
+      }}
       className={`rounded-md border border-yellow-600/50 border-l-4 border-l-yellow-400 bg-github-bg-tertiary p-3 shadow-sm transition-all ${
         onClick ? 'cursor-pointer hover:shadow-md' : ''
       }`}

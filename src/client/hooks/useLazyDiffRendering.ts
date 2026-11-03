@@ -29,7 +29,7 @@ interface UseLazyDiffRenderingReturn {
   ensureFileRendered: (filePath: string) => void;
   ensureFilesRenderedUpTo: (filePath: string) => void;
   registerLazyFileContainer: (filePath: string, node: HTMLDivElement | null) => void;
-  scrollFileIntoDiffContainer: (filePath: string) => void;
+  scrollFileIntoDiffContainer: (filePath: string, target?: 'first-comment') => void;
   isFileScrolledPastContainerTop: (filePath: string) => boolean;
 }
 
@@ -210,7 +210,7 @@ export function useLazyDiffRendering({
   );
 
   const scrollFileIntoDiffContainer = useCallback(
-    (filePath: string) => {
+    (filePath: string, destination?: 'first-comment') => {
       ensureFilesRenderedUpTo(filePath);
 
       const targetIndex = diffData?.files.findIndex((file) => file.path === filePath) ?? -1;
@@ -235,14 +235,26 @@ export function useLazyDiffRendering({
 
       const scrollToFile = () => {
         const scrollContainer = diffScrollContainerRef.current;
-        const target = document.getElementById(getFileElementId(filePath));
-        if (!scrollContainer || !target) {
-          return false;
-        }
+        const file = document.getElementById(getFileElementId(filePath));
+        const target =
+          destination === 'first-comment'
+            ? file?.querySelector<HTMLElement>(
+                '[data-comment-thread-id]:not([data-comment-deleted="true"])',
+              )
+            : file;
+        if (!scrollContainer || !target) return false;
 
+        // DOM order follows the displayed diff, even when threads were created out of order.
+        if (destination === 'first-comment') target.focus({ preventScroll: true });
+        const headerHeight =
+          destination === 'first-comment'
+            ? (file?.querySelector('[data-diff-viewer-header]')?.getBoundingClientRect().height ??
+                0) + 12
+            : 0;
         const containerRect = scrollContainer.getBoundingClientRect();
         const targetRect = target.getBoundingClientRect();
-        const targetScrollTop = scrollContainer.scrollTop + (targetRect.top - containerRect.top);
+        const targetScrollTop =
+          scrollContainer.scrollTop + (targetRect.top - containerRect.top) - headerHeight;
 
         scrollContainer.scrollTo({
           top: Math.max(0, targetScrollTop),
