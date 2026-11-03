@@ -24,6 +24,7 @@ const baseSettings = {
   theme: 'dark' as const,
   syntaxTheme: 'vsDark',
   colorVision: 'normal' as const,
+  approvalAnimations: { confetti: true, streamers: true, sparkles: true },
   autoViewedPatterns: [],
 } satisfies React.ComponentProps<typeof SettingsModal>['settings'];
 
@@ -117,6 +118,48 @@ describe('SettingsModal', () => {
     ).toBeInTheDocument();
     expect(screen.queryByLabelText('Command')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Arguments')).not.toBeInTheDocument();
+  });
+
+  it('toggles each approval animation and resets them with the appearance defaults', () => {
+    const onSettingsChange = vi.fn();
+    const settings = {
+      ...baseSettings,
+      approvalAnimations: { confetti: true, streamers: false, sparkles: true },
+    };
+
+    render(
+      <SettingsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        settings={settings}
+        onSettingsChange={onSettingsChange}
+      />,
+      { wrapper },
+    );
+
+    expect(screen.getByRole('checkbox', { name: 'Confetti' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    expect(screen.getByRole('checkbox', { name: 'Streamers' })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Sparkles' }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({
+      ...settings,
+      approvalAnimations: { confetti: true, streamers: false, sparkles: false },
+    });
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Streamers' }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({
+      ...settings,
+      approvalAnimations: { confetti: true, streamers: true, sparkles: true },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset Appearance Defaults' }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith(baseSettings);
   });
 
   it('edits auto-viewed patterns from the system section as newline-delimited values', () => {

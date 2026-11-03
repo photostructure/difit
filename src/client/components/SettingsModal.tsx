@@ -9,7 +9,16 @@ import {
   getThemesForResolvedTheme,
   isSyntaxThemeForResolvedTheme,
 } from '../utils/themeLoader';
+import { Checkbox } from './Checkbox';
 import { Tooltip } from './Tooltip';
+
+const APPROVAL_ANIMATIONS = [
+  { id: 'confetti', label: 'Confetti' },
+  { id: 'streamers', label: 'Streamers' },
+  { id: 'sparkles', label: 'Sparkles' },
+] as const;
+
+type ApprovalAnimation = (typeof APPROVAL_ANIMATIONS)[number]['id'];
 
 interface AppearanceSettings {
   fontSize: number;
@@ -17,6 +26,8 @@ interface AppearanceSettings {
   theme: 'light' | 'dark' | 'auto';
   syntaxTheme: string;
   colorVision: ColorVisionMode;
+  /** Which bursts the Approve button may fire; each approval picks one at random. */
+  approvalAnimations: Record<ApprovalAnimation, boolean>;
   autoViewedPatterns: string[];
 }
 
@@ -29,13 +40,14 @@ interface SettingsModalProps {
 
 type SettingsSection = 'appearance' | 'system';
 
-const DEFAULT_SETTINGS: AppearanceSettings = {
+export const DEFAULT_SETTINGS: AppearanceSettings = {
   fontSize: 14,
   fontFamily:
     'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
   theme: 'dark',
   syntaxTheme: 'vsDark',
   colorVision: 'normal',
+  approvalAnimations: { confetti: true, streamers: true, sparkles: true },
   autoViewedPatterns: [],
 };
 
@@ -141,6 +153,7 @@ export function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: S
         theme: DEFAULT_SETTINGS.theme,
         syntaxTheme: DEFAULT_SETTINGS.syntaxTheme,
         colorVision: DEFAULT_SETTINGS.colorVision,
+        approvalAnimations: DEFAULT_SETTINGS.approvalAnimations,
       });
       return;
     }
@@ -156,8 +169,8 @@ export function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: S
 
   return (
     <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-      <div className="bg-github-bg-secondary border border-github-border rounded-lg w-full max-w-3xl mx-4 pointer-events-auto overflow-hidden">
-        <div className="flex items-center justify-between p-4 border-b border-github-border">
+      <div className="flex flex-col max-h-[calc(100vh-2rem)] bg-github-bg-secondary border border-github-border rounded-lg w-full max-w-3xl mx-4 pointer-events-auto overflow-hidden">
+        <div className="shrink-0 flex items-center justify-between p-4 border-b border-github-border">
           <h2 className="text-lg font-semibold text-github-text-primary flex items-center gap-2">
             <Settings size={20} />
             Settings
@@ -170,7 +183,8 @@ export function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: S
           </button>
         </div>
 
-        <div className="flex flex-col sm:flex-row min-h-[420px]">
+        {/* Short windows shrink this pane and scroll it, keeping the header and footer in view. */}
+        <div className="flex flex-col sm:flex-row min-h-[min(420px,calc(100vh-10rem))]">
           <nav
             aria-label="Settings sections"
             className="sm:w-40 border-b sm:border-b-0 sm:border-r border-github-border px-3 py-2"
@@ -197,7 +211,7 @@ export function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: S
             </div>
           </nav>
 
-          <div className="flex-1 p-4 sm:p-6 overflow-y-auto">
+          <div className="flex-1 min-h-0 p-4 sm:p-6 overflow-y-auto">
             {activeSection === 'appearance' && (
               <div className="space-y-6">
                 <div>
@@ -320,6 +334,34 @@ export function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: S
                     ))}
                   </select>
                 </div>
+
+                <div>
+                  <span className="block text-sm font-medium text-github-text-primary mb-2">
+                    Approval Celebration
+                  </span>
+                  <p className="text-sm text-github-text-secondary mb-2">
+                    Approving a review plays one of the enabled animations at random, unless your
+                    system is set to reduce motion. Turn them all off for none.
+                  </p>
+                  <div className="flex flex-wrap gap-4">
+                    {APPROVAL_ANIMATIONS.map((animation) => (
+                      <Checkbox
+                        key={animation.id}
+                        label={animation.label}
+                        checked={settings.approvalAnimations[animation.id]}
+                        onChange={(checked) =>
+                          onSettingsChange({
+                            ...settings,
+                            approvalAnimations: {
+                              ...settings.approvalAnimations,
+                              [animation.id]: checked,
+                            },
+                          })
+                        }
+                      />
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -370,7 +412,7 @@ export function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: S
           </div>
         </div>
 
-        <div className="flex items-center justify-between p-4 border-t border-github-border">
+        <div className="shrink-0 flex items-center justify-between p-4 border-t border-github-border">
           <button
             onClick={handleReset}
             className="px-3 py-2 text-sm text-github-text-secondary hover:text-github-text-primary"
@@ -389,4 +431,4 @@ export function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: S
   );
 }
 
-export type { AppearanceSettings };
+export type { AppearanceSettings, ApprovalAnimation };

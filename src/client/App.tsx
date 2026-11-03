@@ -1,4 +1,6 @@
 import {
+  Check,
+  Square,
   Columns,
   AlignLeft,
   Settings,
@@ -62,6 +64,7 @@ import { useViewedFiles } from './hooks/useViewedFiles';
 import { useViewport } from './hooks/useViewport';
 import { fetchClientSettings, saveClientSettings } from './services/userSettings';
 import { resolveThemePreference } from './utils/appearanceTheme';
+import { celebrateApproval } from './utils/approvalCelebration';
 import { hasMultipleCommentAuthors } from './utils/commentAuthors';
 import { copyTextToClipboard } from './utils/clipboard';
 import { getFileElementId } from './utils/domUtils';
@@ -186,6 +189,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [isCopiedAll, setIsCopiedAll] = useState(false);
   const [isShipping, setIsShipping] = useState(false);
+  const approveButtonRef = useRef<HTMLButtonElement>(null);
   const [shipItError, setShipItError] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(getInitialSidebarWidth);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -459,6 +463,14 @@ function App() {
       // A failed comment save must not prevent the user from revoking approval.
       if (!approval.approved) await syncThreadsToServer(threads);
       await approval.setApproved(!approval.approved, summary.version);
+      // Skip the burst if the user switched reviews while the approval was saving.
+      if (
+        !approval.approved &&
+        activeCommentsContextRef.current.generation === commentsGeneration &&
+        approveButtonRef.current
+      ) {
+        celebrateApproval(approveButtonRef.current, settings.approvalAnimations);
+      }
     } catch (approvalError) {
       console.error('Failed to approve review:', approvalError);
       setShipItError('Could not update approval. Please try again.');
@@ -1845,6 +1857,7 @@ function App() {
                 <>
                   <button
                     type="button"
+                    ref={approveButtonRef}
                     onClick={() => void handleShipIt()}
                     disabled={
                       isShipping ||
@@ -1860,8 +1873,17 @@ function App() {
                     aria-pressed={approval.approved}
                     aria-busy={isShipping}
                     title={approval.approved ? 'Revoke commit approval' : 'Approve this review'}
-                    className={`flex h-9 min-w-[76px] shrink-0 items-center justify-center rounded border px-3 py-1 text-xs font-medium ${approval.approved ? 'border-github-accent bg-github-accent/10 text-github-accent hover:bg-github-accent/20' : 'border-github-border bg-github-bg-primary text-github-text-primary hover:bg-github-bg-tertiary'} transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-github-accent disabled:opacity-50`}
+                    className={`relative flex shrink-0 items-center justify-center gap-2 border px-3 py-1.5 rounded-md text-sm font-medium transition-colors duration-200 disabled:cursor-wait disabled:opacity-60 ${
+                      approval.approved
+                        ? 'border-transparent bg-github-accent text-white'
+                        : 'dark:bg-slate-600 dark:text-white dark:border-slate-500 dark:hover:bg-slate-500 dark:hover:border-slate-400 bg-github-bg-secondary text-github-text-primary border-github-border hover:bg-github-bg-tertiary hover:border-github-text-muted'
+                    } focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-github-accent`}
                   >
+                    {approval.approved ? (
+                      <Check size={14} aria-hidden="true" />
+                    ) : (
+                      <Square size={14} aria-hidden="true" />
+                    )}
                     {approval.approved ? 'Approved' : 'Approve'}
                   </button>
                   {(shipItError || approval.error) && (

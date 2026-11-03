@@ -748,6 +748,123 @@ describe('App Component - Ship it', () => {
   });
 });
 
+describe('App Component - Approval celebration', () => {
+  let bursts = 0;
+  /** While set, approval POSTs wait for this promise before the server answers. */
+  let approvalPostGate: Promise<void> | null = null;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockComments = [];
+    bursts = 0;
+    approvalPostGate = null;
+    // happy-dom has no 2D context; a stand-in lets each burst get past that check so it can be counted.
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => {
+      bursts++;
+      return new Proxy({}, { get: () => () => undefined, set: () => true }) as never;
+    });
+    const approvals = new Map<string, boolean>();
+    vi.mocked(global.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.startsWith('/api/review-summary')) {
+        return Promise.resolve(Response.json({ commitMessage: '', rationale: '', version: 0 }));
+      }
+      if (url.startsWith('/api/approval')) {
+        if (init?.method === 'POST') {
+          const approved = Boolean(JSON.parse(String(init.body)).approved);
+          return (approvalPostGate ?? Promise.resolve()).then(() => {
+            approvals.set(url, approved);
+            return Response.json({ approved });
+          });
+        }
+        return Promise.resolve(Response.json({ approved: approvals.get(url) ?? false }));
+      }
+      if (url.includes('/api/revisions')) {
+        return Promise.resolve(new Response(null, { status: 404 }));
+      }
+      if (url.startsWith('/api/diff')) {
+        const params = new URL(url, 'http://localhost').searchParams;
+        const base = params.get('base') ?? 'HEAD^';
+        const target = params.get('target') ?? 'HEAD';
+        return Promise.resolve(
+          Response.json({
+            ...mockDiffResponse,
+            shipIt: true,
+            commit: `${base}...${target}`,
+            baseCommitish: base,
+            targetCommitish: target,
+            requestedBaseCommitish: base,
+            requestedTargetCommitish: target,
+          }),
+        );
+      }
+      return Promise.resolve(Response.json({}));
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const navigate = (search: string) => {
+    act(() => {
+      window.history.pushState(null, '', `/${search}`);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+  };
+  const approveButton = () => screen.getByRole('button', { name: 'Approve' });
+
+  // Before the burst was fired from the click handler, returning to an approved
+  // review remounted the celebration and fired a second burst with no click.
+  it('fires one burst per approval, not again when returning to an approved review', async () => {
+    renderApp();
+    await waitFor(() => expect(approveButton()).toBeEnabled());
+    fireEvent.click(approveButton());
+    await waitFor(() => expect(approveButton()).toHaveAttribute('aria-pressed', 'true'));
+    expect(bursts).toBe(1);
+
+    navigate('?base=main&target=feature');
+    await waitFor(() => expect(window.location.search).toContain('base=main'));
+    await waitFor(() => expect(approveButton()).toHaveAttribute('aria-pressed', 'false'));
+
+    navigate('?base=HEAD%5E&target=HEAD');
+    await waitFor(() => expect(approveButton()).toHaveAttribute('aria-pressed', 'true'));
+    expect(bursts).toBe(1);
+
+    fireEvent.click(approveButton());
+    await waitFor(() => expect(approveButton()).toHaveAttribute('aria-pressed', 'false'));
+    expect(bursts).toBe(1);
+  });
+
+  it('does not celebrate on another review when an earlier approval finishes late', async () => {
+    let releaseApprovalPost = () => {};
+    approvalPostGate = new Promise((resolve) => {
+      releaseApprovalPost = resolve;
+    });
+    renderApp();
+    await waitFor(() => expect(approveButton()).toBeEnabled());
+    fireEvent.click(approveButton());
+    await waitFor(() =>
+      expect(global.fetch).toHaveBeenCalledWith(
+        '/api/approval?base=HEAD%5E&target=HEAD',
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    );
+
+    navigate('?base=main&target=feature');
+    await waitFor(() => expect(window.location.search).toContain('base=main'));
+    await waitFor(() => expect(approveButton()).toHaveAttribute('aria-pressed', 'false'));
+    await act(async () => {
+      releaseApprovalPost();
+      await approvalPostGate;
+    });
+
+    await waitFor(() => expect(approveButton()).toBeEnabled());
+    expect(approveButton()).toHaveAttribute('aria-pressed', 'false');
+    expect(bursts).toBe(0);
+  });
+});
+
 describe('App Component - Ship it delivery', () => {
   beforeEach(() => {
     vi.clearAllMocks();

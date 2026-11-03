@@ -1,6 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
-import { FONT_FAMILIES, type AppearanceSettings } from '../components/SettingsModal';
+import {
+  DEFAULT_SETTINGS,
+  FONT_FAMILIES,
+  type AppearanceSettings,
+} from '../components/SettingsModal';
 import { fetchClientSettings, saveClientSettings } from '../services/userSettings';
 import { normalizeAutoViewedPatterns } from '../utils/autoViewedPatterns';
 import {
@@ -11,16 +15,6 @@ import {
   type ResolvedTheme,
 } from '../utils/appearanceTheme';
 import { getFallbackSyntaxTheme, isSyntaxThemeForResolvedTheme } from '../utils/themeLoader';
-
-const DEFAULT_SETTINGS: AppearanceSettings = {
-  fontSize: 14,
-  fontFamily:
-    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-  theme: 'dark',
-  syntaxTheme: 'vsDark',
-  colorVision: 'normal',
-  autoViewedPatterns: [],
-};
 
 // Key for appearance settings inside the server-persisted client settings object.
 const APPEARANCE_SETTINGS_KEY = 'appearance';
