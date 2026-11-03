@@ -2340,3 +2340,21 @@ describe('App Component - Retained conversation contexts', () => {
     },
   );
 });
+
+describe('App Component - Custom tab title', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockComments = [];
+    mockConfirm.mockReturnValue(false);
+  });
+
+  it('sets document.title from the diff response when --title is provided', async () => {
+    mockFetch({ ...mockDiffResponse, title: 'DEV-1234 review' });
+
+    renderApp();
+
+    await waitFor(() => {
+      expect(document.title).toBe('DEV-1234 review');
+    });
+  });
+});

@@ -75,6 +75,7 @@ export interface DiffResponse {
   reviewContext?: ReviewContext;
   commentImports?: CommentImport[];
   commentImportId?: string;
+  title?: string;
 }
 
 export interface GeneratedStatusResponse {

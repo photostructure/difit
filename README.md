@@ -258,6 +258,7 @@ Stdin mode is selected with intent-first rules:
 | `--no-jsonl`                 | false           | Use human-readable foreground output                                                                    |
 | `--background`               | false           | Detach the server and output connection information; no live stdout stream                              |
 | `--context <lines>`          | git default (3) | Limit surrounding context lines per change (`0` shows changes only; not available with `--pr` or stdin) |
+| `--title <title>`            | -               | Custom browser tab title, to tell review sessions apart when several difit instances are open           |
 
 ### Open in editor
 

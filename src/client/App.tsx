@@ -985,6 +985,7 @@ function App() {
         }
         setDiffData(data);
         setDiffDataVersion((prev) => prev + 1);
+        if (data.title) document.title = data.title;
         const requestedBase = data.requestedBaseCommitish ?? data.baseCommitish;
         const requestedTarget = data.requestedTargetCommitish ?? data.targetCommitish;
         if (requestedBase && requestedTarget && !preserveLocation) {

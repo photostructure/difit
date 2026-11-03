@@ -102,6 +102,7 @@ interface CliOptions {
   background?: boolean;
   context?: number;
   mergeBase?: boolean;
+  title?: string;
 }
 
 const program = new Command();
@@ -171,6 +172,7 @@ program
     '--merge-base',
     'resolve the base revision with git merge-base before diffing (Git revision mode only)',
   )
+  .option('--title <title>', 'custom browser tab title for this review session')
   .addHelpText(
     'after',
     `
@@ -329,6 +331,7 @@ Editor configuration (set before starting difit):
 
         const { launchUrl, port, isEmpty } = await startServer({
           namedReview,
+          title: options.title,
           repoPath: namedReview.capture.repositoryRoot,
           preferredPort: options.port,
           host: options.host,
@@ -381,6 +384,7 @@ Editor configuration (set before starting difit):
           commitMessage: options.commitMessage,
           why: options.why,
           keepAlive: options.keepAlive,
+          title: options.title,
           ...(commentImports.length > 0 ? { commentImports } : {}),
         });
 
@@ -451,6 +455,7 @@ Editor configuration (set before starting difit):
         contextLines: options.context,
         diffMode: determineDiffMode(selection, compareWith),
         repoPath,
+        title: options.title,
         ...(commentImports.length > 0 ? { commentImports } : {}),
       });
 
