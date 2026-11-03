@@ -1571,14 +1571,9 @@ function App() {
           }`}
         >
           <div
-            className={`flex items-center justify-between w-full ${
-              isMobile ? 'px-3 py-2 gap-3' : 'px-4 py-3 gap-4 w-auto'
-            } ${!isDragging ? '!transition-all !duration-300 !ease-in-out' : ''}`}
-            style={{
-              width: isMobile ? '100%' : isFileTreeOpen ? `${sidebarWidth}px` : 'auto',
-              minWidth: isMobile ? '0px' : isFileTreeOpen ? '200px' : 'auto',
-              maxWidth: isMobile ? 'none' : isFileTreeOpen ? '600px' : 'none',
-            }}
+            className={`flex items-center justify-between ${
+              isMobile ? 'w-full px-3 py-2 gap-3' : 'shrink-0 px-4 py-3 gap-4'
+            }`}
           >
             <h1>
               <Logo
@@ -1617,17 +1612,6 @@ function App() {
               </button>
             </div>
           </div>
-          {!isMobile && (
-            <div
-              className={`border-r border-github-border ${!isDragging ? '!transition-all !duration-300 !ease-in-out' : ''}`}
-              style={{
-                width: isFileTreeOpen ? '4px' : '0px',
-                height: 'calc(100% - 16px)',
-                margin: '8px 0',
-                transform: 'translateX(-2px)',
-              }}
-            />
-          )}
           <div
             className={`flex-1 flex flex-wrap items-center justify-between ${
               isMobile ? 'px-3 pb-2 gap-3' : 'px-4 py-3 gap-4'
@@ -1686,7 +1670,7 @@ function App() {
               />
             </div>
             <div
-              className={`flex min-w-0 max-w-full flex-wrap items-center text-sm text-github-text-secondary ${
+              className={`flex min-w-0 max-w-full flex-wrap items-baseline text-sm text-github-text-secondary ${
                 isMobile ? 'gap-3' : 'gap-4'
               }`}
             >
@@ -1694,7 +1678,7 @@ function App() {
                 <div
                   role="status"
                   aria-label="Named review capture"
-                  className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-1 text-xs text-github-text-secondary"
+                  className="flex min-w-0 max-w-full flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-github-text-secondary"
                   title={`Capture digest ${diffData.capture.patchDigest}; base ${diffData.capture.baseCommit}. Fixed patch; extra context and previews are unavailable.`}
                 >
                   <span className="break-all font-mono text-github-text-primary">
@@ -1723,7 +1707,7 @@ function App() {
                   onViewAll={() => setIsCommentsListOpen(true)}
                 />
               )}
-              <div className="flex flex-col gap-1 items-center">
+              <div className="relative flex flex-col items-center pb-2">
                 <div className="text-xs relative">
                   {viewedFilesInDiffCount === diffData.files.length
                     ? 'All diffs difit-ed!'
@@ -1731,7 +1715,7 @@ function App() {
                   <SparkleAnimation isActive={showSparkles} />
                 </div>
                 <div
-                  className="relative h-2 bg-github-bg-tertiary rounded-full overflow-hidden"
+                  className="absolute bottom-0 h-1.5 bg-github-bg-tertiary rounded-full overflow-hidden"
                   style={{
                     width: '90px',
                     border: '1px solid var(--color-github-border)',
