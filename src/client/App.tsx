@@ -1865,7 +1865,11 @@ function App() {
             </div>
           </div>
         </header>
-        <ReviewSummaryPanel key={commentsContextKey} summary={summary} />
+        <ReviewSummaryPanel
+          key={commentsContextKey}
+          summary={summary}
+          committed={!diffData.capture && diffData.targetCommitMessage !== undefined}
+        />
         {revisionOptions && (
           <RevisionDetailModal
             key={isRevisionModalOpen ? getDiffSelectionKey(selectedRevision) : 'closed'}

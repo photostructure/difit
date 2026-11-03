@@ -14,6 +14,23 @@ const response = (summary: ReviewSummary) => new Response(JSON.stringify(summary
 afterEach(() => vi.unstubAllGlobals());
 
 describe('review summary drafts', () => {
+  it('keeps a saved user message when an older committed-message seed arrives on refresh', async () => {
+    const saved = { ...initial, commitMessage: 'My saved commit explanation', version: 2 };
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response(saved));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useReviewSummary('/api/review-summary?target=abc1234'));
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    fetchMock.mockResolvedValue(
+      response({ ...initial, commitMessage: 'Original Git message\n\nFull body.\n', version: 1 }),
+    );
+
+    await act(async () => result.current.refresh());
+
+    expect(result.current.draft.commitMessage).toBe(saved.commitMessage);
+    expect(result.current.version).toBe(2);
+    expect(result.current.dirty).toBe(false);
+  });
+
   it('saves both fields with the version the user edited', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response(initial));
     vi.stubGlobal('fetch', fetchMock);

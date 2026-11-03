@@ -383,6 +383,8 @@ export async function startServer(options: ServerOptions): Promise<{
     conversation?.setSummary(currentCommentSelection, summary, 'agent');
   }
 
+  seedCommittedSummary(currentCommentSelection, initialDiffData);
+
   function parseRepositoryRelativePath(filepath: unknown):
     | { ok: true; path: string }
     | {
@@ -634,6 +636,8 @@ export async function startServer(options: ServerOptions): Promise<{
       requestedSelection,
       Boolean(options.stdinDiff),
     );
+
+    seedCommittedSummary(currentCommentSelection, responseDiffData);
 
     const baseCommitish =
       responseDiffData.baseCommitish ?? (options.stdinDiff ? 'stdin' : undefined);
@@ -1101,6 +1105,21 @@ export async function startServer(options: ServerOptions): Promise<{
       summaries.get(getDiffSelectionKey(selection)) ??
       emptyReviewSummary()
     );
+  }
+
+  function seedCommittedSummary(selection: DiffSelection, diff: DiffResponse): void {
+    if (selection.reviewName || diff.targetCommitMessage === undefined) return;
+    const previous = getReviewSummary(selection);
+    // Saved edits, including an intentional clear, always take precedence over Git metadata.
+    if (previous.version !== 0 || previous.commitMessage || previous.rationale) return;
+    const summary: ReviewSummary = {
+      commitMessage: diff.targetCommitMessage,
+      rationale: '',
+      version: 1,
+      updatedAt: new Date().toISOString(),
+    };
+    summaries.set(getDiffSelectionKey(selection), summary);
+    conversation?.setSummary(selection, summary, 'agent');
   }
 
   app.get('/api/review-summary', (req, res) => {

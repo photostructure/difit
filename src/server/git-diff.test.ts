@@ -1481,6 +1481,31 @@ index abc123..def456 100644
   });
 
   describe('parseDiff', () => {
+    it('reads the full commit message from the resolved target object', async () => {
+      parser = new GitDiffParser(TEST_REPO_PATH);
+      const git = vi.mocked(simpleGit).mock.results.at(-1)!.value;
+      const targetHash = '1234567890abcdef1234567890abcdef12345678';
+      const baseHash = 'abcdef1234567890abcdef1234567890abcdef12';
+      const message = 'fix: retain café context\n\nExplain the full change.\n\nRefs: #123\n';
+      vi.mocked(git.revparse).mockResolvedValueOnce(targetHash).mockResolvedValueOnce(baseHash);
+      vi.mocked(git.diff).mockResolvedValue('');
+      vi.mocked(git.raw).mockResolvedValue(message);
+
+      const diff = await parser.parseDiff({ baseCommitish: 'HEAD^', targetCommitish: 'HEAD' });
+
+      expect(diff.targetCommitMessage).toBe(message);
+      expect(git.raw).toHaveBeenCalledWith([
+        'log',
+        '-1',
+        '--format=format:%B',
+        '--no-notes',
+        '--encoding=UTF-8',
+        targetHash,
+        '--',
+      ]);
+      expect(git.revparse).toHaveBeenCalledTimes(2);
+    });
+
     it('marks files with .gitattributes linguist-generated=true as generated', async () => {
       const file = 'apps/app/web/src/api/index.tsx';
       const gitDiff = (parser as any).git.diff;

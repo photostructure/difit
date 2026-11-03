@@ -76,6 +76,7 @@ export interface DiffResponse {
   commentImports?: CommentImport[];
   commentImportId?: string;
   title?: string;
+  targetCommitMessage?: string;
 }
 
 export interface GeneratedStatusResponse {

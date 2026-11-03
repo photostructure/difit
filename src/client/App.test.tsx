@@ -2358,3 +2358,35 @@ describe('App Component - Custom tab title', () => {
     });
   });
 });
+
+describe('App Component - Committed review summaries', () => {
+  it.each([
+    { committed: true, label: 'Commit message' },
+    { committed: false, label: 'Proposed commit message' },
+  ])('labels the summary as $label and displays its full message', async ({ committed, label }) => {
+    const message =
+      'fix: preserve café context\n\nKeep the explanation and trailers.\n\nRefs: #123\n';
+    mockComments = [];
+    mockFetch({
+      ...mockDiffResponse,
+      targetCommitMessage: committed ? message : undefined,
+    });
+    const fallback = vi.mocked(global.fetch).getMockImplementation()!;
+    vi.mocked(global.fetch).mockImplementation((input, init) =>
+      String(input).startsWith('/api/review-summary')
+        ? Promise.resolve({
+            ok: true,
+            json: async () => ({ commitMessage: message, rationale: '', version: 1 }),
+          } as Response)
+        : fallback(input, init),
+    );
+
+    renderApp();
+    fireEvent.click(await screen.findByRole('button', { name: /Change summary/ }));
+
+    await waitFor(() => expect(screen.getByLabelText(label)).toHaveValue(message));
+    expect(
+      screen.queryByLabelText(committed ? 'Proposed commit message' : 'Commit message'),
+    ).toBeNull();
+  });
+});

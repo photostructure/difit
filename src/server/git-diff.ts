@@ -93,6 +93,7 @@ export class GitDiffParser {
       let resolvedBaseCommitish = effectiveBaseCommitish;
       let resolvedTargetCommitish = targetCommitish;
       let attributesRef = targetCommitish;
+      let targetCommitMessage: string | undefined;
 
       // Handle target special chars (base is always a regular commit)
       if (targetCommitish === 'working') {
@@ -120,6 +121,16 @@ export class GitDiffParser {
         resolvedTargetCommitish = shortHash(targetHash);
         attributesRef = targetHash;
         diffArgs = [baseHash, targetHash];
+        // Read the full message from the same immutable object used for the diff.
+        targetCommitMessage = await this.git.raw([
+          'log',
+          '-1',
+          '--format=format:%B',
+          '--no-notes',
+          '--encoding=UTF-8',
+          targetHash,
+          '--',
+        ]);
       }
 
       if (ignoreWhitespace) {
@@ -150,6 +161,7 @@ export class GitDiffParser {
         requestedBaseCommitish: baseCommitish,
         requestedTargetCommitish: targetCommitish,
         requestedBaseMode,
+        ...(targetCommitMessage !== undefined ? { targetCommitMessage } : {}),
       };
     } catch (error) {
       throw new Error(

@@ -5,9 +5,10 @@ import type { useReviewSummary } from '../hooks/useReviewSummary';
 
 interface Props {
   summary: ReturnType<typeof useReviewSummary>;
+  committed?: boolean;
 }
 
-export function ReviewSummaryPanel({ summary }: Props) {
+export function ReviewSummaryPanel({ summary, committed = false }: Props) {
   const [expanded, setExpanded] = useState(false);
   const id = useId();
   const subject = summary.draft.commitMessage.split('\n')[0];
@@ -52,7 +53,7 @@ export function ReviewSummaryPanel({ summary }: Props) {
               />
             </label>
             <label className="flex min-w-0 flex-col gap-1 text-xs text-github-text-secondary">
-              Proposed commit message
+              {committed ? 'Commit message' : 'Proposed commit message'}
               <textarea
                 value={summary.draft.commitMessage}
                 onChange={(event) => summary.updateDraft({ commitMessage: event.target.value })}
