@@ -33,8 +33,7 @@ npx skills add yoshiko-pg/difit # エージェントにスキル群を追加
 
 インストールされる主な skill:
 
-- `difit`: コード変更後に difit を使ってユーザーへレビューを依頼する
-- `difit-review`: 特定の diff や PR をレビューし、指摘や解説をコメントとして事前投入した difit を起動する
+- `difit`: ユーザーが difit を明示的に指定したとき、コード変更のレビューを依頼するか、指定された diff や PR をレビューして指摘をビューアに表示する
 
 ## 🚀 使い方
 
@@ -190,8 +189,7 @@ npx skills add yoshiko-pg/difit
 
 インストールされる主な skill:
 
-- `difit`: コード変更後に difit を使ってユーザーへレビューを依頼する
-- `difit-review`: 特定の diff や PR をレビューし、指摘や解説をコメントとして事前投入した difit を起動する
+- `difit`: ユーザーが difit を明示的に指定したとき、コード変更のレビューを依頼するか、指定された diff や PR をレビューして指摘をビューアに表示する
 
 コード編集後や自動レビュー時に、目的に応じた skill で difit サーバーを起動できます。
 

@@ -33,8 +33,7 @@ npx skills add yoshiko-pg/difit # 에이전트에 Skill들 추가
 
 설치되는 주요 Skill:
 
-- `difit`: 코드 변경 후 difit을 통해 사용자에게 리뷰를 요청
-- `difit-review`: 특정 diff 또는 PR을 검토하고, 지적사항이나 설명을 코멘트로 미리 넣은 difit을 실행
+- `difit`: 사용자가 difit을 명시적으로 요청하면 코드 변경에 대한 리뷰를 요청하거나, 지정한 diff 또는 PR을 검토하고 뷰어에 지적사항을 표시
 
 ## 🚀 사용법
 
@@ -190,8 +189,7 @@ npx skills add yoshiko-pg/difit
 
 설치되는 주요 Skill:
 
-- `difit`: 코드 변경 후 difit을 통해 사용자에게 리뷰를 요청
-- `difit-review`: 특정 diff 또는 PR을 검토하고, 지적사항이나 설명을 코멘트로 미리 넣은 difit을 실행
+- `difit`: 사용자가 difit을 명시적으로 요청하면 코드 변경에 대한 리뷰를 요청하거나, 지정한 diff 또는 PR을 검토하고 뷰어에 지적사항을 표시
 
 코드 수정 후나 자동 리뷰 시, 목적에 맞는 Skill로 difit 서버를 실행할 수 있습니다.
 

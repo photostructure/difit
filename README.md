@@ -96,8 +96,7 @@ npx skills add photostructure/difit # Add the Skills to your agent
 
 Installed skills include:
 
-- `difit`: ask the user for a review in the difit viewer when the user explicitly opts in to difit
-- `difit-review`: review a specific diff or PR and show the findings inside the difit viewer, when the user explicitly asks for difit
+- `difit`: ask the user to review code changes, or review a named diff or PR and show findings in the difit viewer, when the user explicitly asks for difit
 
 ## 🚀 Usage
 
@@ -326,8 +325,7 @@ npx skills add photostructure/difit
 
 Installed skills include:
 
-- `difit`: ask the user for a review in the difit viewer when the user explicitly opts in to difit
-- `difit-review`: review a specific diff or PR and show the findings inside the difit viewer, when the user explicitly asks for difit
+- `difit`: ask the user to review code changes, or review a named diff or PR and show findings in the difit viewer, when the user explicitly asks for difit
 
 After code edits or automated review, the agent can start the difit server with the appropriate skill.
 

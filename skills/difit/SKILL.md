@@ -1,12 +1,21 @@
 ---
 name: difit
-description: Ask the user for a code review by opening the changes in difit, a local diff viewer. Explicit opt-in only — use when the user names difit, asks to open or show the diff in the viewer, or has a standing instruction to request reviews through difit after changes. Do not use it for ordinary requests to review code, diffs, commits, branches, or pull requests.
+description: Open a diff in difit, the local diff viewer, with reading-guide comments and a proposed commit message — either your own changes for the user to review, or a branch, commit, or GitHub PR the user names, which you first review for defects. Explicit opt-in only — use when the user names difit or $difit, asks to open, show, or annotate a diff in the viewer, or has a standing instruction to request reviews through difit after changes. Do not use it for ordinary requests to review code, diffs, commits, branches, or pull requests; answer those in chat.
 ---
 
 # Difit
 
 Use only for an explicit difit/viewer request, skill invocation, or standing
 instruction to request difit reviews. Ordinary review requests belong in chat.
+
+Decide what to show from the request:
+
+- "Show me your difit", or no target: the changes this session made. For
+  uncommitted work, a named review scoped to your own paths and hunks; for work
+  you already committed, those commits.
+- A named branch, commit, range, or PR (`--pr <url>`): that diff. Review it for
+  defects before launching, and pass `--no-lgtm` unless the user asked to
+  approve it. Do not post PR findings to GitHub.
 
 Use a source build of `@photostructure/difit` for `<difit-command>` until the
 next release: published 5.1.0 lacks named captures and the launch JSONL protocol.
@@ -70,9 +79,39 @@ JSON payloads before composing them; omit the selector for events. The Draft
 2020-12 bundle includes request/response definitions in `$defs`. Use command
 `--help` for usage. The commit-message TLDR is the summary's `rationale` field.
 
-For a proposed commit, supply `--commit-message <text>` and `--why <text>`.
-Read the review's saved `summary` from `comment snapshot` before committing;
-honor the user's message edits within the approved scope and repository rules.
+Every review you open carries reading-guide comments and a change summary,
+including read-only reviews. Preload comments that help the user navigate the
+diff with repeatable `--comment` arguments (on a reused server, `comment add
+--port <api-port>`; see `schema import`). Use `old` for deleted lines, `new`
+for target lines, and a number or `{"start":36,"end":39}` for a range:
+
+```sh
+<difit-command> <target> [base] --keep-alive \
+  --comment '{"type":"thread","filePath":"src/example.ts","position":{"side":"new","line":36},"body":"Start here: ..."}'
+```
+
+- On the first hunk worth reading, say where to start and the order in which
+  the files make sense, unless the diff is a single hunk.
+- On each line that is non-intuitive, odd, or confusing, explain it: a change
+  whose reason is not visible in the hunk, code that looks wrong but is
+  intended, a deletion whose replacement lives in another file, a test that
+  exercises its subject indirectly, or mechanical churn that can be skimmed.
+- On code in or next to the diff that deserves reworking or refactoring, say
+  what you would change and why. These are suggestions, not changes you made.
+- When you reviewed the diff for defects, state each finding on its line,
+  opening with "Finding:" so it reads apart from the navigation notes.
+
+One point per comment, anchored on the line it explains. Skip lines that
+explain themselves. Keep credentials out of comment bodies and arguments, and
+write in the user's language.
+
+Always supply `--commit-message <text>`, the Conventional Commit message the
+change would land under, and `--why <text>`, one to three sentences on the
+problem and why this change solves it. When the diff is someone else's, write
+them from your reading of it and say in the why where you inferred intent. On a
+reused server, set them with `comment summary` after `review create`. Read the
+review's saved `summary` from `comment snapshot` before committing; honor the
+user's message edits within the approved scope and repository rules.
 To update it, `comment summary` accepts `{reviewId,commitMessage,rationale,baseVersion}`
 on stdin. Changed summaries revoke LGTM; `review.summary` events need no comment receipt.
 

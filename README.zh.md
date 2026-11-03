@@ -33,8 +33,7 @@ npx skills add yoshiko-pg/difit # 为代理添加 Skills
 
 安装后包含的主要 Skill：
 
-- `difit`：在代码修改后通过 difit 向用户请求审查
-- `difit-review`：审查特定 diff 或 PR，并启动一个已预载评论或说明的 difit
+- `difit`：用户明确请求使用 difit 时，请用户审查代码修改，或审查指定的 diff 或 PR 并在查看器中显示发现的问题
 
 ## 🚀 使用方法
 
@@ -190,8 +189,7 @@ npx skills add yoshiko-pg/difit
 
 安装后包含的主要 Skill：
 
-- `difit`：在代码修改后通过 difit 向用户请求审查
-- `difit-review`：审查特定 diff 或 PR，并启动一个已预载评论或说明的 difit
+- `difit`：用户明确请求使用 difit 时，请用户审查代码修改，或审查指定的 diff 或 PR 并在查看器中显示发现的问题
 
 在代码修改后或自动审查时，代理可以根据目的使用对应的 Skill 来启动 difit 服务器。
 
