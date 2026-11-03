@@ -807,21 +807,22 @@ function App() {
     return map;
   }, [displayThreads]);
 
-  // Keep the captured patch canonical for viewed hashes and comment snapshots;
+  // Keep imported patches canonical for viewed hashes and comment snapshots;
   // rendering and keyboard navigation share only this presentation projection.
+  const isImportedPatch = Boolean(diffData?.capture) || diffData?.targetCommitish === 'stdin';
   const navigableFiles = useMemo(
     () =>
       canonicalFiles.map((file) => ({
         ...file,
         chunks:
-          diffData?.capture && ignoreWhitespace
+          isImportedPatch && ignoreWhitespace
             ? hideWhitespaceChanges(
                 file.chunks,
                 threadsByFile.get(file.path) ?? EMPTY_COMMENT_THREADS,
               )
             : file.chunks,
       })),
-    [canonicalFiles, diffData?.capture, ignoreWhitespace, threadsByFile],
+    [canonicalFiles, isImportedPatch, ignoreWhitespace, threadsByFile],
   );
   const presentationChunksByPath = useMemo(() => {
     const map = new Map<string, MergedChunk[]>();
@@ -1151,9 +1152,14 @@ function App() {
   useEffect(() => {
     const whitespaceChanged = previousIgnoreWhitespaceRef.current !== ignoreWhitespace;
     previousIgnoreWhitespaceRef.current = ignoreWhitespace;
-    // Captures use a local projection; refetching would only rebuild the same
+    // Imported patches use a local projection; refetching would only rebuild the same
     // immutable patch and temporarily discard the merged display chunks.
-    if (whitespaceChanged && selectedRevisionRef.current.reviewName !== undefined) return;
+    if (
+      whitespaceChanged &&
+      (selectedRevisionRef.current.reviewName !== undefined ||
+        selectedRevisionRef.current.targetCommitish === 'stdin')
+    )
+      return;
     void fetchDiffData();
   }, [fetchDiffData, ignoreWhitespace]);
 

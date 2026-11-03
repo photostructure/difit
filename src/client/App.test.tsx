@@ -205,6 +205,52 @@ const mockDiffResponse: DiffResponse = {
   isEmpty: false,
 };
 
+it('filters stdin whitespace locally without replacing the canonical patch', async () => {
+  vi.clearAllMocks();
+  mockComments = [];
+  const response: DiffResponse = {
+    ...mockDiffResponse,
+    baseCommitish: 'stdin',
+    targetCommitish: 'stdin',
+    requestedBaseCommitish: 'stdin',
+    requestedTargetCommitish: 'stdin',
+    files: [
+      {
+        path: 'stdin.ts',
+        status: 'modified',
+        additions: 1,
+        deletions: 1,
+        chunks: [
+          {
+            header: '@@ -1 +1 @@',
+            oldStart: 1,
+            oldLines: 1,
+            newStart: 1,
+            newLines: 1,
+            lines: [
+              { type: 'delete', content: 'const value = 1;', oldLineNumber: 1 },
+              { type: 'add', content: '  const value = 1;  ', newLineNumber: 1 },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  mockFetch(response);
+  renderApp();
+  await screen.findByText('Whitespace-only changes hidden');
+  expect(document.querySelectorAll('[data-diff-line-row="true"]')).toHaveLength(0);
+  const diffRequests = () =>
+    vi.mocked(fetch).mock.calls.filter(([url]) => String(url).startsWith('/api/diff'));
+  const requestsBefore = diffRequests().length;
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Ignore Whitespace' }));
+  await waitFor(() =>
+    expect(document.querySelectorAll('[data-diff-line-row="true"]').length).toBeGreaterThan(0),
+  );
+  expect(diffRequests()).toHaveLength(requestsBefore);
+  expect(vi.mocked(useViewedFiles).mock.lastCall?.[4]).toEqual(response.files);
+});
+
 describe('App Component - Clear Comments Functionality', () => {
   beforeEach(() => {
     vi.clearAllMocks();
