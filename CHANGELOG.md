@@ -8,6 +8,19 @@ All notable changes to this project will be documented in this file.
 
 - Discover launch events and agent JSON requests/responses through `difit schema` and command help.
 
+### Changed in the PhotoStructure fork
+
+- Bind an OS-assigned port with `--port 0` and report it in `server.ready`; reject non-numeric ports instead of falling back to 4966.
+- Emit JSON Lines from the foreground launch process by default, with `--jsonl` and a `--no-jsonl` human-output opt-out.
+- Include server readiness, comment progress, and thread changes in launch output; require explicit Delivered receipts.
+- Remove the separate `comment watch` command and conversation event long-poll endpoint; retain snapshot recovery and companion commands.
+- Require `--no-jsonl --no-conversation` together to disable conversations; `--no-conversation` alone now exits with an error.
+- Route startup and disconnect diagnostics to stderr in both output modes; `--no-jsonl` uses human-readable comment and approval output on stdout.
+
+## [5.1.0] - 2026-10-29
+
+### Added in the PhotoStructure fork
+
 - Review-wide conversations alongside inline threads, with drafts retained while navigating code.
 - Immediate JSON comment events, exact-thread agent replies, and Delivered, Read, Thinking, Replying, Replied, and Noted progress.
 - One Comment / Change request / Question control with explanatory tooltips and selection styling for light and dark themes.
@@ -17,16 +30,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed in the PhotoStructure fork
 
-- Bind an OS-assigned port with `--port 0` and report it in `server.ready`; reject non-numeric ports instead of falling back to 4966.
-
-- Emit JSON Lines from the foreground launch process by default, with `--jsonl` and a `--no-jsonl` human-output opt-out.
-- Include server readiness, comment progress, and thread changes in launch output; require explicit Delivered receipts.
-- Remove the separate `comment watch` command and conversation event long-poll endpoint; retain snapshot recovery and companion commands.
-- Require `--no-jsonl --no-conversation` together to disable conversations; `--no-conversation` alone now exits with an error.
-- Route startup and disconnect diagnostics to stderr in both output modes; `--no-jsonl` uses human-readable comment and approval output on stdout.
-
 - Distribute the fork as `@photostructure/difit`, retaining the `difit` command.
-- Enable conversations and LGTM by default, with `--no-jsonl --no-conversation` and `--no-lgtm` opt-outs.
+- Enable conversations and LGTM by default, with `--no-conversation` and `--no-lgtm` opt-outs.
 - Shorten the agent skill instructions and document the live conversation protocol.
 - Prepare releases through signed tags, package acceptance checks, and staged npm publication with human approval.
 
@@ -1421,7 +1426,7 @@ All notable changes to this project will be documented in this file.
 
 - First stable release 🌱
 
-[Unreleased]: https://github.com/yoshiko-pg/difit/compare/v5.0.12...HEAD
+[5.1.0]: https://github.com/photostructure/difit/releases/tag/v5.1.0
 [5.0.12]: https://github.com/yoshiko-pg/difit/compare/v5.0.11...v5.0.12
 [5.0.11]: https://github.com/yoshiko-pg/difit/compare/v5.0.10...v5.0.11
 [5.0.10]: https://github.com/yoshiko-pg/difit/compare/v5.0.9...v5.0.10
