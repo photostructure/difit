@@ -1,0 +1,107 @@
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it } from 'vitest';
+
+import type { CommentThread } from '../../types/diff';
+
+import { useAgentUpdates } from './useAgentUpdates';
+
+const thread: CommentThread = {
+  id: 'thread',
+  scope: 'review',
+  createdAt: '2026-11-03T00:00:00Z',
+  updatedAt: '2026-11-03T00:00:00Z',
+  messages: [
+    {
+      id: 'question',
+      origin: 'user',
+      body: 'Why?',
+      createdAt: '2026-11-03T00:00:00Z',
+      updatedAt: '2026-11-03T00:00:00Z',
+    },
+    {
+      id: 'answer',
+      origin: 'agent',
+      body: 'Because...',
+      createdAt: '2026-11-03T00:01:00Z',
+      updatedAt: '2026-11-03T00:01:00Z',
+    },
+  ],
+};
+
+describe('unseen agent updates', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('keeps replies unseen until explicitly observed and retains seen revisions across reloads', async () => {
+    const first = renderHook(() => useAgentUpdates([thread], 'repo/review', true));
+    await waitFor(() => expect(first.result.current.updates).toHaveLength(1));
+    const update = first.result.current.updates[0]!;
+    act(() => first.result.current.markSeen(update.thread.id, update.message.id, update.revision));
+    expect(first.result.current.updates).toHaveLength(0);
+    first.unmount();
+    const reloaded = renderHook(() => useAgentUpdates([thread], 'repo/review', true));
+    await waitFor(() => expect(reloaded.result.current.updates).toHaveLength(0));
+  });
+
+  it('treats edited agent content as unseen even if its timestamp did not change', async () => {
+    const { result, rerender } = renderHook(
+      ({ threads }) => useAgentUpdates(threads, 'review', true),
+      { initialProps: { threads: [thread] } },
+    );
+    await waitFor(() => expect(result.current.updates).toHaveLength(1));
+    const update = result.current.updates[0]!;
+    act(() => result.current.markSeen(thread.id, update.message.id, update.revision));
+    const edited = structuredClone(thread);
+    edited.messages[1]!.body = 'A corrected answer';
+    rerender({ threads: [edited] });
+    expect(result.current.updates).toHaveLength(1);
+    act(() => result.current.markSeen(thread.id, update.message.id, update.revision));
+    expect(result.current.updates).toHaveLength(1);
+  });
+
+  it('keeps review scopes separate and ignores a stale observer from another review', async () => {
+    const { result, rerender } = renderHook(({ scope }) => useAgentUpdates([thread], scope, true), {
+      initialProps: { scope: 'first' },
+    });
+    await waitFor(() => expect(result.current.updates).toHaveLength(1));
+    const stale = result.current.markSeen;
+    const update = result.current.updates[0]!;
+    act(() => result.current.markSeen(thread.id, update.message.id, update.revision));
+    rerender({ scope: 'second' });
+    await waitFor(() => expect(result.current.updates).toHaveLength(1));
+    act(() => stale(thread.id, update.message.id, update.revision));
+    expect(result.current.updates).toHaveLength(1);
+    rerender({ scope: 'first' });
+    await waitFor(() => expect(result.current.updates).toHaveLength(0));
+  });
+
+  it('excludes deleted content and keeps identical message IDs in distinct threads separate', async () => {
+    const other = { ...thread, id: 'other' };
+    const removed = { ...thread, id: 'deleted', deleted: true };
+    const { result } = renderHook(() => useAgentUpdates([thread, other, removed], 'review', true));
+    await waitFor(() => expect(result.current.updates).toHaveLength(2));
+    const first = result.current.updates[0]!;
+    act(() => result.current.markSeen(first.thread.id, first.message.id, first.revision));
+    expect(result.current.updates).toHaveLength(1);
+  });
+
+  it('retains messages seen in different tabs without overwriting another tab', async () => {
+    const threads = [thread, { ...thread, id: 'other' }];
+    const first = renderHook(() => useAgentUpdates(threads, 'shared-review', true));
+    const second = renderHook(() => useAgentUpdates(threads, 'shared-review', true));
+    const firstUpdate = first.result.current.updates[0]!;
+    const secondUpdate = second.result.current.updates[1]!;
+    act(() =>
+      first.result.current.markSeen(thread.id, firstUpdate.message.id, firstUpdate.revision),
+    );
+    act(() =>
+      second.result.current.markSeen('other', secondUpdate.message.id, secondUpdate.revision),
+    );
+    act(() => window.dispatchEvent(new StorageEvent('storage', { key: null })));
+    expect(first.result.current.updates).toHaveLength(0);
+    expect(second.result.current.updates).toHaveLength(0);
+    first.unmount();
+    second.unmount();
+    const reloaded = renderHook(() => useAgentUpdates(threads, 'shared-review', true));
+    await waitFor(() => expect(reloaded.result.current.updates).toHaveLength(0));
+  });
+});

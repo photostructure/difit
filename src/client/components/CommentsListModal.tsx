@@ -1,15 +1,18 @@
 import { X } from 'lucide-react';
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 
 import type { CommentIntent, CommentThread } from '../../types/diff';
 import { hasActiveTextSelection } from '../utils/domUtils';
+import { AgentUpdatesContext } from '../contexts/AgentUpdatesContext';
 
 import { CommentForm, type CommentSubmitOptions } from './CommentForm';
 import { CommentThreadCard } from './CommentThreadCard';
 import type { AppearanceSettings } from './SettingsModal';
 
 interface CommentsListModalProps {
+  focusedMessage?: { threadId: string; messageId: string } | null;
+  onAgentMessageSeen?: (threadId: string, messageId: string, revision: string) => void;
   isOpen: boolean;
   onClose: () => void;
   onAddGeneralComment?: (body: string, options: CommentSubmitOptions) => Promise<void>;
@@ -33,6 +36,8 @@ interface CommentsListModalProps {
 }
 
 export function CommentsListModal({
+  focusedMessage,
+  onAgentMessageSeen,
   isOpen,
   onClose,
   onAddGeneralComment,
@@ -58,10 +63,14 @@ export function CommentsListModal({
   const commentRefs = useRef<(HTMLDivElement | null)[]>([]);
   const dialogRef = useRef<HTMLDivElement>(null);
   const { enableScope, disableScope } = useHotkeysContext();
+  const agentUpdateReadState = useMemo(
+    () => (onAgentMessageSeen ? { enabled: true, markSeen: onAgentMessageSeen } : null),
+    [onAgentMessageSeen],
+  );
 
   useEffect(() => {
-    if (isOpen) dialogRef.current?.focus();
-  }, [isOpen]);
+    if (isOpen && !focusedMessage) dialogRef.current?.focus();
+  }, [isOpen, focusedMessage]);
 
   const sortedThreads = comments
     .filter(
@@ -80,6 +89,27 @@ export function CommentsListModal({
 
       return a.createdAt.localeCompare(b.createdAt);
     });
+
+  const focusedThreadIndex = sortedThreads.findIndex(
+    (thread) => thread.id === focusedMessage?.threadId,
+  );
+  const handledFocus = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isOpen || !focusedMessage) {
+      handledFocus.current = null;
+      return;
+    }
+    const key = JSON.stringify([focusedMessage.threadId, focusedMessage.messageId]);
+    if (handledFocus.current === key) return;
+    if (filter !== 'all') {
+      setFilter('all');
+      return;
+    }
+    if (focusedThreadIndex >= 0) {
+      setSelectedIndex(focusedThreadIndex);
+      handledFocus.current = key;
+    }
+  }, [isOpen, focusedMessage, filter, focusedThreadIndex]);
 
   useEffect(() => {
     setSelectedIndex((index) => Math.max(0, Math.min(index, sortedThreads.length - 1)));
@@ -178,135 +208,145 @@ export function CommentsListModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch justify-end">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div
-        ref={dialogRef}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="conversation-title"
-        className="relative flex h-full w-full max-w-2xl flex-col overflow-hidden border border-github-border bg-github-bg-primary shadow-lg"
-      >
-        <div className="sticky top-0 border-b border-github-border bg-github-bg-primary px-6 py-4">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 id="conversation-title" className="text-lg font-semibold text-github-text-primary">
-              Conversation
-            </h2>
-            <button
-              onClick={onClose}
-              className="text-github-text-secondary transition-colors hover:text-github-text-primary"
-              aria-label="Close conversation"
-            >
-              <X size={20} />
-            </button>
-          </div>
-          <div className="text-xs text-github-text-secondary">
-            <span className="font-mono">j/k</span> or <span className="font-mono">↑/↓</span> to
-            navigate • <span className="font-mono">Enter</span> to jump •{' '}
-            <span className="font-mono">d</span> to resolve/reopen •{' '}
-            <span className="font-mono">Esc</span> to close
-          </div>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="p-6">
-            <label className="mb-4 flex items-center gap-2 text-xs text-github-text-secondary">
-              Show
-              <select
-                aria-label="Conversation filter"
-                value={filter}
-                onChange={(event) => {
-                  setFilter(event.target.value as typeof filter);
-                  setSelectedIndex(0);
-                }}
-                className="rounded border border-github-border bg-github-bg-secondary p-1"
+    <AgentUpdatesContext.Provider value={agentUpdateReadState}>
+      <div className="fixed inset-0 z-50 flex items-stretch justify-end">
+        <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+        <div
+          ref={dialogRef}
+          tabIndex={-1}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="conversation-title"
+          className="relative flex h-full w-full max-w-2xl flex-col overflow-hidden border border-github-border bg-github-bg-primary shadow-lg"
+        >
+          <div className="sticky top-0 border-b border-github-border bg-github-bg-primary px-6 py-4">
+            <div className="mb-2 flex items-center justify-between">
+              <h2
+                id="conversation-title"
+                className="text-lg font-semibold text-github-text-primary"
               >
-                <option value="all">All conversations</option>
-                <option value="open">Open</option>
-                <option value="resolved">Resolved</option>
-              </select>
-            </label>
-            {onAddGeneralComment && (
-              <div className="mb-6">
-                <CommentForm
-                  embedded
-                  submitLabel="Send"
-                  value={generalDraft.body}
-                  onChange={(nextBody) =>
-                    setGeneralDraft((current) => {
-                      const body =
-                        typeof nextBody === 'function' ? nextBody(current.body) : nextBody;
-                      return body === current.body ? current : { ...current, body };
-                    })
-                  }
-                  intentValue={generalDraft.intent}
-                  onIntentChange={(intent) =>
-                    setGeneralDraft((current) => ({ ...current, intent }))
-                  }
-                  dismissOnOutsideClick={false}
-                  autoFocus={false}
-                  title="General comment or question"
-                  placeholder="Comment or ask about this review…"
-                  onSubmit={async (body, options) => {
-                    const submittedDraft = generalDraft;
-                    await onAddGeneralComment(body, options);
-                    setGeneralDraft((current) =>
-                      current === submittedDraft ? { body: '', intent: 'comment' } : current,
-                    );
-                  }}
-                  onCancel={() => {
-                    setGeneralDraft({ body: '', intent: 'comment' });
-                    onClose();
-                  }}
-                />
-              </div>
-            )}
+                Conversation
+              </h2>
+              <button
+                onClick={onClose}
+                className="text-github-text-secondary transition-colors hover:text-github-text-primary"
+                aria-label="Close conversation"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="text-xs text-github-text-secondary">
+              <span className="font-mono">j/k</span> or <span className="font-mono">↑/↓</span> to
+              navigate • <span className="font-mono">Enter</span> to jump •{' '}
+              <span className="font-mono">d</span> to resolve/reopen •{' '}
+              <span className="font-mono">Esc</span> to close
+            </div>
+          </div>
 
-            {sortedThreads.length === 0 ? (
-              <p className="text-center text-github-text-secondary">No comments yet</p>
-            ) : (
-              <>
-                <div className="space-y-2">
-                  {sortedThreads.map((thread, index) => (
-                    <div
-                      key={thread.id}
-                      ref={(el) => {
-                        commentRefs.current[index] = el;
-                      }}
-                      className={selectedIndex === index ? 'rounded ring-2 ring-blue-500' : ''}
-                    >
-                      <CommentThreadCard
-                        thread={thread}
-                        showAuthorBadges={showAuthorBadges}
-                        onGeneratePrompt={onGenerateThreadPrompt}
-                        onRemoveThread={onRemoveThread ? handleRemoveThread : undefined}
-                        onRestoreComment={onRestoreComment}
-                        onToggleThreadResolved={onToggleThreadResolved}
-                        onReplyToThread={onReplyToThread}
-                        onRemoveMessage={onRemoveMessage}
-                        onUpdateMessage={onUpdateMessage}
-                        syntaxTheme={syntaxTheme}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          // Selecting text inside a card fires a click as well; do not
-                          // treat it as a request to navigate and close the modal.
-                          if (hasActiveTextSelection()) return;
-                          setSelectedIndex(index);
-                          handleThreadClick(thread);
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="p-6">
+              <label className="mb-4 flex items-center gap-2 text-xs text-github-text-secondary">
+                Show
+                <select
+                  aria-label="Conversation filter"
+                  value={filter}
+                  onChange={(event) => {
+                    setFilter(event.target.value as typeof filter);
+                    setSelectedIndex(0);
+                  }}
+                  className="rounded border border-github-border bg-github-bg-secondary p-1"
+                >
+                  <option value="all">All conversations</option>
+                  <option value="open">Open</option>
+                  <option value="resolved">Resolved</option>
+                </select>
+              </label>
+              {onAddGeneralComment && (
+                <div className="mb-6">
+                  <CommentForm
+                    embedded
+                    submitLabel="Send"
+                    value={generalDraft.body}
+                    onChange={(nextBody) =>
+                      setGeneralDraft((current) => {
+                        const body =
+                          typeof nextBody === 'function' ? nextBody(current.body) : nextBody;
+                        return body === current.body ? current : { ...current, body };
+                      })
+                    }
+                    intentValue={generalDraft.intent}
+                    onIntentChange={(intent) =>
+                      setGeneralDraft((current) => ({ ...current, intent }))
+                    }
+                    dismissOnOutsideClick={false}
+                    autoFocus={false}
+                    title="General comment or question"
+                    placeholder="Comment or ask about this review…"
+                    onSubmit={async (body, options) => {
+                      const submittedDraft = generalDraft;
+                      await onAddGeneralComment(body, options);
+                      setGeneralDraft((current) =>
+                        current === submittedDraft ? { body: '', intent: 'comment' } : current,
+                      );
+                    }}
+                    onCancel={() => {
+                      setGeneralDraft({ body: '', intent: 'comment' });
+                      onClose();
+                    }}
+                  />
+                </div>
+              )}
+
+              {sortedThreads.length === 0 ? (
+                <p className="text-center text-github-text-secondary">No comments yet</p>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    {sortedThreads.map((thread, index) => (
+                      <div
+                        key={thread.id}
+                        ref={(el) => {
+                          commentRefs.current[index] = el;
                         }}
-                      />
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-4 border-t border-github-border pt-4 text-center text-xs text-github-text-secondary">
-                  {selectedIndex + 1} of {sortedThreads.length} threads
-                </div>
-              </>
-            )}
+                        className={selectedIndex === index ? 'rounded ring-2 ring-blue-500' : ''}
+                      >
+                        <CommentThreadCard
+                          focusedMessageId={
+                            focusedMessage?.threadId === thread.id
+                              ? focusedMessage.messageId
+                              : undefined
+                          }
+                          thread={thread}
+                          showAuthorBadges={showAuthorBadges}
+                          onGeneratePrompt={onGenerateThreadPrompt}
+                          onRemoveThread={onRemoveThread ? handleRemoveThread : undefined}
+                          onRestoreComment={onRestoreComment}
+                          onToggleThreadResolved={onToggleThreadResolved}
+                          onReplyToThread={onReplyToThread}
+                          onRemoveMessage={onRemoveMessage}
+                          onUpdateMessage={onUpdateMessage}
+                          syntaxTheme={syntaxTheme}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            // Selecting text inside a card fires a click as well; do not
+                            // treat it as a request to navigate and close the modal.
+                            if (hasActiveTextSelection()) return;
+                            setSelectedIndex(index);
+                            handleThreadClick(thread);
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 border-t border-github-border pt-4 text-center text-xs text-github-text-secondary">
+                    {selectedIndex + 1} of {sortedThreads.length} threads
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </AgentUpdatesContext.Provider>
   );
 }

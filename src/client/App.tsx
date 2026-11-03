@@ -49,10 +49,12 @@ import { Logo } from './components/Logo';
 import { ReloadButton } from './components/ReloadButton';
 import { ReviewSummaryPanel } from './components/ReviewSummaryPanel';
 import { ReviewPresenceIndicator } from './components/ReviewPresenceIndicator';
+import { AgentUpdatesPanel } from './components/AgentUpdatesPanel';
+import { useAgentUpdates } from './hooks/useAgentUpdates';
 import { RevisionDetailModal } from './components/RevisionDetailModal';
 import { SettingsModal } from './components/SettingsModal';
 import { SparkleAnimation } from './components/SparkleAnimation';
-import { WordHighlightProvider } from './contexts/WordHighlightContext';
+import { ReviewProviders } from './contexts/ReviewProviders';
 import { useAppearanceSettings } from './hooks/useAppearanceSettings';
 import { useDiffComments } from './hooks/useDiffComments';
 import { useExpandedLines, type MergedChunk } from './hooks/useExpandedLines';
@@ -199,6 +201,12 @@ function App() {
   const [showSparkles, setShowSparkles] = useState(false);
   const [hasTriggeredSparkles, setHasTriggeredSparkles] = useState(false);
   const [isCommentsListOpen, setIsCommentsListOpen] = useState(false);
+  const [isAgentUpdatesOpen, setIsAgentUpdatesOpen] = useState(false);
+  const [focusedAgentMessage, setFocusedAgentMessage] = useState<{
+    threadId: string;
+    messageId: string;
+  } | null>(null);
+  const closeAgentUpdates = useCallback(() => setIsAgentUpdatesOpen(false), []);
   const [isRevisionModalOpen, setIsRevisionModalOpen] = useState(false);
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
   const collapsedInitializedRef = useRef(false);
@@ -789,6 +797,11 @@ function App() {
           isThreadOutdated(thread, fileLineIndexByPath.get(thread.filePath), diffData?.capture),
       })),
     [threads, deletedComments, fileLineIndexByPath, diffData?.capture],
+  );
+  const { updates: agentUpdates, markSeen: markAgentMessageSeen } = useAgentUpdates(
+    normalizedThreads,
+    commentsContextKey,
+    hasBootstrappedComments,
   );
   const showAuthorBadges = useMemo(
     () => hasMultipleCommentAuthors(normalizedThreads.flatMap((thread) => thread.messages)),
@@ -1487,6 +1500,28 @@ function App() {
   }, [getCommentApiUrl, hasBootstrappedComments, syncThreadsToServer, threads, diffData?.capture]);
 
   const reviewPresence = useReviewPresence();
+  const inlineAgentReadContext = useMemo(
+    () => ({
+      enabled:
+        !isCommentsListOpen &&
+        !isAgentUpdatesOpen &&
+        !isSettingsOpen &&
+        !isHelpOpen &&
+        !isRevisionModalOpen &&
+        !(isMobile && isFileTreeOpen),
+      markSeen: markAgentMessageSeen,
+    }),
+    [
+      isCommentsListOpen,
+      isAgentUpdatesOpen,
+      isSettingsOpen,
+      isHelpOpen,
+      isRevisionModalOpen,
+      isMobile,
+      isFileTreeOpen,
+      markAgentMessageSeen,
+    ],
+  );
 
   const handleAddComment = useCallback(
     (
@@ -1643,7 +1678,7 @@ function App() {
   const canOpenInEditor = diffData.openInEditorAvailable !== false && Boolean(editorSessionToken);
 
   return (
-    <WordHighlightProvider>
+    <ReviewProviders agentUpdates={inlineAgentReadContext}>
       <div className="h-screen flex flex-col" onClickCapture={handleGlobalClick}>
         <header
           className={`bg-github-bg-secondary border-b border-github-border flex text-sm text-github-text-primary ${
@@ -1764,12 +1799,36 @@ function App() {
               )}
               <button
                 type="button"
-                onClick={() => setIsCommentsListOpen(true)}
+                onClick={() => {
+                  setFocusedAgentMessage(null);
+                  setIsCommentsListOpen(true);
+                }}
                 className="rounded-md border border-github-border px-3 py-1.5 font-medium text-github-text-primary hover:bg-github-bg-tertiary"
               >
                 Conversation
               </button>
               <ReviewPresenceIndicator presence={reviewPresence} />
+              <button
+                type="button"
+                aria-expanded={isAgentUpdatesOpen}
+                aria-controls="agent-updates-panel"
+                aria-haspopup="dialog"
+                aria-busy={!hasBootstrappedComments}
+                disabled={!hasBootstrappedComments}
+                title="Unseen agent replies and edited messages"
+                className={`rounded-md border px-3 py-1.5 font-medium ${agentUpdates.length ? 'border-github-accent text-github-accent' : 'border-github-border text-github-text-primary'} hover:bg-github-bg-tertiary`}
+                onClick={() => {
+                  setIsCommentsListOpen(false);
+                  setFocusedAgentMessage(null);
+                  setIsAgentUpdatesOpen(true);
+                }}
+              >
+                <span aria-live="polite" aria-atomic="true">
+                  {agentUpdates.length
+                    ? `${agentUpdates.length} new agent update${agentUpdates.length === 1 ? '' : 's'}`
+                    : 'Agent updates'}
+                </span>
+              </button>
               {!isMobile && threads.length > 0 && (
                 <CommentsDropdown
                   commentsCount={threads.length}
@@ -2112,10 +2171,30 @@ function App() {
         )}
 
         <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
+        {isAgentUpdatesOpen && (
+          <AgentUpdatesPanel
+            updates={agentUpdates}
+            onClose={closeAgentUpdates}
+            onSelect={(update) => {
+              setIsAgentUpdatesOpen(false);
+              setFocusedAgentMessage({ threadId: update.thread.id, messageId: update.message.id });
+              setIsCommentsListOpen(true);
+            }}
+          />
+        )}
 
         <CommentsListModal
           isOpen={isCommentsListOpen}
-          onClose={() => setIsCommentsListOpen(false)}
+          onClose={() => {
+            setIsCommentsListOpen(false);
+            setFocusedAgentMessage(null);
+          }}
+          focusedMessage={focusedAgentMessage}
+          onAgentMessageSeen={
+            !isSettingsOpen && !isHelpOpen && !isRevisionModalOpen
+              ? markAgentMessageSeen
+              : undefined
+          }
           onNavigate={handleNavigateToComment}
           comments={displayThreads}
           onAddGeneralComment={(body, options) => {
@@ -2133,7 +2212,7 @@ function App() {
           syntaxTheme={settings.syntaxTheme}
         />
       </div>
-    </WordHighlightProvider>
+    </ReviewProviders>
   );
 }
 

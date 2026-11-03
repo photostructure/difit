@@ -12,12 +12,15 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 
 import { type CommentIntent, type CommentThread, type DiffCommentMessage } from '../../types/diff';
 import { copyTextToClipboard } from '../utils/clipboard';
+import { useSeenAgentMessage } from '../hooks/useSeenAgentMessage';
 
 import { CommentBodyRenderer } from './CommentBodyRenderer';
 import { CommentForm, type CommentSubmitOptions } from './CommentForm';
 import type { AppearanceSettings } from './SettingsModal';
 
 interface ThreadMessageItemProps {
+  threadId: string;
+  highlighted?: boolean;
   message: DiffCommentMessage;
   isRootMessage?: boolean;
   showAuthorBadge: boolean;
@@ -32,6 +35,8 @@ interface ThreadMessageItemProps {
 }
 
 function ThreadMessageItem({
+  threadId,
+  highlighted = false,
   message,
   isRootMessage = false,
   showAuthorBadge,
@@ -44,6 +49,7 @@ function ThreadMessageItem({
   onDelete,
   onClick,
 }: ThreadMessageItemProps) {
+  const messageElement = useSeenAgentMessage(threadId, message, highlighted);
   const [isEditing, setIsEditing] = useState(false);
   const showAuthorHeader = showAuthorBadge && Boolean(message.author);
   const progress = message.origin !== 'agent' ? message.progress : undefined;
@@ -84,7 +90,13 @@ function ThreadMessageItem({
   };
 
   return (
-    <div className={isEditing ? '' : 'flex min-w-0 items-start gap-3'} onClick={onClick}>
+    <div
+      ref={messageElement}
+      tabIndex={-1}
+      data-comment-message-id={message.id}
+      className={`${isEditing ? '' : 'flex min-w-0 items-start gap-3'} ${highlighted ? 'rounded ring-2 ring-blue-500 ring-offset-2 ring-offset-github-bg-tertiary' : ''}`}
+      onClick={onClick}
+    >
       {!isEditing ? (
         <>
           <div className="min-w-0 flex-1">
@@ -205,6 +217,7 @@ function ThreadMessageItem({
 }
 
 interface CommentThreadCardProps {
+  focusedMessageId?: string;
   thread: CommentThread;
   showAuthorBadges?: boolean;
   onGeneratePrompt: (thread: CommentThread) => string;
@@ -225,6 +238,7 @@ interface CommentThreadCardProps {
 }
 
 export function CommentThreadCard({
+  focusedMessageId,
   thread,
   showAuthorBadges = false,
   onGeneratePrompt,
@@ -243,11 +257,11 @@ export function CommentThreadCard({
   useEffect(() => () => clearTimeout(copyTimer.current), []);
   const contentId = useId();
   const [isCollapsed, setIsCollapsed] = useState(
-    Boolean(thread.deleted || thread.resolution?.resolved),
+    Boolean(thread.deleted || (thread.resolution?.resolved && !focusedMessageId)),
   );
   useEffect(() => {
-    setIsCollapsed(Boolean(thread.deleted || thread.resolution?.resolved));
-  }, [thread.deleted, thread.resolution?.resolved]);
+    setIsCollapsed(Boolean(thread.deleted || (thread.resolution?.resolved && !focusedMessageId)));
+  }, [focusedMessageId, thread.deleted, thread.resolution?.resolved]);
   const lineLabel = Array.isArray(thread.line)
     ? `${thread.line[0]}-${thread.line[1]}`
     : thread.line;
@@ -392,6 +406,8 @@ export function CommentThreadCard({
         {!isCollapsed && (
           <>
             <ThreadMessageItem
+              threadId={thread.id}
+              highlighted={focusedMessageId === rootMessage.id}
               message={{
                 ...rootMessage,
                 intent: rootMessage.intent ?? (thread.isQuestion ? 'question' : undefined),
@@ -427,6 +443,8 @@ export function CommentThreadCard({
                   </div>
                 ) : (
                   <ThreadMessageItem
+                    threadId={thread.id}
+                    highlighted={focusedMessageId === message.id}
                     message={message}
                     showAuthorBadge={showAuthorBadges}
                     syntaxTheme={syntaxTheme}

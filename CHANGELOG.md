@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added in the PhotoStructure fork
 
+- Navigate unseen agent replies and edited messages from a persistent updates button, with previews and direct message jumps.
 - Report browser visibility and agent-listener presence; offer a resume prompt for agents that cannot receive idle notifications.
 - Stop `difit wait` with exit 4 when every selected review is unattended, after recovering existing human work.
 
