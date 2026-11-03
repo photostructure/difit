@@ -27,3 +27,11 @@ Git history mixes lightweight descriptions with Conventional Commit prefixes—f
 ## Tooling & Environment
 
 Use `pnpm` for dependency management (avoid mixing with `npm` or `yarn`) and rely on the `mise.toml` pinned versions for local reproducibility. When performance is a concern, run `pnpm perf:*` scripts to benchmark diff rendering before merging significant parser or rendering changes.
+
+## Upstream PRs and Issues
+
+Before examining or adopting upstream changes, read [UPSTREAM.md](UPSTREAM.md).
+Use its version markers to identify new or changed items, and revisit decisions
+when fork changes invalidate their reasons. Record each examined item's decision,
+fork resolution, upstream marker, review date, fork baseline, and implementation
+or verification evidence. Keep detailed comparisons in dated review records.
