@@ -209,6 +209,14 @@ export interface LegacyDiffContextStorage {
   viewedFiles: ViewedFileRecord[];
 }
 
+// Browser-local undo copies; never included in conversation API requests.
+export interface DeletedComment {
+  thread: DiffCommentThread;
+  followingIds: string[];
+  precedingIds: string[];
+  messageId?: string;
+}
+
 export interface DiffContextStorage {
   version: 2; // Schema version
   baseCommitish: string;
@@ -218,11 +226,14 @@ export interface DiffContextStorage {
   lastModifiedAt: string; // ISO 8601 format
 
   threads: DiffCommentThread[];
+  deletedComments?: DeletedComment[];
   viewedFiles: ViewedFileRecord[];
   appliedCommentImportIds: string[];
 }
 
 interface DisplayCommentThreadBase {
+  deleted?: boolean;
+  deletedMessageIds?: string[];
   capture?: Pick<NamedReviewMetadata, 'version' | 'patchDigest'>;
   id: string;
   createdAt: string;

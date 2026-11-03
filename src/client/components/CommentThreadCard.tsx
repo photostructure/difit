@@ -11,7 +11,6 @@ import {
 import React, { useEffect, useId, useRef, useState } from 'react';
 
 import { type CommentIntent, type CommentThread, type DiffCommentMessage } from '../../types/diff';
-import { useClickOutside } from '../hooks/useClickOutside';
 import { copyTextToClipboard } from '../utils/clipboard';
 
 import { CommentBodyRenderer } from './CommentBodyRenderer';
@@ -28,13 +27,9 @@ interface ThreadMessageItemProps {
   onUpdate: (newBody: string, intent: CommentIntent) => void;
   onResolveOrDelete: () => void;
   actionLabel: string;
-  confirmPrompt?: string;
   onDelete?: () => void;
-  confirmLabel: string;
   onClick?: (e: React.MouseEvent) => void;
 }
-
-type PendingAction = 'primary' | 'delete';
 
 function ThreadMessageItem({
   message,
@@ -46,18 +41,10 @@ function ThreadMessageItem({
   onUpdate,
   onResolveOrDelete,
   actionLabel,
-  confirmPrompt,
   onDelete,
-  confirmLabel,
   onClick,
 }: ThreadMessageItemProps) {
   const [isEditing, setIsEditing] = useState(false);
-  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
-  const isConfirming = pendingAction !== null;
-  const isConfirmingDelete =
-    pendingAction === 'delete' || (pendingAction === 'primary' && !isRootMessage);
-  const confirmContainerRef = useRef<HTMLDivElement>(null);
-  const confirmButtonRef = useRef<HTMLButtonElement>(null);
   const showAuthorHeader = showAuthorBadge && Boolean(message.author);
   const progress = message.origin !== 'agent' ? message.progress : undefined;
   const isUserAuthoredMessage = message.author?.trim() === 'User';
@@ -65,27 +52,6 @@ function ThreadMessageItem({
   const [isCopied, setIsCopied] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(copyTimer.current), []);
-
-  useClickOutside(confirmContainerRef, () => setPendingAction(null), isConfirming);
-
-  useEffect(() => {
-    if (!isConfirming) return;
-
-    confirmButtonRef.current?.focus();
-
-    // Capture phase so Escape only cancels the confirmation and never reaches
-    // surrounding Escape handlers (e.g. the CommentsListModal close hotkey).
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        setPendingAction(null);
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown, true);
-    return () => document.removeEventListener('keydown', handleKeyDown, true);
-  }, [isConfirming]);
 
   const handleStartEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -165,104 +131,59 @@ function ThreadMessageItem({
               syntaxTheme={syntaxTheme}
             />
           </div>
-          {isConfirming ? (
-            <div
-              ref={confirmContainerRef}
-              className="flex shrink-0 items-center gap-1.5 pt-0.5"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <span className="whitespace-nowrap text-xs text-github-text-secondary">
-                {pendingAction === 'delete' ? 'Delete?' : confirmPrompt}
-              </span>
+          <div className="flex shrink-0 items-start gap-2 pt-0.5">
+            {!isRootMessage && (
               <button
-                ref={confirmButtonRef}
+                type="button"
+                onClick={handleCopy}
+                className="rounded border border-github-border bg-github-bg-tertiary p-1.5 text-github-text-primary transition-all hover:bg-github-bg-primary"
+                title={isCopied ? 'Copied!' : 'Copy message'}
+                aria-label={isCopied ? 'Copied!' : 'Copy message'}
+              >
+                {isCopied ? <Check size={12} /> : <Copy size={12} />}
+              </button>
+            )}
+            {(isUserAuthoredMessage || isRootMessage) && (
+              <button
+                type="button"
+                onClick={handleStartEdit}
+                className="rounded border border-github-border bg-github-bg-tertiary p-1.5 text-github-text-primary transition-all hover:bg-github-bg-primary"
+                title="Edit message"
+              >
+                <Edit2 size={12} />
+              </button>
+            )}
+            {(isRootMessage || isUserAuthoredMessage) && (
+              <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  const action = pendingAction;
-                  setPendingAction(null);
-                  if (action === 'delete') {
-                    onDelete?.();
-                  } else {
-                    onResolveOrDelete();
-                  }
+                  onResolveOrDelete();
                 }}
-                className={`whitespace-nowrap rounded border border-github-border bg-github-bg-tertiary px-2 py-1 text-xs font-medium transition-all hover:bg-github-bg-primary ${
-                  isConfirmingDelete ? 'text-github-danger' : 'text-green-700 hover:text-green-800'
+                className={`rounded border border-github-border bg-github-bg-tertiary p-1.5 transition-all hover:bg-github-bg-primary ${
+                  isRootMessage ? 'text-green-700 hover:text-green-800' : 'text-github-danger'
                 }`}
+                title={actionLabel}
+                aria-label={actionLabel}
               >
-                {isConfirmingDelete ? 'Delete' : confirmLabel}
+                {isRootMessage ? <Check size={12} /> : <Trash2 size={12} />}
               </button>
+            )}
+            {onDelete && (
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setPendingAction(null);
+                  onDelete();
                 }}
-                className="whitespace-nowrap rounded border border-github-border bg-github-bg-tertiary px-2 py-1 text-xs text-github-text-primary transition-all hover:bg-github-bg-primary"
+                className="rounded border border-github-border bg-github-bg-tertiary p-1.5 text-github-danger transition-all hover:bg-github-bg-primary"
+                title="Delete thread"
+                aria-label="Delete thread"
               >
-                Cancel
+                <Trash2 size={12} />
               </button>
-            </div>
-          ) : (
-            <div className="flex shrink-0 items-start gap-2 pt-0.5">
-              {!isRootMessage && (
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="rounded border border-github-border bg-github-bg-tertiary p-1.5 text-github-text-primary transition-all hover:bg-github-bg-primary"
-                  title={isCopied ? 'Copied!' : 'Copy message'}
-                  aria-label={isCopied ? 'Copied!' : 'Copy message'}
-                >
-                  {isCopied ? <Check size={12} /> : <Copy size={12} />}
-                </button>
-              )}
-              {(isUserAuthoredMessage || isRootMessage) && (
-                <button
-                  type="button"
-                  onClick={handleStartEdit}
-                  className="rounded border border-github-border bg-github-bg-tertiary p-1.5 text-github-text-primary transition-all hover:bg-github-bg-primary"
-                  title="Edit message"
-                >
-                  <Edit2 size={12} />
-                </button>
-              )}
-              {(isRootMessage || isUserAuthoredMessage) && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (confirmPrompt) {
-                      setPendingAction('primary');
-                      return;
-                    }
-                    onResolveOrDelete();
-                  }}
-                  className={`rounded border border-github-border bg-github-bg-tertiary p-1.5 transition-all hover:bg-github-bg-primary ${
-                    isRootMessage ? 'text-green-700 hover:text-green-800' : 'text-github-danger'
-                  }`}
-                  title={actionLabel}
-                  aria-label={actionLabel}
-                >
-                  {isRootMessage ? <Check size={12} /> : <Trash2 size={12} />}
-                </button>
-              )}
-              {onDelete && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPendingAction('delete');
-                  }}
-                  className="rounded border border-github-border bg-github-bg-tertiary p-1.5 text-github-danger transition-all hover:bg-github-bg-primary"
-                  title="Delete thread"
-                  aria-label="Delete thread"
-                >
-                  <Trash2 size={12} />
-                </button>
-              )}
-            </div>
-          )}
+            )}
+          </div>
         </>
       ) : (
         <CommentForm
@@ -286,10 +207,10 @@ function ThreadMessageItem({
 interface CommentThreadCardProps {
   thread: CommentThread;
   showAuthorBadges?: boolean;
-  confirmRootAction?: boolean;
   onGeneratePrompt: (thread: CommentThread) => string;
   onToggleThreadResolved: (threadId: string) => void;
   onRemoveThread?: (threadId: string) => void;
+  onRestoreComment?: (threadId: string, messageId?: string) => void;
   onReplyToThread: (threadId: string, body: string, intent?: CommentIntent) => Promise<void>;
   onRemoveMessage: (threadId: string, messageId: string) => void;
   onUpdateMessage: (
@@ -306,10 +227,10 @@ interface CommentThreadCardProps {
 export function CommentThreadCard({
   thread,
   showAuthorBadges = false,
-  confirmRootAction = true,
   onGeneratePrompt,
   onToggleThreadResolved,
   onRemoveThread,
+  onRestoreComment,
   onReplyToThread,
   onRemoveMessage,
   onUpdateMessage,
@@ -318,11 +239,15 @@ export function CommentThreadCard({
   syntaxTheme,
 }: CommentThreadCardProps) {
   const [isCopied, setIsCopied] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(copyTimer.current), []);
   const contentId = useId();
-  const [isCollapsed, setIsCollapsed] = useState(Boolean(thread.resolution?.resolved));
+  const [isCollapsed, setIsCollapsed] = useState(
+    Boolean(thread.deleted || thread.resolution?.resolved),
+  );
   useEffect(() => {
-    setIsCollapsed(Boolean(thread.resolution?.resolved));
-  }, [thread.resolution?.resolved]);
+    setIsCollapsed(Boolean(thread.deleted || thread.resolution?.resolved));
+  }, [thread.deleted, thread.resolution?.resolved]);
   const lineLabel = Array.isArray(thread.line)
     ? `${thread.line[0]}-${thread.line[1]}`
     : thread.line;
@@ -338,7 +263,8 @@ export function CommentThreadCard({
       const prompt = onGeneratePrompt(thread);
       await copyTextToClipboard(prompt);
       setIsCopied(true);
-      setTimeout(() => setIsCopied(false), 2000);
+      clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setIsCopied(false), 2000);
     } catch (error) {
       console.error('Failed to copy thread prompt:', error);
     }
@@ -359,6 +285,7 @@ export function CommentThreadCard({
         <button
           type="button"
           onClick={toggleCollapsed}
+          disabled={thread.deleted}
           aria-expanded={!isCollapsed}
           aria-controls={contentId}
           aria-label={isCollapsed ? 'Expand thread' : 'Collapse thread'}
@@ -377,7 +304,11 @@ export function CommentThreadCard({
           >
             {thread.scope === 'review' ? 'Review conversation' : `${thread.file}:${lineLabel}`}
           </span>
-          {thread.resolution?.resolved && <span className="text-github-text-muted">Resolved</span>}
+          {thread.deleted ? (
+            <span>Deleted</span>
+          ) : (
+            thread.resolution?.resolved && <span className="text-github-text-muted">Resolved</span>
+          )}
           {thread.isOutdated && (
             <span
               className="inline-flex h-5 shrink-0 items-center rounded-full border border-github-text-muted px-2 text-[10px] font-medium text-github-text-muted"
@@ -402,19 +333,32 @@ export function CommentThreadCard({
             </span>
           )}
         </button>
-        {(thread.resolution?.resolved || !isCollapsed) && (
+        {(thread.deleted || thread.resolution?.resolved || !isCollapsed) && (
           <div className="flex shrink-0 items-center gap-2">
-            {thread.resolution?.resolved && (
+            {thread.deleted ? (
               <button
                 type="button"
-                className="text-xs text-github-accent"
+                className="rounded border border-github-border bg-github-bg-primary px-2 py-1 text-xs text-github-text-primary hover:bg-github-bg-secondary"
                 onClick={(event) => {
                   event.stopPropagation();
-                  onToggleThreadResolved(thread.id);
+                  onRestoreComment?.(thread.id);
                 }}
               >
-                Reopen
+                Undelete
               </button>
+            ) : (
+              thread.resolution?.resolved && (
+                <button
+                  type="button"
+                  className="text-xs text-github-accent"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onToggleThreadResolved(thread.id);
+                  }}
+                >
+                  Reopen
+                </button>
+              )
             )}
             {!isCollapsed && (
               <button
@@ -456,33 +400,39 @@ export function CommentThreadCard({
               }
               onResolveOrDelete={() => onToggleThreadResolved(thread.id)}
               actionLabel={thread.resolution?.resolved ? 'Reopen thread' : 'Resolve thread'}
-              confirmLabel={thread.resolution?.resolved ? 'Reopen' : 'Resolve'}
-              confirmPrompt={
-                confirmRootAction
-                  ? thread.resolution?.resolved
-                    ? 'Reopen?'
-                    : 'Resolve?'
-                  : undefined
-              }
               onDelete={onRemoveThread ? () => onRemoveThread(thread.id) : undefined}
             />
 
             {thread.messages.slice(1).map((message) => (
               <div key={message.id} className="ml-4 border-l border-github-border pl-3">
-                <ThreadMessageItem
-                  message={message}
-                  showAuthorBadge={showAuthorBadges}
-                  syntaxTheme={syntaxTheme}
-                  filename={thread.file}
-                  originalCode={thread.codeContent}
-                  onUpdate={(newBody, intent) =>
-                    onUpdateMessage(thread.id, message.id, newBody, intent)
-                  }
-                  onResolveOrDelete={() => onRemoveMessage(thread.id, message.id)}
-                  actionLabel="Delete reply"
-                  confirmLabel="Delete"
-                  confirmPrompt="Delete?"
-                />
+                {thread.deletedMessageIds?.includes(message.id) ? (
+                  <div
+                    className="flex items-center justify-between gap-3 text-xs text-github-text-secondary"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <span>Reply deleted</span>
+                    <button
+                      type="button"
+                      className="rounded border border-github-border bg-github-bg-primary px-2 py-1 text-github-text-primary hover:bg-github-bg-secondary"
+                      onClick={() => onRestoreComment?.(thread.id, message.id)}
+                    >
+                      Undelete
+                    </button>
+                  </div>
+                ) : (
+                  <ThreadMessageItem
+                    message={message}
+                    showAuthorBadge={showAuthorBadges}
+                    syntaxTheme={syntaxTheme}
+                    filename={thread.file}
+                    originalCode={thread.codeContent}
+                    onUpdate={(newBody, intent) =>
+                      onUpdateMessage(thread.id, message.id, newBody, intent)
+                    }
+                    onResolveOrDelete={() => onRemoveMessage(thread.id, message.id)}
+                    actionLabel="Delete reply"
+                  />
+                )}
               </div>
             ))}
 

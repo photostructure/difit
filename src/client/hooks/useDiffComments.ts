@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 
 import {
   type BaseMode,
+  type DeletedComment,
   type CommentImport,
   type CommentIntent,
   type DiffContextStorage,
@@ -21,6 +22,7 @@ import { storageService } from '../services/StorageService';
 import { normalizeBaseMode } from '../../utils/diffSelection';
 import type { NamedReviewMetadata } from '../../types/review';
 import { getLanguageFromPath } from '../utils/diffUtils';
+import { includeDeletedComments, insertBeforeFollowing } from '../utils/commentDeletion';
 
 interface AddThreadParams {
   filePath: string;
@@ -42,6 +44,8 @@ interface UseDiffCommentsReturn {
   hasLoadedComments: boolean;
   comments: LegacyDiffComment[];
   threads: DiffCommentThread[];
+  deletedComments: DeletedComment[];
+  restoreComment: (threadId: string, messageId?: string) => void;
   replaceThreads: (threads: DiffCommentThread[]) => void;
   addComment: (params: AddThreadParams) => LegacyDiffComment;
   addThread: (params: AddThreadParams) => DiffCommentThread;
@@ -94,11 +98,15 @@ function normalizeQuestionFlags(threads: DiffCommentThread[]): DiffCommentThread
   });
 }
 
-function withoutProgress(threads: DiffCommentThread[]): DiffCommentThread[] {
-  return threads.map((thread) => ({
+function withoutThreadProgress(thread: DiffCommentThread): DiffCommentThread {
+  return {
     ...thread,
     messages: thread.messages.map((message) => ({ ...message, progress: undefined })),
-  }));
+  };
+}
+
+function withoutProgress(threads: DiffCommentThread[]): DiffCommentThread[] {
+  return threads.map(withoutThreadProgress);
 }
 
 export function useDiffComments(
@@ -111,6 +119,7 @@ export function useDiffComments(
   capture?: Pick<NamedReviewMetadata, 'version' | 'patchDigest'>,
 ): UseDiffCommentsReturn {
   const [threads, setThreads] = useState<DiffCommentThread[]>([]);
+  const [deletedComments, setDeletedComments] = useState<DeletedComment[]>([]);
   const contextKey = JSON.stringify([
     baseCommitish,
     targetCommitish,
@@ -162,12 +171,15 @@ export function useDiffComments(
   useEffect(() => {
     if (!baseCommitish || !targetCommitish) {
       setThreads([]);
+      setDeletedComments([]);
       setLoadedContextKey(null);
       return;
     }
 
+    const storedContext = loadDiffContextData();
+    setDeletedComments(storedContext?.deletedComments ?? []);
     const loadedThreads =
-      loadDiffContextData()?.threads ||
+      storedContext?.threads ||
       storageService.getCommentThreads(
         baseCommitish,
         targetCommitish,
@@ -369,12 +381,102 @@ export function useDiffComments(
     [saveThreads, threads],
   );
 
+  const saveDeletedComments = useCallback(
+    (next: DeletedComment[]) => {
+      if (!baseCommitish || !targetCommitish || activeContext.current !== contextKey) return;
+      const data = loadDiffContextData() || createEmptyDiffContext();
+      if (!data) return;
+      storageService.saveDiffContextData(
+        baseCommitish,
+        targetCommitish,
+        {
+          ...data,
+          deletedComments: next.map((entry) => ({
+            ...entry,
+            thread: withoutThreadProgress(entry.thread),
+          })),
+        },
+        currentCommitHash,
+        branchToHash,
+        repositoryId,
+        baseMode,
+      );
+      setDeletedComments(next);
+    },
+    [
+      baseCommitish,
+      targetCommitish,
+      contextKey,
+      loadDiffContextData,
+      createEmptyDiffContext,
+      currentCommitHash,
+      branchToHash,
+      repositoryId,
+      baseMode,
+    ],
+  );
+
+  const restoreComment = useCallback(
+    (threadId: string, messageId?: string) => {
+      const entry = deletedComments.find(
+        (item) => item.thread.id === threadId && item.messageId === messageId,
+      );
+      if (!entry || activeContext.current !== contextKey) return;
+      const now = new Date().toISOString();
+      if (messageId === undefined) {
+        if (!threads.some((thread) => thread.id === threadId)) {
+          saveThreads(
+            insertBeforeFollowing(
+              threads,
+              { ...withoutThreadProgress(entry.thread), updatedAt: now },
+              entry.followingIds,
+              entry.precedingIds,
+            ),
+          );
+        }
+      } else {
+        const message = entry.thread.messages.find((item) => item.id === messageId);
+        const thread = threads.find((item) => item.id === threadId);
+        if (!message || !thread) return;
+        if (!thread.messages.some((item) => item.id === messageId)) {
+          const messages = insertBeforeFollowing(
+            thread.messages,
+            { ...message, updatedAt: now, progress: undefined },
+            entry.followingIds,
+            entry.precedingIds,
+          );
+          saveThreads(
+            threads.map((item) =>
+              item.id === threadId ? { ...item, messages, updatedAt: now } : item,
+            ),
+          );
+        }
+      }
+      saveDeletedComments(deletedComments.filter((item) => item !== entry));
+    },
+    [deletedComments, threads, saveThreads, saveDeletedComments, contextKey],
+  );
+
   const removeThread = useCallback(
     (threadId: string) => {
-      const newThreads = threads.filter((thread) => thread.id !== threadId);
-      saveThreads(newThreads);
+      const index = threads.findIndex((thread) => thread.id === threadId);
+      const thread = threads[index];
+      if (!thread || activeContext.current !== contextKey) return;
+      const display = includeDeletedComments(threads, deletedComments);
+      const displayIndex = display.findIndex((item) => item.id === threadId);
+      saveDeletedComments([
+        ...deletedComments.filter(
+          (entry) => entry.thread.id !== threadId || entry.messageId !== undefined,
+        ),
+        {
+          thread,
+          followingIds: display.slice(displayIndex + 1).map((item) => item.id),
+          precedingIds: display.slice(0, displayIndex).map((item) => item.id),
+        },
+      ]);
+      saveThreads(threads.filter((item) => item.id !== threadId));
     },
-    [saveThreads, threads],
+    [saveThreads, threads, saveDeletedComments, deletedComments, contextKey],
   );
 
   const removeComment = useCallback(
@@ -399,6 +501,23 @@ export function useDiffComments(
         return;
       }
 
+      if (activeContext.current !== contextKey) return;
+      const display = includeDeletedComments(threads, deletedComments).find(
+        (item) => item.id === threadId,
+      );
+      if (!display) return;
+      const displayIndex = display.messages.findIndex((item) => item.id === messageId);
+      saveDeletedComments([
+        ...deletedComments.filter(
+          (entry) => entry.thread.id !== threadId || entry.messageId !== messageId,
+        ),
+        {
+          thread,
+          followingIds: display.messages.slice(displayIndex + 1).map((item) => item.id),
+          precedingIds: display.messages.slice(0, displayIndex).map((item) => item.id),
+          messageId,
+        },
+      ]);
       const now = new Date().toISOString();
       const newThreads = threads.map((item) =>
         item.id === threadId
@@ -411,7 +530,7 @@ export function useDiffComments(
       );
       saveThreads(newThreads);
     },
-    [removeThread, saveThreads, threads],
+    [removeThread, saveThreads, threads, saveDeletedComments, deletedComments, contextKey],
   );
 
   const updateMessage = useCallback(
@@ -486,7 +605,8 @@ export function useDiffComments(
 
   const clearAllComments = useCallback(() => {
     saveThreads([]);
-  }, [saveThreads]);
+    saveDeletedComments([]);
+  }, [saveThreads, saveDeletedComments]);
 
   const clearAllCommentsWithOptions = useCallback(
     (options?: { resetAppliedCommentImportIds?: boolean }) => {
@@ -503,6 +623,7 @@ export function useDiffComments(
       const nextData: DiffContextStorage = {
         ...existingData,
         threads: [],
+        deletedComments: [],
         appliedCommentImportIds: [],
       };
 
@@ -516,6 +637,7 @@ export function useDiffComments(
         baseMode,
       );
       setThreads([]);
+      setDeletedComments([]);
     },
     [
       baseCommitish,
@@ -616,6 +738,8 @@ export function useDiffComments(
     hasLoadedComments,
     comments,
     threads: visibleThreads,
+    deletedComments: hasLoadedComments ? deletedComments : [],
+    restoreComment,
     replaceThreads,
     addComment,
     addThread,

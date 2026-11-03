@@ -18,6 +18,7 @@ interface CommentsListModalProps {
   showAuthorBadges?: boolean;
   onToggleThreadResolved: (threadId: string) => void;
   onRemoveThread?: (threadId: string) => void;
+  onRestoreComment?: (threadId: string, messageId?: string) => void;
   onGenerateThreadPrompt: (thread: CommentThread) => string;
   onReplyToThread: (threadId: string, body: string, intent?: CommentIntent) => Promise<void>;
   onRemoveMessage: (threadId: string, messageId: string) => void;
@@ -40,6 +41,7 @@ export function CommentsListModal({
   showAuthorBadges = false,
   onToggleThreadResolved,
   onRemoveThread,
+  onRestoreComment,
   onGenerateThreadPrompt,
   onReplyToThread,
   onRemoveMessage,
@@ -64,7 +66,9 @@ export function CommentsListModal({
   const sortedThreads = comments
     .filter(
       (thread) =>
-        filter === 'all' || Boolean(thread.resolution?.resolved) === (filter === 'resolved'),
+        thread.deleted ||
+        filter === 'all' ||
+        Boolean(thread.resolution?.resolved) === (filter === 'resolved'),
     )
     .sort((a, b) => {
       const fileCompare = (a.file ?? '').localeCompare(b.file ?? '');
@@ -102,7 +106,7 @@ export function CommentsListModal({
 
   const handleToggleResolution = useCallback(
     (thread: CommentThread) => {
-      onToggleThreadResolved(thread.id);
+      if (!thread.deleted) onToggleThreadResolved(thread.id);
     },
     [onToggleThreadResolved],
   );
@@ -277,6 +281,7 @@ export function CommentsListModal({
                         showAuthorBadges={showAuthorBadges}
                         onGeneratePrompt={onGenerateThreadPrompt}
                         onRemoveThread={onRemoveThread ? handleRemoveThread : undefined}
+                        onRestoreComment={onRestoreComment}
                         onToggleThreadResolved={onToggleThreadResolved}
                         onReplyToThread={onReplyToThread}
                         onRemoveMessage={onRemoveMessage}

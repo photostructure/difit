@@ -124,12 +124,10 @@ describe('Conversation keyboard navigation', () => {
   });
 });
 
-it('confirms deletion of a general thread without removing adjacent discussions', async () => {
+it('deletes a general thread immediately without removing adjacent discussions', async () => {
   const user = userEvent.setup();
   render(<KeyboardHarness />);
   await user.click(screen.getAllByRole('button', { name: 'Delete thread' })[0]!);
-  expect(screen.getByText('Thread A')).toBeInTheDocument();
-  await user.click(screen.getByRole('button', { name: 'Delete' }));
   expect(screen.queryByText('Thread A')).not.toBeInTheDocument();
   expect(screen.getByText('Thread B')).toBeInTheDocument();
   expect(screen.getByText('Thread C')).toBeInTheDocument();

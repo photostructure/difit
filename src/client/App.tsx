@@ -33,6 +33,7 @@ import {
   normalizeBaseMode,
 } from '../utils/diffSelection';
 
+import { includeDeletedComments } from './utils/commentDeletion';
 import { Checkbox } from './components/Checkbox';
 import type { CommentSubmitOptions } from './components/CommentForm';
 import { CommentsDropdown } from './components/CommentsDropdown';
@@ -272,6 +273,8 @@ function App() {
     replyToThread,
     toggleThreadResolved,
     removeThread,
+    deletedComments,
+    restoreComment,
     removeMessage,
     updateMessage,
     clearAllComments,
@@ -762,13 +765,25 @@ function App() {
       })),
     [threads, fileLineIndexByPath, diffData?.capture],
   );
+  const displayThreads = useMemo<CommentThread[]>(
+    () =>
+      includeDeletedComments(threads, deletedComments).map((thread) => ({
+        ...toCommentThread(thread),
+        deleted: thread.deleted,
+        deletedMessageIds: thread.deletedMessageIds,
+        isOutdated:
+          thread.scope !== 'review' &&
+          isThreadOutdated(thread, fileLineIndexByPath.get(thread.filePath), diffData?.capture),
+      })),
+    [threads, deletedComments, fileLineIndexByPath, diffData?.capture],
+  );
   const showAuthorBadges = useMemo(
     () => hasMultipleCommentAuthors(normalizedThreads.flatMap((thread) => thread.messages)),
     [normalizedThreads],
   );
   const threadsByFile = useMemo(() => {
     const map = new Map<string, CommentThread[]>();
-    normalizedThreads.forEach((thread) => {
+    displayThreads.forEach((thread) => {
       if (thread.scope === 'review') return;
       const entry = map.get(thread.file);
       if (entry) {
@@ -778,7 +793,7 @@ function App() {
       }
     });
     return map;
-  }, [normalizedThreads]);
+  }, [displayThreads]);
 
   // Keep the captured patch canonical for viewed hashes and comment snapshots;
   // rendering and keyboard navigation share only this presentation projection.
@@ -2004,6 +2019,7 @@ function App() {
                       onGenerateThreadPrompt={handleGenerateThreadPrompt}
                       onToggleThreadResolved={toggleThreadResolved}
                       onRemoveThread={removeThread}
+                      onRestoreComment={restoreComment}
                       onReplyToThread={handleReplyToThread}
                       onRemoveMessage={removeMessage}
                       onUpdateMessage={updateMessage}
@@ -2085,7 +2101,7 @@ function App() {
           isOpen={isCommentsListOpen}
           onClose={() => setIsCommentsListOpen(false)}
           onNavigate={handleNavigateToComment}
-          comments={normalizedThreads}
+          comments={displayThreads}
           onAddGeneralComment={(body, options) => {
             addReviewThread(body, options);
             return Promise.resolve();
@@ -2093,6 +2109,7 @@ function App() {
           showAuthorBadges={showAuthorBadges}
           onToggleThreadResolved={toggleThreadResolved}
           onRemoveThread={removeThread}
+          onRestoreComment={restoreComment}
           onGenerateThreadPrompt={handleGenerateThreadPrompt}
           onReplyToThread={handleReplyToThread}
           onRemoveMessage={removeMessage}

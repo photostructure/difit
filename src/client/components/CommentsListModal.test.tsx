@@ -384,8 +384,6 @@ describe('CommentsListModal', () => {
 
     await user.click(screen.getAllByTitle('Resolve thread')[0]!);
 
-    expect(mockRemoveThread).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('button', { name: 'Resolve' }));
     expect(mockRemoveThread).toHaveBeenCalledWith('thread-1');
     expect(confirmSpy).not.toHaveBeenCalled();
   });

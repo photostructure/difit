@@ -22,6 +22,8 @@ vi.mock('./hooks/useViewport', () => ({
 // Mock the useDiffComments hook
 vi.mock('./hooks/useDiffComments', () => ({
   useDiffComments: vi.fn(() => ({
+    deletedComments: [],
+    restoreComment: vi.fn(),
     hasLoadedComments: true,
     comments: [],
     threads: mockComments,

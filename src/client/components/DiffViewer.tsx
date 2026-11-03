@@ -44,6 +44,7 @@ interface DiffViewerProps {
   onGenerateThreadPrompt: (thread: CommentThread) => string;
   onToggleThreadResolved: (threadId: string) => void;
   onRemoveThread?: (threadId: string) => void;
+  onRestoreComment?: (threadId: string, messageId?: string) => void;
   onReplyToThread: (threadId: string, body: string, intent?: CommentIntent) => Promise<void>;
   onRemoveMessage: (threadId: string, messageId: string) => void;
   onUpdateMessage: (
@@ -207,6 +208,7 @@ export const DiffViewer = memo(function DiffViewer({
   onGenerateThreadPrompt,
   onToggleThreadResolved,
   onRemoveThread,
+  onRestoreComment,
   onReplyToThread,
   onRemoveMessage,
   onUpdateMessage,
@@ -396,6 +398,7 @@ export const DiffViewer = memo(function DiffViewer({
     onGenerateThreadPrompt,
     onToggleThreadResolved,
     onRemoveThread,
+    onRestoreComment,
     onReplyToThread,
     onRemoveMessage,
     onUpdateMessage,
