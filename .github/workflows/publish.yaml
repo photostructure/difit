@@ -147,3 +147,14 @@ jobs:
           mapfile -t TARBALLS < <(find package-artifact -maxdepth 1 -type f -name '*.tgz')
           [[ "${#TARBALLS[@]}" -eq 1 ]]
           npm stage publish "./${TARBALLS[0]}" --ignore-scripts --access public
+
+  github-release:
+    runs-on: ubuntu-24.04
+    needs: stage
+    permissions:
+      actions: write # Start github-release.yaml at this tag.
+    steps:
+      - name: Start the GitHub release workflow, which waits for npm approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run github-release.yaml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"

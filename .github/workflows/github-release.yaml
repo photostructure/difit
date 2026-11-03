@@ -37,12 +37,31 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/release-validate-tag.sh
-      - name: Require the approved version to be public on npm
+      - name: Wait for the approved version to be public on npm
         env:
           VERSION: ${{ steps.identity.outputs.package_version }}
         run: |
           set -euo pipefail
-          npm view "@photostructure/difit@$VERSION" version repository.url gitHead dist.integrity --json --registry=https://registry.npmjs.org > "$RUNNER_TEMP/npm-package.json"
+          # npm validates a staged package for 10-30 minutes before the
+          # maintainer can approve it. Create the release only once npm serves
+          # the version, so the watcher email announces an installable package.
+          # The waits total 325 minutes; GitHub stops a job at 360.
+          PUBLIC=false
+          for MINUTES in 10 10 15 20 30 30 30 30 30 30 30 30 30; do
+            sleep "$((MINUTES * 60))"
+            if npm view "@photostructure/difit@$VERSION" version repository.url gitHead dist.integrity --json --prefer-online --registry=https://registry.npmjs.org > "$RUNNER_TEMP/npm-package.json" 2> "$RUNNER_TEMP/npm-view.err"; then
+              PUBLIC=true
+              break
+            fi
+            if ! grep -q E404 "$RUNNER_TEMP/npm-view.err"; then
+              cat "$RUNNER_TEMP/npm-view.err" >&2
+              exit 1
+            fi
+          done
+          if [[ "$PUBLIC" != true ]]; then
+            echo "::error::npm does not serve @photostructure/difit@$VERSION. Approve the stage, then re-run this workflow."
+            exit 1
+          fi
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import { readFileSync } from 'node:fs';
@@ -78,7 +97,22 @@ jobs:
             echo '::error::Release tag moved or lost a verified signature'
             exit 1
           fi
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
+          VERSION="${GITHUB_REF_NAME#v}"
+          CHANGELOG="$RUNNER_TEMP/CHANGELOG.md"
+          NOTES="$RUNNER_TEMP/release-notes.md"
+          # Download before extracting: awk exits at the next heading, which
+          # would kill a still-writing gh with SIGPIPE under pipefail.
+          gh api "repos/$GITHUB_REPOSITORY/contents/CHANGELOG.md?ref=$GITHUB_SHA" \
+            -H "Accept: application/vnd.github.raw" > "$CHANGELOG"
+          awk -v heading="## [$VERSION] - " \
+            'index($0, heading) == 1 { found = 1; next } found && /^## / { exit } found' \
+            "$CHANGELOG" > "$NOTES"
+          if ! grep -q '[^[:space:]]' "$NOTES"; then
+            echo "::error::CHANGELOG.md has no notes under ## [$VERSION]"
+            exit 1
+          fi
+
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --notes-file "$NOTES" --generate-notes
           if [[ "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq '.immutable')" != true ]]; then
             echo '::error::The published release is not immutable; verify repository release settings'
             exit 1

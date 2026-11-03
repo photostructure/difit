@@ -23,6 +23,7 @@
     "public/**",
     "tests/**",
     "scripts/**",
+    ".github/scripts/**",
     "*.config.js",
     "*.config.mjs",
     "*.config.ts",
