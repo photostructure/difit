@@ -1,7 +1,7 @@
 # Waiting for human review
 
 `difit wait` attaches to running conversation-enabled servers and stays silent
-until human activity requires attention. It has no overall timeout. HTTP request
+while waiting for human activity. It has no overall timeout. HTTP request
 deadlines stay inside the process: empty responses do not print a checkpoint or
 complete the command.
 
@@ -10,12 +10,29 @@ difit wait --port 4966
 difit wait --port 4966 --port 4967
 ```
 
+Use `--host <hostname-or-IP>` when the server listens on a particular interface.
+The selected host applies to all repeated ports; it defaults to localhost.
+
 Use the actual API ports from `server.ready` or `server.background`. Run one waiter
 in the owning main agent session using its host's background-command facility.
 Subagents return their review IDs, URLs, ports and pending work to that session.
 The waiter prints one JSON object and exits when any selected server produces a
 nonempty batch. It cancels the remaining HTTP subscriptions without acknowledging
 their messages.
+
+The server must report reviewer presence. Existing queued messages and replayed
+human events are handled first. If every selected server has no connected
+reviewer and no human work, the waiter reports that once on stderr and exits 4.
+End the agent turn on that result; do not re-arm it in a polling loop. While any
+review is attended, every selected port remains subscribed, including ports whose
+browser windows may be reopened. Absence is detected by the end of the current
+HTTP round (at most 25 seconds under normal operation), or server exit is reported
+if the server closes first.
+
+For Codex desktop, use the [Codex integration workflow](codex-review-integration.md):
+end the turn during human review, then use the browser's **Copy resume prompt**
+button when there is feedback. A detached server alone does not establish a
+delivery path to an idle chat.
 
 Do not wrap the waiter in a timed shell command, run it as a foreground polling
 loop, or watch it with a Monitor that expires periodically. Those host mechanisms
@@ -100,6 +117,31 @@ Errors go to stderr. There is no automatic retry loop on terminal errors, and no
 `--timeout`, `--wait` or `--once` option that can enable empty timed completion.
 The old `comment watch` command remains removed.
 
+Exit **4** means no reviewer is connected on any selected server and no human
+work was returned. End the turn and resume on human feedback; never automatically
+retry this result.
+
+## Browser and listener presence
+
+`GET /api/presence`, conversation snapshots and HTTP event batches expose
+`{reviewers: {connected, visible}, listeners}`. The browser receives the same
+state over its heartbeat connection. Visibility changes update metadata without
+disconnecting the tab. Closing one of several tabs does not shut down the server.
+Connected hidden tabs count as connected; visibility does not prove attention.
+An interrupted browser connection is not approval or evidence that review is done.
+
+The browser shows whether an agent listener is attached. `difit wait` supplies a
+stable listener ID on its requests; a one-second grace period covers renewals.
+This reports a subscription, not a model reading or answering messages. Existing
+explicit receipts remain authoritative for message progress. Presence changes
+stay outside the conversation journal and never count as actionable human events.
+
+This guard prevents blind unattended waiting through this CLI. It cannot stop an
+unrestricted agent from inventing a separate shell polling loop. The host must
+enforce any prohibition on arbitrary polling; presence cannot impose a model-token
+budget. Use a host integration that invokes the model only for actual feedback,
+rather than running the model to check for feedback.
+
 ## Event transport
 
 `GET /api/conversation/events?after=<cursor>&wait=25000` returns `{events, cursor}`.
@@ -115,7 +157,8 @@ After a gap, snapshots recover current messages and review state, including
 queued work; they cannot reconstruct every intermediate edit or approval toggle.
 
 Rebuilding the CLI does not upgrade a server that is already running. An older
-server without this endpoint causes exit code 1. Preserve its review state before
+server without the event endpoint or presence reporting causes exit code 1.
+Preserve its review state before
 arranging a replacement; do not stop existing reviews merely to try this command.
 
 This guide supersedes the older no-replay statements in

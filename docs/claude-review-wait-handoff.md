@@ -17,9 +17,10 @@ Codex restored the bounded conversation event journal and
    proposed summary, approval/capture versions, and process ownership. Save their
    conversation snapshots and pending work before changing anything. Do not
    stop, restart or replace the existing review servers as part of this handoff.
-   The installed build `5.1.0-local.20261028.f3d4a302f332` already has the compatible
-   event endpoint, so its servers may be attached directly. Verify each actual
-   server's support once. Rebuilding the CLI does not upgrade those processes. A server without
+   The installed build `5.1.0-local.20261028.f3d4a302f332` has the event endpoint,
+   but the new guarded waiter also requires presence reporting in snapshots and
+   event batches. Endpoint compatibility alone is insufficient. Verify each
+   actual server's support once. Rebuilding the CLI does not upgrade those processes. A server without
    `/api/conversation/events` needs a migration; identify those servers once,
    preserve their state, and report the concrete migration needed. Do not loop
    on unsupported-server errors or replace frozen reviews with a new working-tree
@@ -66,7 +67,9 @@ Codex restored the bounded conversation event journal and
 
 7. Exit 1 means arguments, protocol or server support need correction. Exit 2
    means a connection failed or a server exited. Exit 3 requires snapshot and
-   pending-work reconciliation before using the fresh snapshot cursor. Diagnose
+   pending-work reconciliation before using the fresh snapshot cursor. Exit 4
+   means every selected review is unattended with no human work returned: end
+   the turn and resume on human feedback. Do not re-arm on absence. Diagnose
    terminal errors once; do not automatically restart the waiter in an error
    loop. Empty HTTP responses and agent activity are handled silently inside
    `difit wait` and never need a model turn.
@@ -75,3 +78,16 @@ Report the inventory, recovered pending comments, unsupported servers or host
 limitations, and the single background task ID when installed. Then use the
 host's completion notification path without periodic checks. Do not build a
 daemon or resume-session router as part of this work.
+
+High-priority follow-up: Matthew reports several thousand dollars spent on a
+polling agent while no review browser was open. Establish a Claude-specific
+integration that cannot recreate that supported-path failure. Verify one actual
+feedback event causes one model wake, and no events cause no model wakes. Use the
+real host's background-completion mechanism only if it meets that requirement;
+otherwise evaluate its supported push/event integration. Keep the waiting and
+presence observation in ordinary code, outside model turns. Presence alone does
+not prohibit an agent from inventing its own polling script. Investigate a host
+enforcement boundary for such scripts and distinguish a real invocation limit
+from a hook rejection that simply wakes the model again. Prepare the concrete
+host changes and validation evidence before proposing broader settings changes.
+Do not weaken the target to periodic wakeups or make absence an auto-retry signal.

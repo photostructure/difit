@@ -69,17 +69,19 @@ commit; revocation/restart invalidates prior button approval. Then commit withou
 asking again. Separate chat approval is independent; silence/tab closure is not
 approval. This rule never authorizes a push or publication.
 
-For an existing server, run
-`/home/mrm/.local/bin/difit wait --port <port>` from the reviewed repo's Git root.
-It waits silently for a nonempty human-event batch. Repeat `--port` for several
-servers and retain each port's returned cursor for `--after port=cursor` on the
-next invocation. Queued
-messages are recovered without being acknowledged. Only the main session waits,
-using one background command with no overall deadline; subagents hand ownership
-and pending work back after accounting for server lifetime. A periodically
-expiring Monitor is a timed wake. If the host imposes a background task deadline,
-report it once instead of automatically restarting on expiry. See the
-[waiting guide](../../../docs/waiting-for-review.md) for exit codes, receipts and
-cursor reconciliation; it supersedes the older protocol's no-replay statements.
+For Codex desktop without a verified idle event-delivery path, hand back the
+review URL and end the turn during human review. Keep the detached server and
+pending message revisions recorded. Matthew can use the browser's **Copy resume
+prompt** button to resume this chat; read one snapshot and handle the pending
+feedback, then end the turn again. Do not poll difit, repeatedly inspect shell
+jobs, or keep a subagent awake to retain server ownership. See the
+[Codex integration guide](../../../docs/codex-review-integration.md) for the
+manual workflow and the requirements for an automatic external controller.
 
+On a host with a verified completion-to-turn path, use one background
+`/home/mrm/.local/bin/difit wait --port <port>` from the reviewed repo's Git root.
+Retain per-port cursors, and preserve explicit receipts. Exit 4 means every
+selected review is unattended: end the turn, never automatically retry it.
+Presence changes are not human work. Servers without presence reporting are
+unsupported by guarded waiting. See the [waiting guide](../../../docs/waiting-for-review.md).
 Details: [conversation protocol](../../../docs/agent-conversations.md).

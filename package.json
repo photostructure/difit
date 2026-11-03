@@ -34,6 +34,8 @@
     "LICENSE",
     "docs/agent-conversations.md",
     "docs/server-addresses.md",
+    "docs/waiting-for-review.md",
+    "docs/codex-review-integration.md",
     "!dist/**/*.test.*",
     "!dist/**/*.spec.*",
     "!dist/**/*.map"

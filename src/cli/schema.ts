@@ -408,7 +408,14 @@ const definitions: Record<string, Schema> = {
       'ReviewCaptureEvent',
     ].map(ref),
   },
-  ConversationBatch: object({ events: array(ref('ConversationEvent')), cursor }),
+  ReviewPresence: object({
+    reviewers: object({ connected: version, visible: version }),
+    listeners: version,
+  }),
+  ConversationBatch: object(
+    { events: array(ref('ConversationEvent')), cursor, presence: ref('ReviewPresence') },
+    ['events', 'cursor'],
+  ),
   WaitResult: {
     ...object({
       type: { const: 'wait.events' },
@@ -488,26 +495,30 @@ const definitions: Record<string, Schema> = {
   StatusResponse: ref('SuccessResponse'),
   SuccessResponse: object({ success: { const: true } }),
   ErrorResponse: object({ error: string, summary: ref('ReviewSummary') }, ['error']),
-  SnapshotResponse: object({
-    cursor: {
-      ...cursor,
-      description:
-        'Opaque stream checkpoint captured with this snapshot. Use it as --after only after reconciling current state; it does not acknowledge queued messages. Do not decode, sort, or use it as a message revision guard. Replay is bounded and process-local.',
-    },
-    reviews: array(
-      object(
-        {
-          id: string,
-          selection: ref('DiffSelection'),
-          threads: array(ref('CommentThread')),
-          approval: ref('ReviewApproval'),
-          summary: ref('ReviewSummary'),
-          capture: ref('NamedReviewMetadata'),
-        },
-        ['id', 'selection', 'threads', 'approval', 'summary'],
+  SnapshotResponse: object(
+    {
+      presence: ref('ReviewPresence'),
+      cursor: {
+        ...cursor,
+        description:
+          'Opaque stream checkpoint captured with this snapshot. Use it as --after only after reconciling current state; it does not acknowledge queued messages. Do not decode, sort, or use it as a message revision guard. Replay is bounded and process-local.',
+      },
+      reviews: array(
+        object(
+          {
+            id: string,
+            selection: ref('DiffSelection'),
+            threads: array(ref('CommentThread')),
+            approval: ref('ReviewApproval'),
+            summary: ref('ReviewSummary'),
+            capture: ref('NamedReviewMetadata'),
+          },
+          ['id', 'selection', 'threads', 'approval', 'summary'],
+        ),
       ),
-    ),
-  }),
+    },
+    ['cursor', 'reviews'],
+  ),
   CommentImport: object(importFields, ['type', 'filePath', 'position', 'body']),
   CommentImportRequest: {
     description:
@@ -622,6 +633,7 @@ const roots = {
   snapshot: 'SnapshotResponse',
   wait: 'WaitResult',
   batch: 'ConversationBatch',
+  presence: 'ReviewPresence',
   comments: 'CommentsRequest',
   import: 'CommentImportRequest',
   approval: 'ApprovalRequest',

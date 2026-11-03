@@ -48,6 +48,7 @@ import { HelpModal } from './components/HelpModal';
 import { Logo } from './components/Logo';
 import { ReloadButton } from './components/ReloadButton';
 import { ReviewSummaryPanel } from './components/ReviewSummaryPanel';
+import { ReviewPresenceIndicator } from './components/ReviewPresenceIndicator';
 import { RevisionDetailModal } from './components/RevisionDetailModal';
 import { SettingsModal } from './components/SettingsModal';
 import { SparkleAnimation } from './components/SparkleAnimation';
@@ -60,6 +61,7 @@ import { useKeyboardNavigation } from './hooks/useKeyboardNavigation';
 import { useLazyDiffRendering } from './hooks/useLazyDiffRendering';
 import { useReviewApproval } from './hooks/useReviewApproval';
 import { useReviewSummary } from './hooks/useReviewSummary';
+import { useReviewPresence } from './hooks/useReviewPresence';
 import { useViewedFiles } from './hooks/useViewedFiles';
 import { useViewport } from './hooks/useViewport';
 import { fetchClientSettings, saveClientSettings } from './services/userSettings';
@@ -69,7 +71,6 @@ import { hasMultipleCommentAuthors } from './utils/commentAuthors';
 import { copyTextToClipboard } from './utils/clipboard';
 import { getFileElementId } from './utils/domUtils';
 import { findCommentPosition } from './utils/navigation/positionHelpers';
-import { resolveEventSourceUrl } from './utils/eventSourceUrl';
 import {
   readReviewLocation,
   readReviewHistoryLocation,
@@ -1485,24 +1486,7 @@ function App() {
     };
   }, [getCommentApiUrl, hasBootstrappedComments, syncThreadsToServer, threads, diffData?.capture]);
 
-  // Establish SSE connection for tab close detection
-  useEffect(() => {
-    const eventSource = new EventSource(resolveEventSourceUrl('/api/heartbeat'));
-
-    eventSource.onopen = () => {
-      console.log('Connected to server heartbeat');
-    };
-
-    eventSource.onerror = () => {
-      console.log('Server connection lost');
-      eventSource.close();
-    };
-
-    // Cleanup on unmount
-    return () => {
-      eventSource.close();
-    };
-  }, []);
+  const reviewPresence = useReviewPresence();
 
   const handleAddComment = useCallback(
     (
@@ -1785,6 +1769,7 @@ function App() {
               >
                 Conversation
               </button>
+              <ReviewPresenceIndicator presence={reviewPresence} />
               {!isMobile && threads.length > 0 && (
                 <CommentsDropdown
                   commentsCount={threads.length}

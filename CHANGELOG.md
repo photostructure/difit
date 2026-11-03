@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file.
 
 ### Added in the PhotoStructure fork
 
+- Report browser visibility and agent-listener presence; offer a resume prompt for agents that cannot receive idle notifications.
+- Stop `difit wait` with exit 4 when every selected review is unattended, after recovering existing human work.
+
 - Discover launch events and agent JSON requests/responses through `difit schema` and command help.
 - Wait silently for human activity across review servers with `difit wait`; recover queued messages without implicit delivery receipts.
 - Restore the conversation event endpoint with cursor replay of the latest 256 events per server process.

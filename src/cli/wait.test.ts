@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createWaitCommand } from './wait.js';
 
-const snapshot = { cursor: 'stream:0', reviews: [] };
+const presence = { reviewers: { connected: 1, visible: 1 }, listeners: 0 };
+const snapshot = { cursor: 'stream:0', reviews: [], presence };
 const activity = (type = 'review.approval', origin = 'user', cursor = 'stream:1') => ({
   type,
   origin,
@@ -12,7 +13,13 @@ const activity = (type = 'review.approval', origin = 'user', cursor = 'stream:1'
   approved: true,
   timestamp: '2026-11-03T00:00:00Z',
 });
-const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+const response = (body: unknown, status = 200) =>
+  new Response(
+    JSON.stringify(
+      body && typeof body === 'object' && 'cursor' in body ? { presence, ...body } : body,
+    ),
+    { status },
+  );
 
 describe('difit wait', () => {
   const fetchMock = vi.fn<typeof fetch>();
@@ -113,6 +120,7 @@ describe('difit wait', () => {
 
   it('recovers a queued comment even before the supplied checkpoint without acknowledging it', async () => {
     const queued = {
+      presence: { reviewers: { connected: 0, visible: 0 }, listeners: 0 },
       cursor: 'stream:20',
       reviews: [
         {
@@ -222,6 +230,116 @@ describe('difit wait', () => {
     expect(process.exitCode).toBe(2);
     expect(log).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops once with exit 4 when there is no browser and no human work', async () => {
+    const absent = { reviewers: { connected: 0, visible: 0 }, listeners: 0 };
+    fetchMock
+      .mockResolvedValueOnce(response({ ...snapshot, presence: absent }))
+      .mockResolvedValueOnce(response({ events: [], cursor: snapshot.cursor, presence: absent }))
+      .mockResolvedValueOnce(response({ ...snapshot, presence: absent }))
+      .mockResolvedValueOnce(response({ events: [], cursor: snapshot.cursor, presence: absent }));
+    await createWaitCommand().parseAsync(['node', 'difit', '--port', '4966']);
+    expect(process.exitCode).toBe(4);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls[1]?.[0]).toContain('wait=0');
+    expect(log).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('Do not retry'));
+  });
+
+  it('returns human work before stopping for absence', async () => {
+    const absent = { reviewers: { connected: 0, visible: 0 }, listeners: 0 };
+    fetchMock
+      .mockResolvedValueOnce(response({ ...snapshot, presence: absent }))
+      .mockResolvedValueOnce(
+        response({ events: [activity()], cursor: 'stream:1', presence: absent }),
+      );
+    await createWaitCommand().parseAsync(['node', 'difit', '--port', '4966']);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it('drains feedback that arrives during the final absence check', async () => {
+    const absent = { reviewers: { connected: 0, visible: 0 }, listeners: 0 };
+    fetchMock
+      .mockResolvedValueOnce(response({ ...snapshot, presence: absent }))
+      .mockResolvedValueOnce(response({ events: [], cursor: 'stream:0', presence: absent }))
+      .mockResolvedValueOnce(response({ ...snapshot, presence: absent }))
+      .mockResolvedValueOnce(
+        response({ events: [activity()], cursor: 'stream:1', presence: absent }),
+      );
+    await createWaitCommand().parseAsync(['node', 'difit', '--port', '4966']);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it('subscribes to an explicit server host', async () => {
+    fetchMock
+      .mockResolvedValueOnce(response(snapshot))
+      .mockResolvedValueOnce(response({ events: [activity()], cursor: 'stream:1' }));
+    await createWaitCommand().parseAsync([
+      'node',
+      'difit',
+      '--host',
+      '10.1.1.24',
+      '--port',
+      '4966',
+    ]);
+    expect(
+      fetchMock.mock.calls.every(([url]) => String(url).startsWith('http://10.1.1.24:4966/')),
+    ).toBe(true);
+  });
+
+  it('stops after a reviewer disconnects instead of polling indefinitely', async () => {
+    const absent = { reviewers: { connected: 0, visible: 0 }, listeners: 0 };
+    fetchMock
+      .mockResolvedValueOnce(response(snapshot))
+      .mockResolvedValueOnce(response({ events: [], cursor: snapshot.cursor, presence: absent }))
+      .mockResolvedValueOnce(response({ ...snapshot, presence: absent }))
+      .mockResolvedValueOnce(response({ events: [], cursor: snapshot.cursor, presence: absent }));
+    await createWaitCommand().parseAsync(['node', 'difit', '--port', '4966']);
+    expect(process.exitCode).toBe(4);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('rejects an older server that cannot report presence', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ cursor: 'old:0', reviews: [] })));
+    await createWaitCommand().parseAsync(['node', 'difit', '--port', '4966']);
+    expect(process.exitCode).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('presence is unavailable'));
+  });
+
+  it('keeps a previously unattended port subscribed while another review is open', async () => {
+    const absent = { reviewers: { connected: 0, visible: 0 }, listeners: 0 };
+    let rounds = 0;
+    fetchMock.mockImplementation((url, init) => {
+      if (String(url).endsWith('snapshot'))
+        return Promise.resolve(
+          response({ ...snapshot, presence: String(url).includes(':4966/') ? absent : presence }),
+        );
+      if (String(url).includes(':4966/')) {
+        rounds += 1;
+        return Promise.resolve(
+          response(
+            rounds === 1
+              ? { events: [], cursor: 'stream:0', presence: absent }
+              : { events: [activity()], cursor: 'stream:1' },
+          ),
+        );
+      }
+      return new Promise<Response>((_resolve, reject) =>
+        init!.signal!.addEventListener('abort', () => reject(new Error('Aborted')), { once: true }),
+      );
+    });
+    await createWaitCommand().parseAsync(['node', 'difit', '--port', '4966', '--port', '4967']);
+    expect(rounds).toBe(2);
+    expect(JSON.parse(String(log.mock.calls[0]?.[0])).port).toBe(4966);
+    expect(
+      fetchMock.mock.calls.find(
+        ([url]) => String(url).includes('wait=25000') && String(url).includes(':4966/'),
+      ),
+    ).toBeDefined();
   });
 
   it('treats a dropped response body as a connection failure', async () => {

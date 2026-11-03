@@ -13,6 +13,7 @@ import type {
 import type { CommentProgress, DiffCommentThread, DiffSelection } from '../types/diff.js';
 import { getDiffSelectionKey } from '../utils/diffSelection.js';
 import type { NamedReviewMetadata } from '../types/review.js';
+import type { ReviewPresence } from './review-presence.js';
 
 interface Review {
   capture?: NamedReviewMetadata;
@@ -378,19 +379,25 @@ export function registerConversationRoutes(
   conversation: Conversation,
   update: (selection: DiffSelection, threads: DiffCommentThread[]) => void,
   progressChanged: (selection: DiffSelection) => void,
+  presence?: ReviewPresence,
 ): void {
   app.get('/api/conversation/snapshot', (_req, res) => {
-    res.json(conversation.snapshot());
+    res.json({
+      ...conversation.snapshot(),
+      ...(presence ? { presence: presence.snapshot() } : {}),
+    });
   });
 
   app.get('/api/conversation/events', async (req, res) => {
     const after = req.query.after;
     const wait = req.query.wait ?? '25000';
+    const listener = req.query.listener;
     if (
       (after !== undefined && typeof after !== 'string') ||
       typeof wait !== 'string' ||
       !/^\d+$/.test(wait) ||
-      Number(wait) > 25000
+      Number(wait) > 25000 ||
+      (listener !== undefined && (typeof listener !== 'string' || !/^[\w-]{1,100}$/.test(listener)))
     ) {
       res
         .status(400)
@@ -400,16 +407,21 @@ export function registerConversationRoutes(
     const abort = new AbortController();
     const disconnect = () => abort.abort();
     res.on('close', disconnect);
+    let releaseListener: (() => void) | undefined;
     try {
       const batch = conversation.read(after);
+      if (!batch.events.length && Number(wait) > 0 && typeof listener === 'string')
+        releaseListener = presence?.connectListener(listener);
       const result = batch.events.length
         ? batch
         : await conversation.wait(batch.cursor, Number(wait), abort.signal);
-      if (!abort.signal.aborted) res.json(result);
+      if (!abort.signal.aborted)
+        res.json({ ...result, ...(presence ? { presence: presence.snapshot() } : {}) });
     } catch (error) {
       if (!(error instanceof ConversationCursorError)) throw error;
       if (!abort.signal.aborted) res.status(409).json({ error: error.message });
     } finally {
+      releaseListener?.();
       res.off('close', disconnect);
     }
   });

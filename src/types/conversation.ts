@@ -1,4 +1,5 @@
 import type { NamedReviewMetadata } from './review.js';
+import type { ReviewPresenceSnapshot } from './presence.js';
 import type {
   DiffCommentCodeSnapshot,
   DiffCommentPosition,
@@ -69,6 +70,7 @@ interface ReviewApprovalEvent {
 }
 
 export interface ConversationSnapshot {
+  presence?: ReviewPresenceSnapshot;
   cursor: string;
   reviews: {
     id: string;
@@ -134,6 +136,7 @@ export type ConversationStreamEvent =
   | ThreadEvent;
 
 export interface ConversationBatch {
+  presence?: ReviewPresenceSnapshot;
   events: ConversationStreamEvent[];
   cursor: string;
 }

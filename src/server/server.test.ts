@@ -2205,6 +2205,45 @@ describe('Server Integration Tests', () => {
   });
 
   describe('Keep-alive option', () => {
+    it('keeps the server alive when one of two browser tabs disconnects', async () => {
+      const result = await startServer({ preferredPort: 0, keepAlive: false, conversation: true });
+      servers.push(result.server);
+      const first = new AbortController();
+      const second = new AbortController();
+      try {
+        const a = await fetch(`${result.url}/api/heartbeat?tab=first&visible=true`, {
+          signal: first.signal,
+        });
+        await a.body?.getReader().read();
+        const b = await fetch(`${result.url}/api/heartbeat?tab=second&visible=false`, {
+          signal: second.signal,
+        });
+        await b.body?.getReader().read();
+        expect(await (await fetch(`${result.url}/api/presence`)).json()).toMatchObject({
+          reviewers: { connected: 2, visible: 1 },
+        });
+        await fetch(`${result.url}/api/presence`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tab: 'second', visible: true }),
+        });
+        first.abort();
+        await vi.waitFor(async () =>
+          expect(await (await fetch(`${result.url}/api/presence`)).json()).toMatchObject({
+            reviewers: { connected: 1, visible: 1 },
+          }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        expect(process.exit).not.toHaveBeenCalled();
+        second.abort();
+        await vi.waitFor(() => expect(process.exit).toHaveBeenCalledWith(0));
+      } finally {
+        first.abort();
+        second.abort();
+        await result.shutdown('closed');
+      }
+    });
+
     it.each([
       { jsonl: true, keepAlive: true },
       { jsonl: true, keepAlive: false },

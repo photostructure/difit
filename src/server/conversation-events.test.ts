@@ -5,10 +5,12 @@ import { fetch as realFetch } from 'undici';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createWaitCommand } from '../cli/wait.js';
+import { createCommentCommand } from '../cli/comment.js';
 import type { ConversationBatch, WaitResult } from '../types/conversation.js';
 import type { DiffCommentThread } from '../types/diff.js';
 
 import { Conversation, registerConversationRoutes } from './conversation.js';
+import { ReviewPresence } from './review-presence.js';
 
 const selection = { baseCommitish: 'HEAD', targetCommitish: '.' };
 const thread: DiffCommentThread = {
@@ -46,6 +48,8 @@ describe('conversation event HTTP subscription', () => {
 
   async function start(conversation = new Conversation(), onPoll = () => {}) {
     const app = express();
+    const presence = new ReviewPresence();
+    presence.connectReviewer('test-browser');
     app.use(express.json());
     app.use((req, _res, next) => {
       if (req.path === '/api/conversation/events') onPoll();
@@ -56,6 +60,7 @@ describe('conversation event HTTP subscription', () => {
       conversation,
       () => {},
       () => {},
+      presence,
     );
     const server = await new Promise<Server>((resolve, reject) => {
       const listening = app.listen(0, '127.0.0.1', (error?: Error) => {
@@ -65,6 +70,7 @@ describe('conversation event HTTP subscription', () => {
       listening.on('error', reject);
     });
     servers.push(server);
+    server.once('close', () => presence.dispose());
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Expected listening port');
     return { conversation, server, port: address.port, url: `http://127.0.0.1:${address.port}` };
@@ -94,6 +100,34 @@ describe('conversation event HTTP subscription', () => {
     );
   });
 
+  it('sends a revision-aware CLI reply to an explicitly selected interface', async () => {
+    const { conversation, port } = await start();
+    conversation.update(selection, [], [thread], 'user');
+    const review = conversation.snapshot().reviews[0]!;
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await createCommentCommand().parseAsync([
+      'node',
+      'difit',
+      'reply',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      String(port),
+      JSON.stringify({
+        reviewId: review.id,
+        threadId: 'thread',
+        inReplyTo: 'message',
+        cursor: review.threads[0]!.messages[0]!.progress!.cursor,
+        body: 'Answer via selected host',
+      }),
+    ]);
+    expect(JSON.parse(String(output.mock.calls[0]?.[0]))).toMatchObject({
+      success: true,
+      threadId: 'thread',
+    });
+    expect(process.exitCode).not.toBe(1);
+  });
+
   it('validates request bounds and rejects restarted or expired cursors', async () => {
     const { url, conversation } = await start(new Conversation(undefined, 1));
     for (const query of ['wait=-1', 'wait=25001', 'wait=1.5', 'wait=1&wait=2', 'after=x&after=y'])
@@ -115,7 +149,11 @@ describe('conversation event HTTP subscription', () => {
         `${url}/api/conversation/events?wait=1&after=${encodeURIComponent(conversation.cursor)}`,
       )
     ).json();
-    expect(batch).toEqual({ cursor: conversation.cursor, events: [] });
+    expect(batch).toMatchObject({
+      cursor: conversation.cursor,
+      events: [],
+      presence: { reviewers: { connected: 1 } },
+    });
   });
 
   it('wakes the CLI on a new message and recovers it again until it is acknowledged', async () => {

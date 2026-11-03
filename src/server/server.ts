@@ -45,6 +45,7 @@ import { getFileExtension } from '../utils/fileUtils.js';
 
 import { FileWatcherService } from './file-watcher.js';
 import { Conversation, registerConversationRoutes } from './conversation.js';
+import { ReviewPresence } from './review-presence.js';
 import { emptyReviewSummary, parseReviewSummaryInput } from './review-summary.js';
 import { GitDiffParser } from './git-diff.js';
 import { parseUserSettingsPatch, readUserConfig, updateUserClientSettings } from './user-config.js';
@@ -248,6 +249,9 @@ export async function startServer(options: ServerOptions): Promise<{
     hostname: hostname(),
   };
   const fileWatcher = new FileWatcherService();
+  const presence = new ReviewPresence();
+  let closing = false;
+  let reviewerDisconnectTimer: NodeJS.Timeout | undefined;
   const pendingEvents: ConversationStreamEvent[] = [];
   let ready = false;
   const emit = (event: ServerEvent) => {
@@ -1096,6 +1100,7 @@ export async function startServer(options: ServerOptions): Promise<{
           version: getOrCreateCommentSession(selection).version,
           timestamp: new Date().toISOString(),
         }),
+      presence,
     );
   }
 
@@ -1602,8 +1607,38 @@ export async function startServer(options: ServerOptions): Promise<{
     });
   });
 
-  // SSE endpoint to detect when tab is closed
+  app.get('/api/presence', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(presence.snapshot());
+  });
+  app.post('/api/presence', (req, res) => {
+    const input = req.body as { tab?: unknown; visible?: unknown } | null;
+    if (
+      !req.is('application/json') ||
+      !input ||
+      typeof input.tab !== 'string' ||
+      !/^[\w-]{1,100}$/.test(input.tab) ||
+      typeof input.visible !== 'boolean'
+    ) {
+      res.status(400).json({ error: 'Expected tab ID and visible boolean as JSON' });
+      return;
+    }
+    presence.updateReviewer(input.tab, input.visible);
+    res.json({ success: true });
+  });
+
+  // Existing heartbeat clients remain compatible; new clients also receive presence.
   app.get('/api/heartbeat', (req, res) => {
+    const tab = req.query.tab;
+    const visible = req.query.visible;
+    if (
+      (tab !== undefined && (typeof tab !== 'string' || !/^[\w-]{1,100}$/.test(tab))) ||
+      (visible !== undefined && visible !== 'true' && visible !== 'false')
+    ) {
+      res.status(400).json({ error: 'Expected an optional tab ID and visible=true or false' });
+      return;
+    }
+    clearTimeout(reviewerDisconnectTimer);
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -1613,6 +1648,10 @@ export async function startServer(options: ServerOptions): Promise<{
 
     // Send initial heartbeat
     res.write('data: connected\n\n');
+    const unsubscribe = presence.subscribe((snapshot) => {
+      res.write(`data: ${JSON.stringify({ type: 'presence', presence: snapshot })}\n\n`);
+    });
+    const disconnectReviewer = presence.connectReviewer(tab, visible === 'true');
 
     // Send heartbeat every 5 seconds
     const heartbeatInterval = setInterval(() => {
@@ -1620,14 +1659,18 @@ export async function startServer(options: ServerOptions): Promise<{
     }, 5000);
 
     // When client disconnects (tab closed, navigation, etc.)
-    req.on('close', () => {
+    res.on('close', () => {
       clearInterval(heartbeatInterval);
+      unsubscribe();
+      disconnectReviewer();
+      if (closing) return;
       if (options.keepAlive) {
         console.error('Client disconnected, but server is staying alive (--keep-alive)');
         console.error('Press Ctrl+C to stop the server');
-      } else {
+      } else if (presence.snapshot().reviewers.connected === 0) {
         // Add a small delay to ensure any pending sendBeacon requests are processed
-        setTimeout(async () => {
+        reviewerDisconnectTimer = setTimeout(async () => {
+          if (presence.snapshot().reviewers.connected > 0) return;
           console.error('Client disconnected, shutting down server...');
 
           // Stop file watcher
@@ -1690,6 +1733,9 @@ export async function startServer(options: ServerOptions): Promise<{
   let shutdownPromise: Promise<void> | undefined;
   function shutdown(reason: ServerShutdownEvent['reason']): Promise<void> {
     shutdownPromise ??= (async () => {
+      closing = true;
+      clearTimeout(reviewerDisconnectTimer);
+      presence.dispose();
       await fileWatcher.stop();
       outputShutdown(reason);
       await new Promise<void>((resolveShutdown) => {
@@ -1700,6 +1746,9 @@ export async function startServer(options: ServerOptions): Promise<{
     return shutdownPromise;
   }
   server.once('close', () => {
+    closing = true;
+    clearTimeout(reviewerDisconnectTimer);
+    presence.dispose();
     outputShutdown('closed');
     void fileWatcher.stop();
   });

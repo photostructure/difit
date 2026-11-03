@@ -641,7 +641,9 @@ describe('App Component - Heartbeat Connection', () => {
     renderApp();
 
     await waitFor(() => {
-      expect(MockEventSource.instances[0]?.url).toBe('http://localhost:4969/api/heartbeat');
+      expect(MockEventSource.instances[0]?.url).toMatch(
+        /^http:\/\/localhost:4969\/api\/heartbeat\?tab=/,
+      );
     });
   });
 });
@@ -807,7 +809,16 @@ describe('App Component - Approval celebration', () => {
     // happy-dom has no 2D context; a stand-in lets each burst get past that check so it can be counted.
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => {
       bursts++;
-      return new Proxy({}, { get: () => () => undefined, set: () => true }) as never;
+      return new Proxy(
+        {},
+        {
+          get: (_target, key) =>
+            key === 'createRadialGradient' || key === 'createLinearGradient'
+              ? () => ({ addColorStop: () => {} })
+              : () => undefined,
+          set: () => true,
+        },
+      ) as never;
     });
     const approvals = new Map<string, boolean>();
     vi.mocked(global.fetch).mockImplementation((input, init) => {

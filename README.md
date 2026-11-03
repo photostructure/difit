@@ -403,6 +403,16 @@ contract. See [waiting for review](docs/waiting-for-review.md) and the
 approval. The waiting guide supersedes the older protocol's statements that event
 replay is unavailable.
 
+The browser shows whether an agent listener is attached and offers **Copy resume
+prompt** when one is absent. `difit wait` requires presence reporting and exits 4
+when no reviewer is connected on any selected server, after returning existing
+human work. End the agent turn on that result instead of retrying. For Codex
+desktop, the [integration guide](docs/codex-review-integration.md) describes ending
+the turn during review and resuming from the copied prompt, with no idle model
+turns. It also specifies an external-controller approach for automatic delivery.
+Use an explicit `--host` for a server bound to a LAN interface; see
+[server addresses](docs/server-addresses.md).
+
 ## HTTPS and remote browsers
 
 The browser's [Clipboard API](https://developer.mozilla.org/en-US/docs/Web/API/Clipboard/writeText)

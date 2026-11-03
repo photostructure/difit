@@ -71,15 +71,14 @@ approval. This rule never authorizes a push or publication.
 
 For an existing server, run
 `/home/mrm/.local/bin/difit wait --port <port>` from the reviewed repo's Git root.
-It waits silently for a nonempty human-event batch. Repeat `--port` for several
-servers and retain each port's returned cursor for `--after port=cursor` on the
-next invocation. Queued
-messages are recovered without being acknowledged. Only the main session waits,
-using one background command with no overall deadline; subagents hand ownership
-and pending work back after accounting for server lifetime. A periodically
-expiring Monitor is a timed wake. If the host imposes a background task deadline,
-report it once instead of automatically restarting on expiry. See the
-[waiting guide](../../../docs/waiting-for-review.md) for exit codes, receipts and
-cursor reconciliation; it supersedes the older protocol's no-replay statements.
-
+Use exactly one background waiter in the main session, only when the actual
+host supports completion delivery without a background deadline. Retain each
+port's cursor for the next invocation. Recover queued work without implicit
+receipts. Exit 4 means all selected reviews are unattended: end the turn and
+resume on human feedback; never automatically retry. Presence changes do not
+start work. Unsupported presence reporting is a terminal error, not permission
+to invent a polling script. A periodically expiring Monitor is a timed wake.
+See the [waiting guide](../../../docs/waiting-for-review.md) and
+[Claude integration handoff](../../../docs/claude-review-wait-handoff.md).
+Subagents return ownership and pending work after accounting for server lifetime.
 Details: [conversation protocol](../../../docs/agent-conversations.md).
