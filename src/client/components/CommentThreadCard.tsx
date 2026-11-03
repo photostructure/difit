@@ -62,6 +62,9 @@ function ThreadMessageItem({
   const progress = message.origin !== 'agent' ? message.progress : undefined;
   const isUserAuthoredMessage = message.author?.trim() === 'User';
   const intent = message.intent ?? 'comment';
+  const [isCopied, setIsCopied] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(copyTimer.current), []);
 
   useClickOutside(confirmContainerRef, () => setPendingAction(null), isConfirming);
 
@@ -87,6 +90,18 @@ function ThreadMessageItem({
   const handleStartEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
     setIsEditing(true);
+  };
+
+  const handleCopy = async (event: React.MouseEvent) => {
+    event.stopPropagation();
+    try {
+      await copyTextToClipboard(message.body);
+      setIsCopied(true);
+      clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setIsCopied(false), 2000);
+    } catch (error) {
+      console.error('Failed to copy message:', error);
+    }
   };
 
   const handleCancelEdit = () => {
@@ -150,60 +165,69 @@ function ThreadMessageItem({
               syntaxTheme={syntaxTheme}
             />
           </div>
-          {(isRootMessage || isUserAuthoredMessage) &&
-            (isConfirming ? (
-              <div
-                ref={confirmContainerRef}
-                className="flex shrink-0 items-center gap-1.5 pt-0.5"
-                onClick={(e) => e.stopPropagation()}
+          {isConfirming ? (
+            <div
+              ref={confirmContainerRef}
+              className="flex shrink-0 items-center gap-1.5 pt-0.5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span className="whitespace-nowrap text-xs text-github-text-secondary">
+                {pendingAction === 'delete' ? 'Delete?' : confirmPrompt}
+              </span>
+              <button
+                ref={confirmButtonRef}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const action = pendingAction;
+                  setPendingAction(null);
+                  if (action === 'delete') {
+                    onDelete?.();
+                  } else {
+                    onResolveOrDelete();
+                  }
+                }}
+                className={`whitespace-nowrap rounded border border-github-border bg-github-bg-tertiary px-2 py-1 text-xs font-medium transition-all hover:bg-github-bg-primary ${
+                  isConfirmingDelete ? 'text-github-danger' : 'text-green-700 hover:text-green-800'
+                }`}
               >
-                <span className="whitespace-nowrap text-xs text-github-text-secondary">
-                  {pendingAction === 'delete' ? 'Delete?' : confirmPrompt}
-                </span>
-                <button
-                  ref={confirmButtonRef}
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const action = pendingAction;
-                    setPendingAction(null);
-                    if (action === 'delete') {
-                      onDelete?.();
-                    } else {
-                      onResolveOrDelete();
-                    }
-                  }}
-                  className={`whitespace-nowrap rounded border border-github-border bg-github-bg-tertiary px-2 py-1 text-xs font-medium transition-all hover:bg-github-bg-primary ${
-                    isConfirmingDelete
-                      ? 'text-github-danger'
-                      : 'text-green-700 hover:text-green-800'
-                  }`}
-                >
-                  {isConfirmingDelete ? 'Delete' : confirmLabel}
-                </button>
+                {isConfirmingDelete ? 'Delete' : confirmLabel}
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPendingAction(null);
+                }}
+                className="whitespace-nowrap rounded border border-github-border bg-github-bg-tertiary px-2 py-1 text-xs text-github-text-primary transition-all hover:bg-github-bg-primary"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <div className="flex shrink-0 items-start gap-2 pt-0.5">
+              {!isRootMessage && (
                 <button
                   type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPendingAction(null);
-                  }}
-                  className="whitespace-nowrap rounded border border-github-border bg-github-bg-tertiary px-2 py-1 text-xs text-github-text-primary transition-all hover:bg-github-bg-primary"
+                  onClick={handleCopy}
+                  className="rounded border border-github-border bg-github-bg-tertiary p-1.5 text-github-text-primary transition-all hover:bg-github-bg-primary"
+                  title={isCopied ? 'Copied!' : 'Copy message'}
+                  aria-label={isCopied ? 'Copied!' : 'Copy message'}
                 >
-                  Cancel
+                  {isCopied ? <Check size={12} /> : <Copy size={12} />}
                 </button>
-              </div>
-            ) : (
-              <div className="flex shrink-0 items-start gap-2 pt-0.5">
-                {(isUserAuthoredMessage || isRootMessage) && (
-                  <button
-                    type="button"
-                    onClick={handleStartEdit}
-                    className="rounded border border-github-border bg-github-bg-tertiary p-1.5 text-github-text-primary transition-all hover:bg-github-bg-primary"
-                    title="Edit message"
-                  >
-                    <Edit2 size={12} />
-                  </button>
-                )}
+              )}
+              {(isUserAuthoredMessage || isRootMessage) && (
+                <button
+                  type="button"
+                  onClick={handleStartEdit}
+                  className="rounded border border-github-border bg-github-bg-tertiary p-1.5 text-github-text-primary transition-all hover:bg-github-bg-primary"
+                  title="Edit message"
+                >
+                  <Edit2 size={12} />
+                </button>
+              )}
+              {(isRootMessage || isUserAuthoredMessage) && (
                 <button
                   type="button"
                   onClick={(e) => {
@@ -222,22 +246,23 @@ function ThreadMessageItem({
                 >
                   {isRootMessage ? <Check size={12} /> : <Trash2 size={12} />}
                 </button>
-                {onDelete && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPendingAction('delete');
-                    }}
-                    className="rounded border border-github-border bg-github-bg-tertiary p-1.5 text-github-danger transition-all hover:bg-github-bg-primary"
-                    title="Delete thread"
-                    aria-label="Delete thread"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                )}
-              </div>
-            ))}
+              )}
+              {onDelete && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPendingAction('delete');
+                  }}
+                  className="rounded border border-github-border bg-github-bg-tertiary p-1.5 text-github-danger transition-all hover:bg-github-bg-primary"
+                  title="Delete thread"
+                  aria-label="Delete thread"
+                >
+                  <Trash2 size={12} />
+                </button>
+              )}
+            </div>
+          )}
         </>
       ) : (
         <CommentForm

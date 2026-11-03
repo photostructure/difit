@@ -5,6 +5,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CommentThread } from '../../types/diff';
 
 import { CommentThreadCard } from './CommentThreadCard';
+import { copyTextToClipboard } from '../utils/clipboard';
+vi.mock('../utils/clipboard', () => ({
+  copyTextToClipboard: vi.fn().mockResolvedValue(undefined),
+}));
 
 const mockThread: CommentThread = {
   id: 'thread-1',
@@ -566,5 +570,73 @@ describe('CommentThreadCard', () => {
     await user.click(screen.getByRole('radio', { name: 'Comment' }));
     await user.click(screen.getByRole('button', { name: 'Save' }));
     expect(onUpdateMessage).toHaveBeenCalledWith('thread-1', root.id, root.body, 'comment');
+  });
+});
+
+describe('reply copy actions', () => {
+  it('copies the body of a reply authored by someone else', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <CommentThreadCard
+        thread={mockThread}
+        onGeneratePrompt={() => 'thread prompt'}
+        onToggleThreadResolved={vi.fn()}
+        onRemoveThread={vi.fn()}
+        onReplyToThread={vi.fn().mockResolvedValue(undefined)}
+        onRemoveMessage={vi.fn()}
+        onUpdateMessage={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByTitle('Copy message'));
+
+    expect(copyTextToClipboard).toHaveBeenCalledWith('Reply comment');
+    expect(screen.getByTitle('Copied!')).toBeInTheDocument();
+  });
+
+  it('places the copy action before edit on a user-authored reply', () => {
+    render(
+      <CommentThreadCard
+        thread={{
+          ...mockThread,
+          messages: [
+            mockThread.messages[0]!,
+            {
+              ...mockThread.messages[1]!,
+              author: 'User',
+            },
+          ],
+        }}
+        onGeneratePrompt={() => 'thread prompt'}
+        onToggleThreadResolved={vi.fn()}
+        onRemoveThread={vi.fn()}
+        onReplyToThread={vi.fn().mockResolvedValue(undefined)}
+        onRemoveMessage={vi.fn()}
+        onUpdateMessage={vi.fn()}
+      />,
+    );
+
+    const copyButton = screen.getByTitle('Copy message');
+    const editButtons = screen.getAllByTitle('Edit message');
+    const replyEditButton = editButtons[editButtons.length - 1]!;
+
+    expect(copyButton.nextElementSibling).toBe(replyEditButton);
+  });
+
+  it('does not show the copy action on the root comment', () => {
+    render(
+      <CommentThreadCard
+        thread={{ ...mockThread, messages: [mockThread.messages[0]!] }}
+        onGeneratePrompt={() => 'thread prompt'}
+        onToggleThreadResolved={vi.fn()}
+        onRemoveThread={vi.fn()}
+        onReplyToThread={vi.fn().mockResolvedValue(undefined)}
+        onRemoveMessage={vi.fn()}
+        onUpdateMessage={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTitle('Copy message')).not.toBeInTheDocument();
   });
 });
