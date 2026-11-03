@@ -24,7 +24,15 @@ const baseSettings = {
   theme: 'dark' as const,
   syntaxTheme: 'vsDark',
   colorVision: 'normal' as const,
-  approvalAnimations: { confetti: true, streamers: true, sparkles: true },
+  approvalAnimations: {
+    confetti: true,
+    streamers: true,
+    sparkles: true,
+    fireworks: true,
+    spirals: true,
+    lasers: true,
+    disco: true,
+  },
   autoViewedPatterns: [],
 } satisfies React.ComponentProps<typeof SettingsModal>['settings'];
 
@@ -124,7 +132,7 @@ describe('SettingsModal', () => {
     const onSettingsChange = vi.fn();
     const settings = {
       ...baseSettings,
-      approvalAnimations: { confetti: true, streamers: false, sparkles: true },
+      approvalAnimations: { ...baseSettings.approvalAnimations, streamers: false },
     };
 
     render(
@@ -146,16 +154,16 @@ describe('SettingsModal', () => {
       'false',
     );
 
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Sparkles' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Disco Ball' }));
     expect(onSettingsChange).toHaveBeenLastCalledWith({
       ...settings,
-      approvalAnimations: { confetti: true, streamers: false, sparkles: false },
+      approvalAnimations: { ...settings.approvalAnimations, disco: false },
     });
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Streamers' }));
     expect(onSettingsChange).toHaveBeenLastCalledWith({
       ...settings,
-      approvalAnimations: { confetti: true, streamers: true, sparkles: true },
+      approvalAnimations: { ...settings.approvalAnimations, streamers: true },
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Reset Appearance Defaults' }));

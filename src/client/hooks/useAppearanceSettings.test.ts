@@ -146,6 +146,28 @@ describe('useAppearanceSettings', () => {
 
       expect(result.current.settings.fontFamily).toMatch(/^ui-monospace/);
     });
+
+    it('turns on approval animations that saved settings predate', () => {
+      localStorage.setItem(
+        APPEARANCE_STORAGE_KEY,
+        JSON.stringify({
+          theme: 'dark',
+          approvalAnimations: { confetti: false, streamers: true, sparkles: true },
+        }),
+      );
+
+      const { result } = renderHook(() => useAppearanceSettings());
+
+      expect(result.current.settings.approvalAnimations).toEqual({
+        confetti: false,
+        streamers: true,
+        sparkles: true,
+        fireworks: true,
+        spirals: true,
+        lasers: true,
+        disco: true,
+      });
+    });
   });
 
   describe('server-persisted settings', () => {

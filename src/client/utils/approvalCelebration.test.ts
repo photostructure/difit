@@ -1,33 +1,56 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ApprovalAnimation } from '../components/SettingsModal';
-import { celebrateApproval } from './approvalCelebration';
+import { DEFAULT_SETTINGS, type ApprovalAnimation } from '../components/SettingsModal';
+import { celebrateApproval, pickApprovalAnimation } from './approvalCelebration';
 
-const only = (animation: ApprovalAnimation) => ({
-  confetti: animation === 'confetti',
-  streamers: animation === 'streamers',
-  sparkles: animation === 'sparkles',
+const ANIMATIONS = Object.keys(DEFAULT_SETTINGS.approvalAnimations) as ApprovalAnimation[];
+
+const only = (animation: ApprovalAnimation | null) =>
+  Object.fromEntries(ANIMATIONS.map((id) => [id, id === animation])) as Record<
+    ApprovalAnimation,
+    boolean
+  >;
+
+describe('pickApprovalAnimation', () => {
+  it('picks nothing when every animation is turned off', () => {
+    expect(pickApprovalAnimation(only(null))).toBeNull();
+  });
+
+  it.each(ANIMATIONS)('picks %s when it is the one enabled animation', (animation) => {
+    for (let i = 0; i < 20; i++) expect(pickApprovalAnimation(only(animation))).toBe(animation);
+  });
 });
 
 describe('celebrateApproval', () => {
-  let drawCalls: Set<string>;
+  let drawCalls: number;
   let frame: FrameRequestCallback | undefined;
   let source: HTMLButtonElement;
 
   beforeEach(() => {
-    drawCalls = new Set();
+    drawCalls = 0;
     frame = undefined;
-    // happy-dom has no 2D context; record which drawing calls each burst makes.
-    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
-      () =>
-        new Proxy(
-          {},
-          {
-            get: (_, name) => () => drawCalls.add(String(name)),
-            set: () => true,
+    // happy-dom has no 2D context. This stand-in keeps assigned properties and
+    // counts method calls; methods return it so gradients can be configured.
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => {
+      const properties = new Map<PropertyKey, unknown>();
+      const ctx: object = new Proxy(
+        {},
+        {
+          get: (_, name) =>
+            properties.has(name)
+              ? properties.get(name)
+              : () => {
+                  drawCalls++;
+                  return ctx;
+                },
+          set: (_, name, value) => {
+            properties.set(name, value);
+            return true;
           },
-        ) as never,
-    );
+        },
+      );
+      return ctx as never;
+    });
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
       frame = callback;
       return 1;
@@ -42,23 +65,27 @@ describe('celebrateApproval', () => {
   });
 
   it('does nothing when every animation is turned off', () => {
-    celebrateApproval(source, { confetti: false, streamers: false, sparkles: false });
+    celebrateApproval(source, only(null));
 
     expect(HTMLCanvasElement.prototype.getContext).not.toHaveBeenCalled();
     expect(document.querySelector('canvas')).toBeNull();
   });
 
-  it.each([
-    ['confetti', 'fillRect'],
-    ['streamers', 'stroke'],
-    ['sparkles', 'closePath'],
-  ] as const)('plays only %s when it is the one enabled animation', (animation, signature) => {
+  it.each(ANIMATIONS)('plays %s to the end and removes its canvas', (animation) => {
     celebrateApproval(source, only(animation));
     expect(document.querySelector('canvas')).not.toBeNull();
 
-    frame?.(performance.now() + 50);
+    let now = performance.now();
+    let frames = 0;
+    for (; frame && frames < 60 * 10; frames++) {
+      const tick = frame;
+      frame = undefined;
+      now += 1000 / 60;
+      tick(now);
+    }
 
-    const signatures = ['fillRect', 'stroke', 'closePath'];
-    expect(signatures.filter((call) => drawCalls.has(call))).toEqual([signature]);
+    expect(drawCalls).toBeGreaterThan(0);
+    expect(frames).toBeLessThan(60 * 10);
+    expect(document.querySelector('canvas')).toBeNull();
   });
 });

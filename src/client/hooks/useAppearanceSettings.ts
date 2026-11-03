@@ -41,6 +41,8 @@ const normalizeStoredSettings = (raw: unknown): AppearanceSettings | null => {
     ...DEFAULT_SETTINGS,
     ...sanitized,
     fontFamily,
+    // Animations added since the settings were saved start out on.
+    approvalAnimations: { ...DEFAULT_SETTINGS.approvalAnimations, ...parsed.approvalAnimations },
     autoViewedPatterns: normalizeAutoViewedPatterns(parsed.autoViewedPatterns),
   };
 };

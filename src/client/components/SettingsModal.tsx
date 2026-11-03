@@ -16,6 +16,10 @@ const APPROVAL_ANIMATIONS = [
   { id: 'confetti', label: 'Confetti' },
   { id: 'streamers', label: 'Streamers' },
   { id: 'sparkles', label: 'Sparkles' },
+  { id: 'fireworks', label: 'Fireworks' },
+  { id: 'spirals', label: 'Spirals' },
+  { id: 'lasers', label: 'Lasers' },
+  { id: 'disco', label: 'Disco Ball' },
 ] as const;
 
 type ApprovalAnimation = (typeof APPROVAL_ANIMATIONS)[number]['id'];
@@ -47,7 +51,15 @@ export const DEFAULT_SETTINGS: AppearanceSettings = {
   theme: 'dark',
   syntaxTheme: 'vsDark',
   colorVision: 'normal',
-  approvalAnimations: { confetti: true, streamers: true, sparkles: true },
+  approvalAnimations: {
+    confetti: true,
+    streamers: true,
+    sparkles: true,
+    fireworks: true,
+    spirals: true,
+    lasers: true,
+    disco: true,
+  },
   autoViewedPatterns: [],
 };
 
