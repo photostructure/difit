@@ -204,6 +204,26 @@ describe('comment subcommand integration', () => {
       expect(consoleOutput[0]).toContain('"success":true');
     });
 
+    it('sends comment imports to the named review given by --review', async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ success: true, importId: 'abc123', count: 1 }));
+
+      await createCommentCommand().parseAsync([
+        'node',
+        'difit',
+        'add',
+        '--port',
+        '4966',
+        '--review',
+        'second-task',
+        '{"type":"thread","filePath":"test.ts","position":{"side":"new","line":1},"body":"Test"}',
+      ]);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:4966/api/comment-imports?review=second-task',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+
     it('validates JSON before sending', async () => {
       const command = createCommentCommand();
       await command.parseAsync(['node', 'difit', 'add', '--port', '4966', 'not-valid-json']);

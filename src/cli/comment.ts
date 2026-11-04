@@ -6,6 +6,12 @@ import { detectStdinSource, readStdin } from './utils.js';
 import { addConversationCommands } from './conversation.js';
 import { parseServerPort, serverUrl } from './server-url.js';
 
+interface CommentAddOptions {
+  host: string;
+  port: number;
+  review?: string;
+}
+
 interface CommentImportResponse {
   success?: boolean;
   importId?: string;
@@ -52,12 +58,20 @@ export function createCommentCommand(): Command {
     .description('Add comments to a running difit server')
     .argument('[json]', 'comment import JSON (object or array)')
     .requiredOption('--port <port>', 'port of the running difit server', parseServerPort)
-    .action(async (json: string | undefined, opts: { host: string; port: number }) => {
+    .option(
+      '--review <name>',
+      'named review to add the comments to (default: the review the viewer last loaded)',
+    )
+    .action(async (json: string | undefined, opts: CommentAddOptions) => {
       try {
         const input = await parseCommentAddInput(json);
         const imports = parseCommentImportValue(input);
+        const path =
+          opts.review === undefined
+            ? '/api/comment-imports'
+            : `/api/comment-imports?review=${encodeURIComponent(opts.review)}`;
 
-        const response = await fetch(serverUrl(opts.host, opts.port, '/api/comment-imports'), {
+        const response = await fetch(serverUrl(opts.host, opts.port, path), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(imports),

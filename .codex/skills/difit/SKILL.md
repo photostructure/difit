@@ -70,7 +70,8 @@ Use the API host and port for companion commands, including servers bound to a
 LAN interface. Preserve `--host`; never assume localhost or a development UI port.
 For an existing review, reuse its server. Create another named review with
 `review create <name> --host <host> --port <port>` instead of launching another
-server. Tell the user to select it under **Recent reviews** in the existing tab.
+server, and add its reading-guide comments with `comment add --review <name>`.
+Tell the user to select it under **Recent reviews** in the existing tab.
 Do not stop or replace another session's reviews.
 
 For overlapping files, use `review capture --output <artifact>` and its printed

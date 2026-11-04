@@ -93,7 +93,7 @@ JSON payloads before composing them; omit the selector for events. The Draft
 Every review you open carries reading-guide comments and a change summary,
 including read-only reviews. Preload comments that help the user navigate the
 diff with repeatable `--comment` arguments (on a reused server, `comment add
---port <api-port>`; see `schema import`). Use `old` for deleted lines, `new`
+--port <api-port> --review <name>`; see `schema import`). Use `old` for deleted lines, `new`
 for target lines, and a number or `{"start":36,"end":39}` for a range:
 
 ```sh

@@ -369,6 +369,24 @@ describe('named review HTTP integration', () => {
     ).toMatchObject(binding(next, 2, summary.version));
   });
 
+  it('files comment imports under the named review that ?review= selects', async () => {
+    const otherName = 'other-agent';
+    await post('/api/reviews', { name: otherName, capture: initialCapture });
+    await post(`/api/comment-imports?review=${otherName}`, {
+      type: 'thread',
+      filePath: 'first.txt',
+      position: { side: 'new', line: 1 },
+      body: 'Guide for the other task.',
+    });
+
+    const bodies = async (reviewQuery: string) =>
+      (await get<CommentsResponse>(`/api/comments-json${reviewQuery}`)).threads.flatMap((thread) =>
+        thread.messages.map((message) => message.body),
+      );
+    expect(await bodies(`?review=${otherName}`)).toEqual(['Guide for the other task.']);
+    expect(await bodies(query)).toEqual([]);
+  });
+
   it('keeps two named tasks independent even when their patch digests match', async () => {
     const first = await review();
     const otherName = 'other-agent';
