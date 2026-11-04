@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -493,7 +493,7 @@ describe('reply copy actions', () => {
   });
 });
 
-describe('thread disclosure and persistent replies', () => {
+describe('thread disclosure and replies', () => {
   function renderThread(props: Partial<ComponentProps<typeof CommentThreadCard>> = {}) {
     return render(
       <>
@@ -510,38 +510,98 @@ describe('thread disclosure and persistent replies', () => {
       </>,
     );
   }
+  const agentAnswered: CommentThread = {
+    ...mockThread,
+    messages: [
+      mockThread.messages[0]!,
+      { ...mockThread.messages[1]!, author: 'Codex', origin: 'agent' },
+    ],
+  };
 
-  it('shows the actual reply form without taking focus', () => {
-    renderThread();
+  it('offers quick replies beside the reply field when the agent replied last', () => {
+    renderThread({ thread: agentAnswered });
 
-    const reply = screen.getByRole('textbox', { name: '' });
-    expect(reply).toHaveAttribute('placeholder', 'Write a reply...');
-    expect(reply).not.toHaveFocus();
-    expect(screen.queryByRole('button', { name: 'Write a reply...' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    const row = screen.getByRole('group', { name: 'Reply' });
+    expect(
+      within(row)
+        .getAllByRole('button')
+        .map((button) => [button.textContent, button.getAttribute('title')]),
+    ).toEqual([
+      ['👍 Agreed', 'Send "👍 Agreed: no reply needed." as a comment'],
+      [
+        '❓ Still unclear',
+        'Send "❓ Still unclear: please explain again in different words." as a question',
+      ],
+      ['👎 Disagree', 'Send "👎 Disagree: please reconsider, or defend the point." as a question'],
+      ['Write a reply...', null],
+    ]);
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   });
 
-  it('keeps the reply form visible and clears it after sending', async () => {
+  it.each([
+    ['👍 Agreed', '👍 Agreed: no reply needed.', 'comment'],
+    ['❓ Still unclear', '❓ Still unclear: please explain again in different words.', 'question'],
+    ['👎 Disagree', '👎 Disagree: please reconsider, or defend the point.', 'question'],
+  ])('sends %s as an ordinary reply with one click', async (label, body, intent) => {
     const user = userEvent.setup();
     const onReplyToThread = vi.fn().mockResolvedValue(undefined);
     const onClick = vi.fn();
-    renderThread({ onReplyToThread, onClick });
+    renderThread({ thread: agentAnswered, onReplyToThread, onClick });
 
+    await user.click(screen.getByRole('button', { name: label }));
+
+    expect(onReplyToThread).toHaveBeenCalledWith('thread-1', body, intent);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('offers only the reply field when the newest visible message is not an agent reply', () => {
+    renderThread({
+      thread: { ...agentAnswered, deletedMessageIds: [agentAnswered.messages[1]!.id] },
+    });
+    expect(screen.queryByRole('button', { name: '👍 Agreed' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Write a reply...' })).toBeInTheDocument();
+
+    cleanup();
+    renderThread();
+    expect(screen.queryByRole('button', { name: '👍 Agreed' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Write a reply...' })).toBeInTheDocument();
+  });
+
+  it('opens a focused reply form and collapses it after sending', async () => {
+    const user = userEvent.setup();
+    const onReplyToThread = vi.fn().mockResolvedValue(undefined);
+    const onClick = vi.fn();
+    renderThread({ thread: agentAnswered, onReplyToThread, onClick });
+
+    await user.click(screen.getByRole('button', { name: 'Write a reply...' }));
     const reply = screen.getByPlaceholderText('Write a reply...');
+    expect(reply).toHaveFocus();
+    expect(screen.queryByRole('button', { name: '👍 Agreed' })).not.toBeInTheDocument();
     await user.type(reply, 'A new reply');
     await user.click(screen.getByRole('button', { name: 'Send' }));
 
     expect(onReplyToThread).toHaveBeenCalledWith('thread-1', 'A new reply', 'comment');
-    expect(reply).toBeInTheDocument();
-    expect(reply).toHaveValue('');
-    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Write a reply...' })).toBeInTheDocument();
     expect(onClick).not.toHaveBeenCalled();
   });
 
-  it('preserves a reply draft across Escape and outside clicks', async () => {
+  it('closes an empty reply form on Escape and returns focus to the reply field', async () => {
     const user = userEvent.setup();
     renderThread();
 
+    await user.click(screen.getByRole('button', { name: 'Write a reply...' }));
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Write a reply...' })).toHaveFocus();
+  });
+
+  it('keeps a reply draft open across Escape and outside clicks', async () => {
+    const user = userEvent.setup();
+    renderThread();
+
+    await user.click(screen.getByRole('button', { name: 'Write a reply...' }));
     const reply = screen.getByPlaceholderText('Write a reply...');
     await user.type(reply, 'Keep this draft');
     await user.click(screen.getByRole('radio', { name: 'Question' }));
@@ -551,7 +611,7 @@ describe('thread disclosure and persistent replies', () => {
     expect(reply).toBeVisible();
     expect(reply).toHaveValue('Keep this draft');
     expect(screen.getByRole('radio', { name: 'Question' })).toBeChecked();
-    expect(reply.closest('form')).toHaveAttribute('data-dismiss-on-outside-click', 'false');
+    expect(reply.closest('form')).toHaveAttribute('data-empty', 'false');
   });
 
   it.each([
@@ -587,7 +647,7 @@ describe('thread disclosure and persistent replies', () => {
 
       await user.click(screen.getByText(heading));
       expect(disclosure).toHaveAttribute('aria-expanded', 'true');
-      expect(screen.getByPlaceholderText('Write a reply...')).toBeVisible();
+      expect(screen.getByRole('button', { name: 'Write a reply...' })).toBeVisible();
       expect(onClick).not.toHaveBeenCalled();
     },
   );

@@ -14,7 +14,8 @@ export interface CommentSubmitOptions {
 
 interface CommentFormProps {
   onSubmit: (body: string, options: CommentSubmitOptions) => Promise<void>;
-  onCancel: () => void;
+  // Receives the unsent draft so a caller can keep a form with text open.
+  onCancel: (draft: string) => void;
   selectedCode?: string;
   syntaxTheme?: AppearanceSettings['syntaxTheme'];
   filename?: string;
@@ -95,7 +96,7 @@ export function CommentForm({
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       void handleSubmit(e);
     } else if (e.key === 'Escape') {
-      onCancel();
+      onCancel(body);
     }
   };
 
@@ -109,7 +110,7 @@ export function CommentForm({
       onSubmit={handleSubmit}
       onReset={(event) => {
         event.preventDefault();
-        if (!isSubmitting) onCancel();
+        if (!isSubmitting) onCancel(body);
       }}
       onClick={(e) => e.stopPropagation()}
       data-empty={!body.trim()}

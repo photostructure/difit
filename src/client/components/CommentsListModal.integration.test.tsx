@@ -138,6 +138,7 @@ it('keeps reply drafts visible after Escape and clicks outside the reply form', 
   const user = userEvent.setup();
   render(<TriggerHarness onNavigate={vi.fn()} onAddGeneralComment={vi.fn()} />);
   await user.click(screen.getByRole('button', { name: 'Open conversation' }));
+  await user.click(screen.getByRole('button', { name: 'Write a reply...' }));
   const reply = screen.getByPlaceholderText('Write a reply...');
   await user.type(reply, 'Keep this reply');
   await user.keyboard('{Escape}');

@@ -301,6 +301,12 @@ agent should do; intent is not approval to commit, push, or publish. Explicit
 root-message intent takes precedence over the older thread-level question flag,
 which remains a fallback for saved threads without explicit intent.
 
+After an agent reply, the reviewer can answer with one click. The buttons post
+ordinary replies: "👍 Agreed: no reply needed." as a comment, and "❓ Still
+unclear: please explain again in different words." or "👎 Disagree: please
+reconsider, or defend the point." as questions. Handle them like typed replies:
+mark the agreement `noted`, and answer the questions in the thread.
+
 General threads and events have `scope: "review"` and omit file/line location.
 Use the event's review/thread/message IDs for status and replies just as for inline
 comments. Message events carry optional `intent`: `comment`, `question`, or `change`.

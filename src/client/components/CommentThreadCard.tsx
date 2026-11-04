@@ -18,6 +18,22 @@ import { CommentBodyRenderer } from './CommentBodyRenderer';
 import { CommentForm, type CommentSubmitOptions } from './CommentForm';
 import type { AppearanceSettings } from './SettingsModal';
 
+// One-click answers to an agent reply. They are ordinary replies, so agents
+// receive, acknowledge, and answer them like typed ones.
+const QUICK_REPLIES: readonly { label: string; body: string; intent: CommentIntent }[] = [
+  { label: '👍 Agreed', body: '👍 Agreed: no reply needed.', intent: 'comment' },
+  {
+    label: '❓ Still unclear',
+    body: '❓ Still unclear: please explain again in different words.',
+    intent: 'question',
+  },
+  {
+    label: '👎 Disagree',
+    body: '👎 Disagree: please reconsider, or defend the point.',
+    intent: 'question',
+  },
+];
+
 interface ThreadMessageItemProps {
   threadId: string;
   highlighted?: boolean;
@@ -262,6 +278,18 @@ export function CommentThreadCard({
   useEffect(() => {
     setIsCollapsed(Boolean(thread.deleted || (thread.resolution?.resolved && !focusedMessageId)));
   }, [focusedMessageId, thread.deleted, thread.resolution?.resolved]);
+  const [isReplying, setIsReplying] = useState(false);
+  const replyArea = useRef<HTMLDivElement>(null);
+  const replyTrigger = useRef<HTMLButtonElement>(null);
+  const returnFocusToReplyTrigger = useRef(false);
+  useEffect(() => {
+    if (isReplying || !returnFocusToReplyTrigger.current) return;
+    returnFocusToReplyTrigger.current = false;
+    replyTrigger.current?.focus();
+  }, [isReplying]);
+  const agentRepliedLast =
+    thread.messages.filter((message) => !thread.deletedMessageIds?.includes(message.id)).at(-1)
+      ?.origin === 'agent';
   const lineLabel = Array.isArray(thread.line)
     ? `${thread.line[0]}-${thread.line[1]}`
     : thread.line;
@@ -461,22 +489,59 @@ export function CommentThreadCard({
             ))}
 
             <div
+              ref={replyArea}
               className="ml-4 border-l border-github-border pl-3"
               onClick={(e) => e.stopPropagation()}
             >
-              <CommentForm
-                onSubmit={(body, options) => onReplyToThread(thread.id, body, options.intent)}
-                onCancel={() => undefined}
-                selectedCode={thread.codeContent}
-                syntaxTheme={syntaxTheme}
-                filename={thread.file}
-                embedded={true}
-                autoFocus={false}
-                dismissOnOutsideClick={false}
-                title="Reply to thread"
-                submitLabel="Send"
-                placeholder="Write a reply..."
-              />
+              {isReplying ? (
+                <CommentForm
+                  onSubmit={async (body, options) => {
+                    await onReplyToThread(thread.id, body, options.intent);
+                    setIsReplying(false);
+                  }}
+                  onCancel={(draft) => {
+                    if (draft.trim()) return;
+                    // Escape returns focus to the reply field; an outside click keeps its target.
+                    returnFocusToReplyTrigger.current =
+                      replyArea.current?.contains(document.activeElement) ?? false;
+                    setIsReplying(false);
+                  }}
+                  selectedCode={thread.codeContent}
+                  syntaxTheme={syntaxTheme}
+                  filename={thread.file}
+                  embedded={true}
+                  title="Reply to thread"
+                  submitLabel="Send"
+                  placeholder="Write a reply..."
+                />
+              ) : (
+                <div role="group" aria-label="Reply" className="flex flex-wrap items-center gap-2">
+                  {agentRepliedLast &&
+                    QUICK_REPLIES.map(({ label, body, intent }) => (
+                      <button
+                        key={label}
+                        type="button"
+                        title={`Send "${body}" as a ${intent}`}
+                        onClick={() => {
+                          onReplyToThread(thread.id, body, intent).catch((error: unknown) => {
+                            console.error('Failed to send quick reply:', error);
+                          });
+                        }}
+                        className="whitespace-nowrap rounded-full border border-github-border bg-github-bg-secondary px-3 py-1 text-xs text-github-text-primary transition-colors hover:border-github-text-secondary hover:bg-github-bg-primary"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  <button
+                    ref={replyTrigger}
+                    type="button"
+                    onClick={() => setIsReplying(true)}
+                    className="min-w-40 flex-1 cursor-text rounded border border-github-border bg-github-bg-secondary px-3 py-1.5 text-left text-sm text-github-text-muted transition-colors hover:border-github-text-secondary"
+                  >
+                    Write a reply...
+                  </button>
+                </div>
+              )}
             </div>
           </>
         )}

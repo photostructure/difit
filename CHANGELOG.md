@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Added in the PhotoStructure fork
 
 - Navigate unseen agent replies and edited messages from a persistent updates button, with previews and direct message jumps.
+- Answer an agent reply with one click: **👍 Agreed**, **❓ Still unclear**, and **👎 Disagree** post ordinary replies beside **Write a reply...**.
 - Report browser visibility and agent-listener presence; offer a resume prompt for agents that cannot receive idle notifications.
 - Stop `difit wait` with exit 4 when every selected review is unattended, after recovering existing human work.
 - Show the launching agent and its session's name and ID under **About**. The agent comes from `$CLAUDE_CODE_ENTRYPOINT` or the Codex thread's rollout, and the ID from `$CLAUDE_CODE_SESSION_ID` or `$CODEX_THREAD_ID`, unless `--agent` or `--agent-session-id` overrides them; `--agent-session-name` sets the name.
@@ -18,6 +19,7 @@ All notable changes to this project will be documented in this file.
 ### Changed in the PhotoStructure fork
 
 - Bind an OS-assigned port with `--port 0` and report it in `server.ready`; reject non-numeric ports instead of falling back to 4966.
+- Open thread reply forms from **Write a reply...** again. Escape or a click elsewhere closes an empty form; a draft stays open.
 - Emit JSON Lines from the foreground launch process by default, with `--jsonl` and a `--no-jsonl` human-output opt-out.
 - Include server readiness, comment progress, and thread changes in launch output; require explicit Delivered receipts.
 - Remove the separate `comment watch` command; retain snapshot recovery and companion commands.

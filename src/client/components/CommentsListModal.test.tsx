@@ -297,10 +297,14 @@ describe('CommentsListModal', () => {
       { wrapper },
     );
 
-    const reply = screen.getAllByPlaceholderText('Write a reply...')[0]!;
-    await user.click(reply);
+    await user.click(screen.getAllByRole('button', { name: 'Write a reply...' })[0]!);
+    await user.click(screen.getByPlaceholderText('Write a reply...'));
 
-    expect(within(reply.closest('form')!).getByText('Reply to thread')).toBeInTheDocument();
+    expect(
+      within(screen.getByPlaceholderText('Write a reply...').closest('form')!).getByText(
+        'Reply to thread',
+      ),
+    ).toBeInTheDocument();
     expect(onNavigate).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
   });

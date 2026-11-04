@@ -332,6 +332,14 @@ inline threads, and are saved with the selected comparison. Click an inline thre
 to jump to its code; general threads stay in the panel. Copy All and CLI comment
 output include both kinds of discussion.
 
+When the newest message in a thread is an agent reply, the thread offers quick
+replies beside **Write a reply...**: **👍 Agreed** sends "👍 Agreed: no reply
+needed." as a Comment, **❓ Still unclear** asks for another explanation, and
+**👎 Disagree** asks the agent to reconsider or defend its point; both of those are
+Questions. Each is an ordinary reply, so it shows delivery progress and can be
+deleted. **Write a reply...** opens the full form; Escape or a click elsewhere
+closes it while it is empty.
+
 ### Comment Prompt Format
 
 ```sh
