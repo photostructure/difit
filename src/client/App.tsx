@@ -41,7 +41,6 @@ import { UnreadBadge } from './components/UnreadBadge';
 import { useAgentUpdates } from './hooks/useAgentUpdates';
 import { RevisionDetailModal } from './components/RevisionDetailModal';
 import { SettingsModal } from './components/SettingsModal';
-import { SparkleAnimation } from './components/SparkleAnimation';
 import { ViewMenu } from './components/ViewMenu';
 import { CaptureDetails } from './components/CaptureDetails';
 import { AboutPanel } from './components/AboutPanel';
@@ -191,10 +190,6 @@ function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFileTreeOpen, setIsFileTreeOpen] = useState(getInitialFileTreeOpen);
   const [isDragging, setIsDragging] = useState(false);
-  const [showSparkles, setShowSparkles] = useState(false);
-  const [hasTriggeredSparkles, setHasTriggeredSparkles] = useState(false);
-  const sparkleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(sparkleTimer.current), []);
   const [isCommentsListOpen, setIsCommentsListOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const closeAbout = useCallback(() => setIsAboutOpen(false), []);
@@ -1432,30 +1427,6 @@ function App() {
     threads,
   ]);
 
-  // Trigger sparkle animation when all files are viewed
-  useEffect(() => {
-    if (diffData) {
-      // Reset the trigger flag when not all files are viewed
-      if (viewedFilesInDiffCount < diffData.files.length) {
-        setHasTriggeredSparkles(false);
-      }
-      // Show sparkles when all files are viewed and not already triggered
-      else if (
-        diffData.files.length > 0 &&
-        viewedFilesInDiffCount === diffData.files.length &&
-        !hasTriggeredSparkles
-      ) {
-        setShowSparkles(true);
-        setHasTriggeredSparkles(true);
-        // Hide sparkles after animation completes
-        clearTimeout(sparkleTimer.current);
-        sparkleTimer.current = setTimeout(() => {
-          setShowSparkles(false);
-        }, 1000);
-      }
-    }
-  }, [viewedFilesInDiffCount, diffData, hasTriggeredSparkles]);
-
   // Send comments to server whenever they change and before page unload
   useEffect(() => {
     if (!hasBootstrappedComments) {
@@ -1705,7 +1676,7 @@ function App() {
               <Logo style={{ height: '18px', color: 'var(--color-github-text-secondary)' }} />
             </h1>
             {(!isFileTreeOpen || isMobile) && (
-              <span className="relative shrink-0 text-xs ui-value">
+              <span className="shrink-0 text-xs ui-value">
                 <span role="status" title="Files viewed">
                   {allFilesViewed ? (
                     'All files viewed'
@@ -1715,9 +1686,6 @@ function App() {
                       <span className="sr-only"> files viewed</span>
                     </>
                   )}
-                </span>
-                <span aria-hidden="true">
-                  <SparkleAnimation isActive={showSparkles} />
                 </span>
               </span>
             )}
@@ -1912,7 +1880,7 @@ function App() {
                 <FileList
                   files={diffData.files}
                   headerStatus={
-                    <div className="relative mb-3 text-xs text-github-text-secondary">
+                    <div className="mb-3 text-xs text-github-text-secondary">
                       <span className="ui-value">
                         {allFilesViewed
                           ? 'All files viewed'
@@ -1924,7 +1892,6 @@ function App() {
                         max={Math.max(1, diffData.files.length)}
                         aria-label="Files viewed"
                       />
-                      <SparkleAnimation isActive={showSparkles} />
                     </div>
                   }
                   onScrollToFile={handleSidebarFileSelected}

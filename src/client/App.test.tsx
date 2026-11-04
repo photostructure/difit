@@ -1389,6 +1389,16 @@ describe('App Component - Review progress', () => {
 
     expect(await screen.findByText('1 / 2 files viewed')).toBeInTheDocument();
   });
+
+  it('reports a fully viewed diff without animating sparkles', async () => {
+    mockFetch(mockDiffResponse);
+    mockViewedFiles = new Set(['test.ts']);
+
+    renderApp();
+
+    expect(await screen.findByText('All files viewed')).toBeInTheDocument();
+    expect(screen.queryAllByText('✨')).toHaveLength(0);
+  });
 });
 
 describe('App Component - Comment sync', () => {

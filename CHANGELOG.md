@@ -27,6 +27,7 @@ All notable changes to this project will be documented in this file.
 - Require `--no-jsonl --no-conversation` together to disable conversations; `--no-conversation` alone now exits with an error.
 - Route startup and disconnect diagnostics to stderr in both output modes; `--no-jsonl` uses human-readable comment and approval output on stdout.
 - Rename the header's **Repository** button to **About**.
+- Stop two ✨ emoji from rising beside the files-viewed status when the last file is marked **Viewed**; **All files viewed** and the full progress bar still mark completion.
 
 ## [5.1.0] - 2026-10-29
 
