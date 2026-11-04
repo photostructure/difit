@@ -1704,7 +1704,7 @@ function App() {
     <ReviewProviders agentUpdates={inlineAgentReadContext}>
       <div className="h-screen flex flex-col" onClickCapture={handleGlobalClick}>
         <header
-          className="review-toolbar flex shrink-0 flex-wrap items-stretch gap-2 border-b border-github-border bg-github-bg-secondary px-3 py-2 text-sm text-github-text-primary"
+          className="review-toolbar flex shrink-0 flex-wrap items-stretch justify-end gap-2 border-b border-github-border bg-github-bg-secondary px-3 py-2 text-sm text-github-text-primary"
           data-testid="compact-review-header"
         >
           {diffData.capture && (
@@ -1714,7 +1714,7 @@ function App() {
               <span>{diffData.capture.patchDigest.slice(0, 12)}</span>
             </div>
           )}
-          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
+          <div className="mr-auto flex min-w-0 max-w-full flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => setIsFileTreeOpen(!isFileTreeOpen)}
