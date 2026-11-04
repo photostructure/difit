@@ -23,11 +23,13 @@ describe('pickApprovalAnimation', () => {
 
 describe('celebrateApproval', () => {
   let drawCalls: number;
+  let ellipseCalls: number;
   let frame: FrameRequestCallback | undefined;
   let source: HTMLButtonElement;
 
   beforeEach(() => {
     drawCalls = 0;
+    ellipseCalls = 0;
     frame = undefined;
     // happy-dom has no 2D context. This stand-in keeps assigned properties and
     // counts method calls; methods return it so gradients can be configured.
@@ -41,6 +43,7 @@ describe('celebrateApproval', () => {
               ? properties.get(name)
               : () => {
                   drawCalls++;
+                  if (name === 'ellipse') ellipseCalls++;
                   return ctx;
                 },
           set: (_, name, value) => {
@@ -87,5 +90,28 @@ describe('celebrateApproval', () => {
     expect(drawCalls).toBeGreaterThan(0);
     expect(frames).toBeLessThan(60 * 10);
     expect(document.querySelector('canvas')).toBeNull();
+  });
+
+  it('stops painting disco light specks once the ball starts to rise', () => {
+    celebrateApproval(source, only('disco'));
+
+    // Records the specks painted in each frame, keyed by seconds since launch.
+    const specks: [number, number][] = [];
+    const start = performance.now();
+    for (let now = start; frame; ) {
+      const tick = frame;
+      frame = undefined;
+      now += 1000 / 60;
+      ellipseCalls = 0;
+      tick(now);
+      specks.push([(now - start) / 1000, ellipseCalls]);
+    }
+
+    // The ball rests on its line for 3.6 seconds before it is pulled back up.
+    const resting = specks.filter(([t]) => t > 1.2 && t < 3.5);
+    const rising = specks.filter(([t]) => t > 3.65);
+    expect(resting.every(([, count]) => count > 0)).toBe(true);
+    expect(rising.length).toBeGreaterThan(0);
+    expect(rising.every(([, count]) => count === 0)).toBe(true);
   });
 });

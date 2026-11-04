@@ -544,9 +544,14 @@ function drawDisco(ctx: CanvasRenderingContext2D, piece: Piece) {
       );
     }
   }
+  ctx.restore();
+
+  // The specks go out as soon as the ball starts to rise.
+  if (piece.age >= DISCO_REST) return;
 
   // Each speck is light off one facet, so it sweeps across the page as the ball turns.
   const show = clamp01((piece.age - 0.7) / 0.4);
+  ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   for (let i = 0; i < piece.parts; i++) {
     // Spread the facets evenly over the sphere (a Fibonacci lattice).
