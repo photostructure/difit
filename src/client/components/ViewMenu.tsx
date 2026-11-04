@@ -1,4 +1,12 @@
-import { ChevronDown, Moon, Settings, SlidersHorizontal, Sun } from 'lucide-react';
+import {
+  AlignLeft,
+  ChevronDown,
+  Columns,
+  Moon,
+  Settings,
+  SlidersHorizontal,
+  Sun,
+} from 'lucide-react';
 
 import type { DiffViewMode } from '../../types/diff';
 
@@ -42,8 +50,13 @@ export function ViewMenu({
               type="button"
               aria-pressed={mode === value}
               onClick={() => onModeChange(value)}
-              className={`flex-1 border border-github-border px-3 py-2 ${mode === value ? 'bg-github-bg-tertiary font-medium' : ''}`}
+              className={`inline-flex flex-1 items-center justify-center gap-1.5 border border-github-border px-3 py-2 ${mode === value ? 'bg-github-bg-tertiary font-medium' : ''}`}
             >
+              {value === 'split' ? (
+                <Columns size={14} aria-hidden="true" />
+              ) : (
+                <AlignLeft size={14} aria-hidden="true" />
+              )}
               {value === 'split' ? 'Split' : 'Unified'}
             </button>
           ))}
