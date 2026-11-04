@@ -60,13 +60,11 @@ export function AgentUpdatesPanel({
         className="relative h-full w-full max-w-lg overflow-y-auto border-l border-github-border bg-github-bg-primary p-5 shadow-lg"
       >
         <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="font-semibold text-github-text-primary">
-            Unseen agent updates ({updates.length})
-          </h2>
+          <h2 className="font-semibold ui-label">Unseen agent updates ({updates.length})</h2>
           <button
             type="button"
             onClick={onClose}
-            className="rounded border border-github-border px-2 py-1 text-sm text-github-text-primary"
+            className="rounded border border-github-border px-2 py-1 text-sm ui-value"
           >
             Close updates
           </button>
@@ -85,12 +83,12 @@ export function AgentUpdatesPanel({
                   onClick={() => onSelect(update)}
                   className="w-full rounded border border-github-border p-3 text-left hover:bg-github-bg-secondary"
                 >
-                  <span className="mb-1 block text-xs font-medium text-github-text-secondary">
+                  <span className="mb-1 block text-xs font-medium ui-label">
                     {update.thread.scope === 'review'
                       ? 'Review conversation'
                       : `${update.thread.file}:${Array.isArray(update.thread.line) ? update.thread.line[0] : update.thread.line}`}
                   </span>
-                  <span className="mb-1 block whitespace-pre-wrap break-words text-sm text-github-text-primary">
+                  <span className="mb-1 block whitespace-pre-wrap break-words text-sm ui-value">
                     {update.message.body.length > 240
                       ? `${update.message.body.slice(0, 240)}…`
                       : update.message.body}

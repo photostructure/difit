@@ -183,7 +183,7 @@ export function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: S
     <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
       <div className="flex flex-col max-h-[calc(100vh-2rem)] bg-github-bg-secondary border border-github-border rounded-lg w-full max-w-3xl mx-4 pointer-events-auto overflow-hidden">
         <div className="shrink-0 flex items-center justify-between p-4 border-b border-github-border">
-          <h2 className="text-lg font-semibold text-github-text-primary flex items-center gap-2">
+          <h2 className="text-lg font-semibold ui-label flex items-center gap-2">
             <Settings size={20} />
             Settings
           </h2>
@@ -227,9 +227,7 @@ export function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: S
             {activeSection === 'appearance' && (
               <div className="space-y-6">
                 <div>
-                  <label className="block text-sm font-medium text-github-text-primary mb-2">
-                    Font Size
-                  </label>
+                  <label className="block text-sm font-medium ui-label mb-2">Font Size</label>
                   <div className="flex items-center gap-3">
                     <input
                       type="range"
@@ -245,16 +243,12 @@ export function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: S
                       }
                       className="flex-1 accent-github-accent"
                     />
-                    <span className="text-sm text-github-text-secondary w-8 text-right">
-                      {settings.fontSize}px
-                    </span>
+                    <span className="text-sm ui-value w-8 text-right">{settings.fontSize}px</span>
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-github-text-primary mb-2">
-                    Font Family
-                  </label>
+                  <label className="block text-sm font-medium ui-label mb-2">Font Family</label>
                   <select
                     value={settings.fontFamily}
                     onChange={(e) => onSettingsChange({ ...settings, fontFamily: e.target.value })}
@@ -269,9 +263,7 @@ export function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: S
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-github-text-primary mb-2">
-                    Theme
-                  </label>
+                  <label className="block text-sm font-medium ui-label mb-2">Theme</label>
                   <div className="flex gap-2">
                     {(['light', 'dark', 'auto'] as const).map((theme) => (
                       <button
@@ -291,9 +283,7 @@ export function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: S
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-github-text-primary mb-2">
-                    Color Vision
-                  </label>
+                  <label className="block text-sm font-medium ui-label mb-2">Color Vision</label>
                   <div className="flex gap-2">
                     {COLOR_VISION_MODES.map((mode) => {
                       const isSelected = (settings.colorVision ?? 'normal') === mode.id;
@@ -326,7 +316,7 @@ export function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: S
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-github-text-primary mb-2">
+                  <label className="block text-sm font-medium ui-label mb-2">
                     Syntax Highlighting Theme
                   </label>
                   <select
@@ -382,7 +372,7 @@ export function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: S
                 <div>
                   <label
                     htmlFor="auto-viewed-patterns"
-                    className="block text-sm font-medium text-github-text-primary mb-2"
+                    className="block text-sm font-medium ui-label mb-2"
                   >
                     Auto-Mark Viewed Patterns
                   </label>
@@ -408,9 +398,7 @@ export function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: S
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-github-text-primary mb-2">
-                    Open In Editor
-                  </label>
+                  <label className="block text-sm font-medium ui-label mb-2">Open In Editor</label>
                   <p className="text-sm text-github-text-secondary">
                     Set DIFIT_EDITOR before starting difit to choose an editor. If unset, difit uses
                     EDITOR when it names a preset; otherwise it uses VS Code. For a custom editor,

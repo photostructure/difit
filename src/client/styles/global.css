@@ -1,5 +1,28 @@
 @import "tailwindcss";
 
+/* Section/field labels are muted; their content and values use primary text. */
+.ui-label {
+  color: var(--color-github-text-secondary);
+}
+.ui-value {
+  color: var(--color-github-text-primary);
+}
+.ui-warning {
+  color: var(--color-yellow-btn-text);
+}
+
+@media (pointer: coarse) {
+  .review-toolbar button,
+  .review-menu button,
+  .review-panel button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .review-menu [role="checkbox"] {
+    min-height: 44px;
+  }
+}
+
 /* A native range crosses table cells in DOM order. Exclude the other side,
  * including syntax tokens with explicit select-text, when selecting split code. */
 .split-diff-selection[data-selection-side="old"] [data-diff-side="new"],

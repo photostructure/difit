@@ -90,7 +90,7 @@ export function RevisionDetailModal({
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="relative bg-github-bg-secondary border border-github-border rounded-lg shadow-lg w-full max-w-lg mx-4">
         <div className="flex items-center justify-between p-4 border-b border-github-border">
-          <h2 className="text-lg font-semibold text-github-text-primary">Detailed Diff</h2>
+          <h2 className="text-lg font-semibold ui-label">Detailed Diff</h2>
           <button
             onClick={onClose}
             className="text-github-text-secondary hover:text-github-text-primary p-1"
