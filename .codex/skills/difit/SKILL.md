@@ -49,6 +49,14 @@ only when setting up automatic delivery or diagnosing a host integration.
    short explanation with `--why`. Add reading-guide comments with repeatable
    `--comment` arguments: where to start, surprising behavior, and verified
    findings. Anchor each point to its line; skip self-explanatory code.
+   The viewer's **About** panel names the agent, thread title, and thread ID
+   that launched the review. difit fills in the agent (such as `Codex desktop`,
+   from this thread's rollout `originator`) and `$CODEX_THREAD_ID` itself;
+   override them with `--agent <host>` and `--agent-session-id <id>` when those
+   are wrong. Pass `--agent-session-name <title>` when you know the thread's
+   title, since Codex does not export it; never invent a title. They are set per
+   server at launch; `review create` on a reused server keeps the launching
+   chat's values.
 4. Launch once with `--background --keep-alive`. Read the finite
    `server.background` record: `port`, `pid`, and `url`. Its `url` is the reviewing
    link. Open it in the requested browser when browser tools are available.

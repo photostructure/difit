@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - Navigate unseen agent replies and edited messages from a persistent updates button, with previews and direct message jumps.
 - Report browser visibility and agent-listener presence; offer a resume prompt for agents that cannot receive idle notifications.
 - Stop `difit wait` with exit 4 when every selected review is unattended, after recovering existing human work.
+- Show the launching agent and its session's name and ID under **About**. The agent comes from `$CLAUDE_CODE_ENTRYPOINT` or the Codex thread's rollout, and the ID from `$CLAUDE_CODE_SESSION_ID` or `$CODEX_THREAD_ID`, unless `--agent` or `--agent-session-id` overrides them; `--agent-session-name` sets the name.
 
 - Discover launch events and agent JSON requests/responses through `difit schema` and command help.
 - Wait silently for human activity across review servers with `difit wait`; recover queued messages without implicit delivery receipts.
@@ -22,6 +23,7 @@ All notable changes to this project will be documented in this file.
 - Remove the separate `comment watch` command; retain snapshot recovery and companion commands.
 - Require `--no-jsonl --no-conversation` together to disable conversations; `--no-conversation` alone now exits with an error.
 - Route startup and disconnect diagnostics to stderr in both output modes; `--no-jsonl` uses human-readable comment and approval output on stdout.
+- Rename the header's **Repository** button to **About**.
 
 ## [5.1.0] - 2026-10-29
 

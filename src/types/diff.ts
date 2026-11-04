@@ -55,6 +55,9 @@ export interface ReviewContext {
   repositoryPath?: string;
   workingDirectory: string;
   hostname: string;
+  agent?: string;
+  agentSessionName?: string;
+  agentSessionId?: string;
 }
 
 export interface DiffResponse {

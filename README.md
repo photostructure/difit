@@ -21,9 +21,10 @@ This fork builds on Yoshiko's diff viewer with a review workflow for coding agen
 - **Intent and retained discussions:** choose Comment, Change request, or Question
   in one radio group, resolve
   and reopen it without losing the history, or explicitly delete it.
-- **Repository information:** open **Repository** beside **View** for the reviewed
-  repository, worktree, server, and launch directory in a right-side panel. The
-  browser title identifies the repository and port.
+- **Review information:** open **About** beside **View** for the launching agent
+  and its session's name and ID, the reviewed repository, worktree, server, and
+  launch directory in a right-side panel. The browser title identifies the
+  repository and port.
 
 The question marker and explicit thread deletion incorporate
 [upstream PR #482](https://github.com/yoshiko-pg/difit/pull/482).
@@ -237,32 +238,35 @@ Stdin mode is selected with intent-first rules:
 
 ## ⚙️ CLI Options
 
-| Flag                         | Default         | Description                                                                                             |
-| ---------------------------- | --------------- | ------------------------------------------------------------------------------------------------------- |
-| `<target>`                   | HEAD            | Commit hash, tag, HEAD~n, branch, or special arguments                                                  |
-| `[compare-with]`             | -               | Optional second commit to compare with (shows diff between the two)                                     |
-| `--merge-base`               | false           | Resolve the base revision with `git merge-base` before diffing (Git revision mode only)                 |
-| `--review <name>`            | -               | Capture uncommitted changes under a stable task name                                                    |
-| `--pathspec <git-pathspec>`  | -               | Filter a native named capture with repeatable Git pathspecs, including exclusions                       |
-| `--capture <file>`           | -               | Load an immutable capture artifact for a named review                                                   |
-| `--select <file-or-hunk-id>` | -               | Select exact file/hunk IDs from a capture; repeatable                                                   |
-| `--pr <url>`                 | -               | GitHub PR URL to review (e.g., https://github.com/owner/repo/pull/123)                                  |
-| `--comment <json>`           | -               | Inject initial comments (repeatable; accepts a JSON object or array)                                    |
-| `--commit-message <text>`    | -               | Seed the proposed commit message for the initial review                                                 |
-| `--why <text>`               | -               | Seed the rationale for the initial review                                                               |
-| `--port`                     | 4966            | Preferred port; falls back to +1 if occupied                                                            |
-| `--host`                     | 127.0.0.1       | Host address to bind server to (use 0.0.0.0 for external access)                                        |
-| `--no-open`                  | false           | Don't automatically open browser                                                                        |
-| `--clean`                    | false           | Clear all existing comments and viewed files on startup                                                 |
-| `--lgtm, --ship-it`          | true            | Show the LGTM toggle to grant or revoke approval while the review stays open                            |
-| `--conversation`             | true            | Enable conversation APIs (exact-thread replies, progress receipts, snapshots); required by `--jsonl`    |
-| `--include-untracked`        | false           | Include untracked files with `.`, `working`, or a native named capture                                  |
-| `--keep-alive`               | false           | Keep server running after browser disconnects (stop manually with Ctrl+C)                               |
-| `--jsonl`                    | true            | Emit JSON Lines on foreground stdout; diagnostics go to stderr                                          |
-| `--no-jsonl`                 | false           | Use human-readable foreground output                                                                    |
-| `--background`               | false           | Detach the server and output connection information; no live stdout stream                              |
-| `--context <lines>`          | git default (3) | Limit surrounding context lines per change (`0` shows changes only; not available with `--pr` or stdin) |
-| `--title <title>`            | -               | Custom browser tab title, to tell review sessions apart when several difit instances are open           |
+| Flag                          | Default         | Description                                                                                             |
+| ----------------------------- | --------------- | ------------------------------------------------------------------------------------------------------- |
+| `<target>`                    | HEAD            | Commit hash, tag, HEAD~n, branch, or special arguments                                                  |
+| `[compare-with]`              | -               | Optional second commit to compare with (shows diff between the two)                                     |
+| `--merge-base`                | false           | Resolve the base revision with `git merge-base` before diffing (Git revision mode only)                 |
+| `--review <name>`             | -               | Capture uncommitted changes under a stable task name                                                    |
+| `--pathspec <git-pathspec>`   | -               | Filter a native named capture with repeatable Git pathspecs, including exclusions                       |
+| `--capture <file>`            | -               | Load an immutable capture artifact for a named review                                                   |
+| `--select <file-or-hunk-id>`  | -               | Select exact file/hunk IDs from a capture; repeatable                                                   |
+| `--pr <url>`                  | -               | GitHub PR URL to review (e.g., https://github.com/owner/repo/pull/123)                                  |
+| `--comment <json>`            | -               | Inject initial comments (repeatable; accepts a JSON object or array)                                    |
+| `--commit-message <text>`     | -               | Seed the proposed commit message for the initial review                                                 |
+| `--why <text>`                | -               | Seed the rationale for the initial review                                                               |
+| `--port`                      | 4966            | Preferred port; falls back to +1 if occupied                                                            |
+| `--host`                      | 127.0.0.1       | Host address to bind server to (use 0.0.0.0 for external access)                                        |
+| `--no-open`                   | false           | Don't automatically open browser                                                                        |
+| `--clean`                     | false           | Clear all existing comments and viewed files on startup                                                 |
+| `--lgtm, --ship-it`           | true            | Show the LGTM toggle to grant or revoke approval while the review stays open                            |
+| `--conversation`              | true            | Enable conversation APIs (exact-thread replies, progress receipts, snapshots); required by `--jsonl`    |
+| `--include-untracked`         | false           | Include untracked files with `.`, `working`, or a native named capture                                  |
+| `--keep-alive`                | false           | Keep server running after browser disconnects (stop manually with Ctrl+C)                               |
+| `--jsonl`                     | true            | Emit JSON Lines on foreground stdout; diagnostics go to stderr                                          |
+| `--no-jsonl`                  | false           | Use human-readable foreground output                                                                    |
+| `--background`                | false           | Detach the server and output connection information; no live stdout stream                              |
+| `--context <lines>`           | git default (3) | Limit surrounding context lines per change (`0` shows changes only; not available with `--pr` or stdin) |
+| `--title <title>`             | -               | Custom browser tab title, to tell review sessions apart when several difit instances are open           |
+| `--agent <name>`              | detected        | Agent shown under **About**, from `$CLAUDE_CODE_ENTRYPOINT` or the Codex thread rollout's `originator`  |
+| `--agent-session-name <name>` | -               | Name of the agent session that launched the review, shown under **About**                               |
+| `--agent-session-id <id>`     | detected        | Agent session ID shown under **About**; `$CLAUDE_CODE_SESSION_ID` or `$CODEX_THREAD_ID`                 |
 
 ### Open in editor
 
@@ -301,7 +305,7 @@ difit includes a review comment system that makes it easy to provide feedback to
 
 The header keeps the current review, **View**, **Conversation**, **Updates**, and
 approval together. The review picker switches comparisons and shows capture details.
-**Repository** opens repository and server information in a right-side panel.
+**About** opens agent, session, repository, and server information in a right-side panel.
 **View** contains Split/Unified, whitespace, theme, and settings. Copy-all and agent
 resume actions live in **Conversation**; file-view progress sits above the file list.
 

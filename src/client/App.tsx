@@ -1,6 +1,6 @@
 import {
   Bell,
-  FolderGit2,
+  Info,
   GitBranch,
   MessageSquare,
   PanelLeftClose,
@@ -52,7 +52,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { SparkleAnimation } from './components/SparkleAnimation';
 import { ViewMenu } from './components/ViewMenu';
 import { CaptureDetails } from './components/CaptureDetails';
-import { RepositoryInfoPanel } from './components/RepositoryInfoPanel';
+import { AboutPanel } from './components/AboutPanel';
 import { HeaderMenu } from './components/HeaderMenu';
 import { ApprovalSplitButton } from './components/ApprovalSplitButton';
 import { ReviewProviders } from './contexts/ReviewProviders';
@@ -205,8 +205,8 @@ function App() {
   useEffect(() => () => clearTimeout(sparkleTimer.current), []);
   const [isCommentsListOpen, setIsCommentsListOpen] = useState(false);
   const [isAgentUpdatesOpen, setIsAgentUpdatesOpen] = useState(false);
-  const [isRepositoryInfoOpen, setIsRepositoryInfoOpen] = useState(false);
-  const closeRepositoryInfo = useCallback(() => setIsRepositoryInfoOpen(false), []);
+  const [isAboutOpen, setIsAboutOpen] = useState(false);
+  const closeAbout = useCallback(() => setIsAboutOpen(false), []);
   const [focusedAgentMessage, setFocusedAgentMessage] = useState<{
     threadId: string;
     messageId: string;
@@ -1524,7 +1524,7 @@ function App() {
       enabled:
         !isCommentsListOpen &&
         !isAgentUpdatesOpen &&
-        !isRepositoryInfoOpen &&
+        !isAboutOpen &&
         !isSettingsOpen &&
         !isHelpOpen &&
         !isRevisionModalOpen &&
@@ -1534,7 +1534,7 @@ function App() {
     [
       isCommentsListOpen,
       isAgentUpdatesOpen,
-      isRepositoryInfoOpen,
+      isAboutOpen,
       isSettingsOpen,
       isHelpOpen,
       isRevisionModalOpen,
@@ -1799,19 +1799,19 @@ function App() {
           />
           <button
             type="button"
-            aria-expanded={isRepositoryInfoOpen}
-            aria-controls="repository-info-panel"
+            aria-expanded={isAboutOpen}
+            aria-controls="about-panel"
             aria-haspopup="dialog"
-            aria-label="Repository info"
+            aria-label="About"
             className="inline-flex items-center gap-1.5 rounded-md border border-github-border px-3 py-1.5 font-medium hover:bg-github-bg-tertiary"
             onClick={() => {
               setIsCommentsListOpen(false);
               setIsAgentUpdatesOpen(false);
-              setIsRepositoryInfoOpen(true);
+              setIsAboutOpen(true);
             }}
           >
-            <FolderGit2 size={14} aria-hidden="true" />
-            Repository
+            <Info size={14} aria-hidden="true" />
+            About
           </button>
           <ReloadButton
             shouldReload={shouldReload}
@@ -1830,7 +1830,7 @@ function App() {
             }
             onClick={() => {
               setFocusedAgentMessage(null);
-              setIsRepositoryInfoOpen(false);
+              setIsAboutOpen(false);
               setIsCommentsListOpen(true);
             }}
             className="inline-flex items-center gap-1.5 rounded-md border border-github-border px-3 py-1.5 font-medium hover:bg-github-bg-tertiary"
@@ -1858,7 +1858,7 @@ function App() {
             className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 font-medium ${agentUpdates.length ? 'border-github-accent text-github-accent' : 'border-github-border text-github-text-primary'} hover:bg-github-bg-tertiary`}
             onClick={() => {
               setIsCommentsListOpen(false);
-              setIsRepositoryInfoOpen(false);
+              setIsAboutOpen(false);
               setFocusedAgentMessage(null);
               setIsAgentUpdatesOpen(true);
             }}
@@ -2124,9 +2124,7 @@ function App() {
         )}
 
         <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
-        {isRepositoryInfoOpen && (
-          <RepositoryInfoPanel context={diffData.reviewContext} onClose={closeRepositoryInfo} />
-        )}
+        {isAboutOpen && <AboutPanel context={diffData.reviewContext} onClose={closeAbout} />}
         {isAgentUpdatesOpen && (
           <AgentUpdatesPanel
             updates={agentUpdates}
@@ -2160,7 +2158,7 @@ function App() {
           }
           focusedMessage={focusedAgentMessage}
           onAgentMessageSeen={
-            !isSettingsOpen && !isHelpOpen && !isRevisionModalOpen && !isRepositoryInfoOpen
+            !isSettingsOpen && !isHelpOpen && !isRevisionModalOpen && !isAboutOpen
               ? markAgentMessageSeen
               : undefined
           }

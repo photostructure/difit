@@ -14,6 +14,12 @@ Use `pnpm run dev` from this repository's Git root, with no extra `--` separator
 Use `node dist/cli/index.js` for the companion comment commands below.
 Launch `pnpm run dev <target> [base]`. Targets: `.` (uncommitted),
 `working`, `staged`, or omit for HEAD. Add `--include-untracked` when needed.
+difit fills in the **About** panel's agent and session ID from Claude Code's
+environment; override them with `--agent` and `--agent-session-id`. A session
+started from another session's shell (such as `claude -p`) inherits its
+entrypoint, so pass `--agent` there. Add
+`--agent-session-name <title>` when you know this session's title; never invent
+a title.
 
 Keep one foreground server per Git root and target; retain its process handle.
 Stdout is JSONL by default (`--jsonl` is explicit; `--no-jsonl` selects human output).

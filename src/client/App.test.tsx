@@ -333,7 +333,7 @@ describe('App Component - Clear Comments Functionality', () => {
     });
     renderApp();
     expect(screen.queryByRole('region', { name: 'Review context' })).not.toBeInTheDocument();
-    fireEvent.click(await screen.findByRole('button', { name: 'Repository info' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'About' }));
     expect(await screen.findByRole('region', { name: 'Review context' })).toBeVisible();
     expect(screen.getByText('example-project')).toBeVisible();
     expect(document.title).toBe(`example-project — difit (${window.location.host})`);

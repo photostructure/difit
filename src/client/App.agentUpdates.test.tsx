@@ -175,7 +175,7 @@ describe('navigating unseen agent replies', () => {
     );
   });
 
-  it('keeps an inline agent reply unseen while Repository covers it', async () => {
+  it('keeps an inline agent reply unseen while About covers it', async () => {
     inline = true;
     threads.push({
       id: 'inline',
@@ -223,10 +223,10 @@ describe('navigating unseen agent replies', () => {
       });
     mount();
     await screen.findByRole('button', { name: '3 new agent updates' });
-    fireEvent.click(screen.getByRole('button', { name: 'Repository info' }));
+    fireEvent.click(screen.getByRole('button', { name: 'About' }));
     showInline();
     expect(screen.getByRole('button', { name: '3 new agent updates' })).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Close repository info' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close About' }));
     showInline();
     await screen.findByRole('button', { name: '2 new agent updates' });
   });

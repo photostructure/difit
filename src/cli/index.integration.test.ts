@@ -189,6 +189,76 @@ describe('actual CLI launch protocol', () => {
     15000,
   );
 
+  const allAgentFlags = [
+    '--agent',
+    'Codex desktop',
+    '--agent-session-name',
+    'Add agent session to About',
+    '--agent-session-id',
+    'session-1234',
+  ];
+  const claudeEnvironment = {
+    CLAUDE_CODE_ENTRYPOINT: 'cli',
+    CLAUDE_CODE_SESSION_ID: 'environment-session',
+  };
+  it.each([
+    {
+      label: 'a commit review',
+      args: ['HEAD', ...allAgentFlags],
+      environment: claudeEnvironment,
+      expected: {
+        agent: 'Codex desktop',
+        agentSessionName: 'Add agent session to About',
+        agentSessionId: 'session-1234',
+      },
+    },
+    {
+      label: 'a named review',
+      args: ['--review', 'agent-task', ...allAgentFlags],
+      environment: claudeEnvironment,
+      expected: {
+        agent: 'Codex desktop',
+        agentSessionName: 'Add agent session to About',
+        agentSessionId: 'session-1234',
+      },
+    },
+    {
+      label: 'an environment default with an --agent override',
+      args: ['HEAD', '--agent', 'Codex desktop'],
+      environment: claudeEnvironment,
+      expected: { agent: 'Codex desktop', agentSessionId: 'environment-session' },
+    },
+    {
+      label: 'environment defaults alone',
+      args: ['HEAD'],
+      environment: claudeEnvironment,
+      expected: { agent: 'Claude Code terminal', agentSessionId: 'environment-session' },
+    },
+  ])(
+    'reports the launching agent session for $label',
+    async ({ args, environment, expected }) => {
+      const fixture = launch(
+        [...args, '--background', '--host', '127.0.0.1', '--port', '0', '--no-open'],
+        undefined,
+        environment,
+      );
+      let background: BackgroundServerInfo | undefined;
+      try {
+        const exitCode = await fixture.closed;
+        const output = fixture.output().stdout.trim();
+        if (output) background = JSON.parse(output) as BackgroundServerInfo;
+        expect(exitCode, fixture.output().stderr).toBe(0);
+        const response = await fetch(new URL('/api/diff', background!.url));
+        const diff = (await response.json()) as DiffResponse;
+        expect(diff.reviewContext).toMatchObject(expected);
+      } finally {
+        if (background) process.kill(background.pid, 'SIGKILL');
+        await stop(fixture.child);
+      }
+    },
+    15000,
+  );
+
   it('rejects an explicitly empty named review instead of opening an ordinary comparison', async () => {
     // Ground truth: the documented 1–80 character name contract requires rejection of
     // node <compiled-cli> --review '' --host 127.0.0.1 --port 0 --no-open --keep-alive.

@@ -20,6 +20,7 @@ import {
   getGitRoot,
   readStdin,
 } from './utils.js';
+import { detectAgentSession } from './agent-session.js';
 import { createCommentCommand } from './comment.js';
 import { createSchemaCommand } from './schema.js';
 import { serverUrl } from './server-url.js';
@@ -105,6 +106,9 @@ interface CliOptions {
   context?: number;
   mergeBase?: boolean;
   title?: string;
+  agent?: string;
+  agentSessionName?: string;
+  agentSessionId?: string;
 }
 
 const program = new Command();
@@ -172,6 +176,15 @@ program
     'resolve the base revision with git merge-base before diffing (Git revision mode only)',
   )
   .option('--title <title>', 'custom browser tab title for this review session')
+  .option(
+    '--agent <name>',
+    'agent host that launched this review (default: from $CLAUDE_CODE_ENTRYPOINT or the originator in the Codex thread rollout)',
+  )
+  .option('--agent-session-name <name>', 'name of the agent session that launched this review')
+  .option(
+    '--agent-session-id <id>',
+    'ID of the agent session that launched this review (default: $CLAUDE_CODE_SESSION_ID or $CODEX_THREAD_ID)',
+  )
   .addHelpText(
     'after',
     `
@@ -281,6 +294,10 @@ Editor configuration (set before starting difit):
         options.open = false;
       }
 
+      const detectedAgent = await detectAgentSession(process.env);
+      options.agent ??= detectedAgent.agent;
+      options.agentSessionId ??= detectedAgent.agentSessionId;
+
       if (options.pr) {
         if (commitish !== 'HEAD' || compareWith) {
           console.error('Error: --pr option cannot be used with positional arguments');
@@ -330,6 +347,9 @@ Editor configuration (set before starting difit):
         const { launchUrl, port, isEmpty } = await startServer({
           namedReview,
           title: options.title,
+          agent: options.agent,
+          agentSessionName: options.agentSessionName,
+          agentSessionId: options.agentSessionId,
           repoPath: namedReview.capture.repositoryRoot,
           preferredPort: options.port,
           host: options.host,
@@ -395,6 +415,9 @@ Editor configuration (set before starting difit):
           why: options.why,
           keepAlive: options.keepAlive,
           title: options.title,
+          agent: options.agent,
+          agentSessionName: options.agentSessionName,
+          agentSessionId: options.agentSessionId,
           ...(commentImports.length > 0 ? { commentImports } : {}),
         });
 
@@ -467,6 +490,9 @@ Editor configuration (set before starting difit):
         diffMode: determineDiffMode(selection, compareWith),
         repoPath,
         title: options.title,
+        agent: options.agent,
+        agentSessionName: options.agentSessionName,
+        agentSessionId: options.agentSessionId,
         ...(commentImports.length > 0 ? { commentImports } : {}),
       });
 

@@ -1043,6 +1043,24 @@ describe('Server Integration Tests', () => {
       expect(data.reviewContext?.workingDirectory).toBe(process.cwd());
     });
 
+    it('identifies the agent session that launched the review', async () => {
+      const result = await startServer({
+        selection: { targetCommitish: 'HEAD', baseCommitish: 'HEAD^' },
+        preferredPort: 9096,
+        agent: 'Claude Code desktop',
+        agentSessionName: 'Add agent session to About',
+        agentSessionId: '823b3140-526b-4b91-82b1-920d0b66d08f',
+      });
+      servers.push(result.server);
+      const response = await fetch(`http://localhost:${result.port}/api/diff`);
+      const data = (await response.json()) as import('../types/diff.js').DiffResponse;
+      expect(data.reviewContext).toMatchObject({
+        agent: 'Claude Code desktop',
+        agentSessionName: 'Add agent session to About',
+        agentSessionId: '823b3140-526b-4b91-82b1-920d0b66d08f',
+      });
+    });
+
     it('GET /api/diff includes the custom title when --title is set', async () => {
       const result = await startServer({
         selection: { targetCommitish: 'HEAD', baseCommitish: 'HEAD^' },

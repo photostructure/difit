@@ -33,6 +33,32 @@ describe('ReviewContext', () => {
     expect(screen.getByText('Launched from')).toBeInTheDocument();
   });
 
+  it('identifies the agent session that launched the review', () => {
+    render(
+      <ReviewContext
+        context={{
+          ...context,
+          agent: 'Claude Code desktop',
+          agentSessionName: 'Add agent session to About',
+          agentSessionId: '823b3140-526b-4b91-82b1-920d0b66d08f',
+        }}
+      />,
+    );
+    expect(screen.getByText('Agent')).toBeVisible();
+    expect(screen.getByText('Claude Code desktop')).toBeVisible();
+    expect(screen.getByText('Agent session name')).toBeVisible();
+    expect(screen.getByText('Add agent session to About')).toBeVisible();
+    expect(screen.getByText('Agent session ID')).toBeVisible();
+    expect(screen.getByText('823b3140-526b-4b91-82b1-920d0b66d08f')).toBeVisible();
+  });
+
+  it('omits agent session rows when the launcher did not supply them', () => {
+    render(<ReviewContext context={context} />);
+    expect(screen.queryByText('Agent')).not.toBeInTheDocument();
+    expect(screen.queryByText('Agent session name')).not.toBeInTheDocument();
+    expect(screen.queryByText('Agent session ID')).not.toBeInTheDocument();
+  });
+
   it('keeps the tab title unchanged while metadata is opened and closed', () => {
     const previousTitle = document.title;
     const { unmount } = render(<ReviewContext context={context} />);

@@ -1,3 +1,4 @@
+import { X } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { useHotkeysContext } from 'react-hotkeys-hook';
 
@@ -5,7 +6,7 @@ import type { ReviewContext as ReviewContextData } from '../../types/diff';
 
 import { ReviewContext } from './ReviewContext';
 
-export function RepositoryInfoPanel({
+export function AboutPanel({
   context,
   onClose,
 }: {
@@ -52,30 +53,30 @@ export function RepositoryInfoPanel({
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
       <div
-        id="repository-info-panel"
+        id="about-panel"
         ref={panel}
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-label="Repository info"
+        aria-label="About"
         className="review-panel relative h-full w-full max-w-lg overflow-y-auto border-l border-github-border bg-github-bg-primary p-5 text-github-text-primary shadow-lg"
       >
         <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="ui-label font-semibold">Repository info</h2>
+          <h2 className="text-lg font-semibold ui-label">About</h2>
           <button
             type="button"
             onClick={onClose}
-            className="rounded border border-github-border px-2 py-1 text-sm"
-            aria-label="Close repository info"
+            className="text-github-text-secondary transition-colors hover:text-github-text-primary"
+            aria-label="Close About"
           >
-            Close
+            <X size={20} />
           </button>
         </div>
         {context ? (
           <ReviewContext context={context} />
         ) : (
           <p className="text-sm text-github-text-secondary">
-            Repository information is unavailable from this server.
+            Review information is unavailable from this server.
           </p>
         )}
       </div>

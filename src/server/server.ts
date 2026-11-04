@@ -93,6 +93,9 @@ export interface ServerOptions {
   repoPath?: string;
   contextLines?: number;
   title?: string;
+  agent?: string;
+  agentSessionName?: string;
+  agentSessionId?: string;
 }
 
 const GENERATED_STATUS_CACHE_TTL_MS = 60_000;
@@ -247,6 +250,9 @@ export async function startServer(options: ServerOptions): Promise<{
       : { repositoryName: await parser.getRepositoryName(), repositoryPath }),
     workingDirectory: process.cwd(),
     hostname: hostname(),
+    ...(options.agent ? { agent: options.agent } : {}),
+    ...(options.agentSessionName ? { agentSessionName: options.agentSessionName } : {}),
+    ...(options.agentSessionId ? { agentSessionId: options.agentSessionId } : {}),
   };
   const fileWatcher = new FileWatcherService();
   const presence = new ReviewPresence();

@@ -30,6 +30,16 @@ against the requested scope; a matching file may also contain another task's wor
 Capture operations leave the Git index and working files unchanged.
 For commits, launch `<difit-command> <target> [base]` using immutable SHAs when
 approval matters. Existing unnamed `.`, `working`, and `staged` remain available.
+The viewer's **About** panel names the agent, session, and session ID that
+launched the review. difit fills in the agent and ID itself from
+`$CLAUDE_CODE_ENTRYPOINT` and `$CLAUDE_CODE_SESSION_ID` (Codex:
+`$CODEX_THREAD_ID` and its thread rollout); override them with `--agent <host>`
+and `--agent-session-id <id>` when those are wrong or absent. A Claude Code
+session started from another session's shell (such as `claude -p`) inherits
+that session's entrypoint, so pass `--agent` there. Pass
+`--agent-session-name <title>` when you know this session's title, since no
+host exports it; never invent a title. They are set per server at launch;
+`review create` on a reused server keeps the launching session's values.
 
 To select part of an overlapping file, save an artifact and use its catalogue IDs:
 
