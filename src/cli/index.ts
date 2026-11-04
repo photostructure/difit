@@ -178,7 +178,7 @@ program
   .option('--title <title>', 'custom browser tab title for this review session')
   .option(
     '--agent <name>',
-    'agent host that launched this review (default: from $CLAUDE_CODE_ENTRYPOINT or the originator in the Codex thread rollout)',
+    'agent host that launched this review (default: from $CLAUDE_CODE_ENTRYPOINT, the originator in the Codex thread rollout, or $AI_AGENT)',
   )
   .option('--agent-session-name <name>', 'name of the agent session that launched this review')
   .option(

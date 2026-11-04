@@ -264,7 +264,7 @@ Stdin mode is selected with intent-first rules:
 | `--background`                | false           | Detach the server and output connection information; no live stdout stream                              |
 | `--context <lines>`           | git default (3) | Limit surrounding context lines per change (`0` shows changes only; not available with `--pr` or stdin) |
 | `--title <title>`             | -               | Custom browser tab title, to tell review sessions apart when several difit instances are open           |
-| `--agent <name>`              | detected        | Agent shown under **About**, from `$CLAUDE_CODE_ENTRYPOINT` or the Codex thread rollout's `originator`  |
+| `--agent <name>`              | detected        | Agent shown under **About**: `$CLAUDE_CODE_ENTRYPOINT`, the Codex rollout `originator`, or `$AI_AGENT`  |
 | `--agent-session-name <name>` | -               | Name of the agent session that launched the review, shown under **About**                               |
 | `--agent-session-id <id>`     | detected        | Agent session ID shown under **About**; `$CLAUDE_CODE_SESSION_ID` or `$CODEX_THREAD_ID`                 |
 

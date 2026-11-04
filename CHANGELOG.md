@@ -10,7 +10,7 @@ All notable changes to this project will be documented in this file.
 - Answer an agent reply with one click: **👍 Agreed**, **❓ Still unclear**, and **👎 Disagree** post ordinary replies beside **Write a reply...**.
 - Report browser visibility and agent-listener presence; offer a resume prompt for agents that cannot receive idle notifications.
 - Stop `difit wait` with exit 4 when every selected review is unattended, after recovering existing human work.
-- Show the launching agent and its session's name and ID under **About**. The agent comes from `$CLAUDE_CODE_ENTRYPOINT` or the Codex thread's rollout, and the ID from `$CLAUDE_CODE_SESSION_ID` or `$CODEX_THREAD_ID`, unless `--agent` or `--agent-session-id` overrides them; `--agent-session-name` sets the name.
+- Show the launching agent and its session's name and ID under **About**. The agent comes from `$CLAUDE_CODE_ENTRYPOINT`, the Codex thread's rollout, or `$AI_AGENT`, and the ID from `$CLAUDE_CODE_SESSION_ID` or `$CODEX_THREAD_ID`, unless `--agent` or `--agent-session-id` overrides them; `--agent-session-name` sets the name.
 
 - Discover launch events and agent JSON requests/responses through `difit schema` and command help.
 - Wait silently for human activity across review servers with `difit wait`; recover queued messages without implicit delivery receipts.

@@ -58,16 +58,23 @@ describe('detectAgentSession', () => {
     },
   );
 
-  it('leaves the agent unset when the Codex thread has no rollout', async () => {
-    expect(await detectAgentSession({ CODEX_THREAD_ID: threadId, CODEX_HOME: codexHome })).toEqual({
-      agentSessionId: threadId,
-    });
+  it('leaves the agent unset when the Codex thread has no rollout, even with AI_AGENT', async () => {
+    expect(
+      await detectAgentSession({
+        CODEX_THREAD_ID: threadId,
+        CODEX_HOME: codexHome,
+        AI_AGENT: 'github-copilot',
+      }),
+    ).toEqual({ agentSessionId: threadId });
   });
 
-  it('leaves the agent unset when Claude Code exports no entrypoint', async () => {
-    expect(await detectAgentSession({ CLAUDE_CODE_SESSION_ID: 'claude-session' })).toEqual({
-      agentSessionId: 'claude-session',
-    });
+  it('leaves the agent unset when Claude Code exports no entrypoint, even with AI_AGENT', async () => {
+    expect(
+      await detectAgentSession({
+        CLAUDE_CODE_SESSION_ID: 'claude-session',
+        AI_AGENT: 'claude-code_2-1-309_agent',
+      }),
+    ).toEqual({ agentSessionId: 'claude-session' });
   });
 
   it('prefers Claude Code when both hosts exported their variables', async () => {
@@ -80,6 +87,41 @@ describe('detectAgentSession', () => {
         CODEX_HOME: codexHome,
       }),
     ).toEqual({ agent: 'Claude Code terminal', agentSessionId: 'claude-session' });
+  });
+
+  it('names other agents from AI_AGENT, without a session ID', async () => {
+    expect(await detectAgentSession({ AI_AGENT: 'github-copilot' })).toEqual({
+      agent: 'github-copilot',
+    });
+  });
+
+  it('prefers the Claude Code variables over AI_AGENT', async () => {
+    expect(
+      await detectAgentSession({
+        AI_AGENT: 'claude-code_2-1-309_agent',
+        CLAUDE_CODE_ENTRYPOINT: 'cli',
+        CLAUDE_CODE_SESSION_ID: 'claude-session',
+      }),
+    ).toEqual({ agent: 'Claude Code terminal', agentSessionId: 'claude-session' });
+  });
+
+  it('names Claude Code from its entrypoint without a session ID, ignoring AI_AGENT', async () => {
+    expect(
+      await detectAgentSession({
+        CLAUDE_CODE_ENTRYPOINT: 'cli',
+        AI_AGENT: 'claude-code_2-1-309_agent',
+      }),
+    ).toEqual({ agent: 'Claude Code terminal' });
+  });
+
+  it('treats blank variables as unset', async () => {
+    expect(
+      await detectAgentSession({
+        CLAUDE_CODE_SESSION_ID: ' ',
+        CODEX_THREAD_ID: '',
+        AI_AGENT: '  ',
+      }),
+    ).toEqual({});
   });
 
   it('detects nothing outside an agent', async () => {

@@ -33,8 +33,9 @@ approval matters. Existing unnamed `.`, `working`, and `staged` remain available
 The viewer's **About** panel names the agent, session, and session ID that
 launched the review. difit fills in the agent and ID itself from
 `$CLAUDE_CODE_ENTRYPOINT` and `$CLAUDE_CODE_SESSION_ID` (Codex:
-`$CODEX_THREAD_ID` and its thread rollout); override them with `--agent <host>`
-and `--agent-session-id <id>` when those are wrong or absent. A Claude Code
+`$CODEX_THREAD_ID` and its thread rollout; other agents: `$AI_AGENT`, agent
+only); override them with `--agent <host>` and `--agent-session-id <id>` when
+those are wrong or absent. A Claude Code
 session started from another session's shell (such as `claude -p`) inherits
 that session's entrypoint, so pass `--agent` there. Pass
 `--agent-session-name <title>` when you know this session's title, since no

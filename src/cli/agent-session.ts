@@ -24,31 +24,39 @@ interface CodexSessionMeta {
   payload: { originator: string };
 }
 
+/** Returns `value` trimmed, or undefined when it is missing or only whitespace. */
+function toNotBlank(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 /**
  * Identifies the agent whose shell launched difit from the variables Claude Code
- * and Codex export to it. Both can be present when one agent runs inside the
- * other; Claude Code is chosen then, and --agent/--agent-session-id override it.
+ * and Codex export to it, falling back to AI_AGENT for other agents. Claude Code
+ * and Codex can both be present when one agent runs inside the other; Claude
+ * Code is chosen then, and --agent/--agent-session-id override it.
  * Claude Code keeps an inherited CLAUDE_CODE_ENTRYPOINT, so a session started
  * from another session's shell (such as `claude -p` run by a desktop session)
  * reports the outer host and must pass --agent itself.
- * The agent is left unset, never guessed, when the host's variables do not name it.
+ * Blank variables count as unset. The agent is left unset, never guessed, when
+ * the host's variables do not name it.
  */
 export async function detectAgentSession(env: NodeJS.ProcessEnv): Promise<AgentSession> {
-  const claudeSession = env.CLAUDE_CODE_SESSION_ID;
-  if (claudeSession) {
-    const entrypoint = env.CLAUDE_CODE_ENTRYPOINT;
+  const claudeSession = toNotBlank(env.CLAUDE_CODE_SESSION_ID);
+  const entrypoint = toNotBlank(env.CLAUDE_CODE_ENTRYPOINT);
+  if (claudeSession !== undefined || entrypoint !== undefined) {
     return {
-      ...(entrypoint
-        ? { agent: CLAUDE_CODE_ENTRYPOINTS[entrypoint] ?? `Claude Code (${entrypoint})` }
-        : {}),
-      agentSessionId: claudeSession,
+      ...(entrypoint === undefined
+        ? {}
+        : { agent: CLAUDE_CODE_ENTRYPOINTS[entrypoint] ?? `Claude Code (${entrypoint})` }),
+      ...(claudeSession === undefined ? {} : { agentSessionId: claudeSession }),
     };
   }
-  const codexThread = env.CODEX_THREAD_ID;
-  if (codexThread) {
+  const codexThread = toNotBlank(env.CODEX_THREAD_ID);
+  if (codexThread !== undefined) {
     // Codex exports no host name; the thread's rollout records it as `originator`.
     const originator = await readCodexOriginator(
-      env.CODEX_HOME ?? join(homedir(), '.codex'),
+      toNotBlank(env.CODEX_HOME) ?? join(homedir(), '.codex'),
       codexThread,
     );
     return {
@@ -58,7 +66,10 @@ export async function detectAgentSession(env: NodeJS.ProcessEnv): Promise<AgentS
       agentSessionId: codexThread,
     };
   }
-  return {};
+  // AI_AGENT (from Vercel's @vercel/detect-agent) is the cross-tool convention for
+  // naming an agent; it has no session ID counterpart.
+  const otherAgent = toNotBlank(env.AI_AGENT);
+  return otherAgent === undefined ? {} : { agent: otherAgent };
 }
 
 async function readCodexOriginator(
