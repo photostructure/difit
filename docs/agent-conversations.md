@@ -121,8 +121,9 @@ below. Schema discovery does not start a review server.
 Foreground stdout emits one JSON object per line by default. `--jsonl` selects
 this explicitly; `--no-jsonl` selects human-readable output. Startup diagnostics
 go to stderr in both modes; human-mode comment and approval output goes to stdout.
-There is no separate `comment watch` command or conversation long-poll
-endpoint. Read output from the running launch process between tool steps.
+There is no separate `comment watch` command. `difit wait` long-polls
+`GET /api/conversation/events`; see [waiting for human review](waiting-for-review.md).
+Otherwise, read output from the running launch process between tool steps.
 `--background` detaches the server and returns connection information without
 live stdout; use foreground `--keep-alive` for active agent conversations. JSONL
 and named reviews require conversation APIs. For unnamed reviews, disable
@@ -435,7 +436,7 @@ Keep the server and companion commands on the same build.
 
 The HTTP equivalents are `GET /api/conversation/snapshot` (returns
 `{reviews,cursor}`) and `POST /api/conversation/reply` (JSON body as above).
-There is no `GET /api/conversation/events` endpoint. Conversation APIs require
+`GET /api/conversation/events?after=<cursor>&wait=<ms>` returns `{events,cursor}`. Conversation APIs require
 `--conversation`, which is enabled by default. Responses include 400 for invalid
 input, 409 for stale message cursors, capture versions/digests, or summary versions, 404 for unknown
 review/thread/parent or a disabled endpoint, and 415 for non-JSON replies.
