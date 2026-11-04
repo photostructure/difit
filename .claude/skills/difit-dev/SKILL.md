@@ -82,7 +82,8 @@ summary edit revokes permission. Keep baseline-to-final changes within the appro
 feedback. Do not resolve/delete threads merely to satisfy conditions. See the
 [approval guide](../../../docs/approval-modes.md) and `schema address`.
 
-With an adopted LGTM rule, commit only the recorded scope/requested fixes after
+Approve as-is, or a fully addressed Approve after comments, on a review you opened
+is commit approval. Commit only the recorded scope/requested fixes after
 addressing comments, passing checks, and independent Codex/Claude LAND on final code.
 Require matching `approval.approved: true` in a fresh snapshot immediately before
 commit; revocation/restart invalidates prior button approval. Then commit without

@@ -147,7 +147,8 @@ is no cursor-based resumption or event replay. Use message `progress.cursor` for
 not a progress event's stream cursor or the snapshot's cursor. Do not promise
 listening after ending the turn without host support that forwards process output.
 
-With an adopted LGTM rule, commit only the recorded scope/requested fixes after
+Approve as-is, or a fully addressed Approve after comments, on a review you opened
+is commit approval. Commit only the recorded scope/requested fixes after
 addressing comments, passing checks, and independent Codex/Claude LAND on final code.
 Require matching `approval.approved: true` in a fresh snapshot immediately before
 commit. For named reviews also match `approval.captureVersion` and

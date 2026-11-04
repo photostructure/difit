@@ -113,7 +113,7 @@ only for an operation not covered here, rather than loading every guide on resum
 Read and honor the saved summary before committing. For conditional approval,
 `requested: true` records permission to address included feedback;
 `approved: false` still blocks the commit. Reply to each included question/fix,
-run checks and independent Codex/Claude review under the adopted LGTM rule,
+run checks and independent Codex/Claude review,
 recapture the final named patch, then certify each exact condition with
 `comment address`. Change requests require `fixed`, questions `answered`, and
 ordinary comments may use `acknowledged` when no action is needed.
@@ -123,7 +123,7 @@ in those resolved threads and report Noted without restarting their closed work.
 Recapture clears agent attestations but preserves reviewer confirmations. New or
 edited feedback, deletion, reopening, and summary changes revoke permission.
 
-Immediately before a commit under the adopted LGTM rule, read a fresh snapshot.
+Button approval is commit approval. Immediately before committing, read a fresh snapshot.
 Require `approval.approved: true`; for named reviews also match capture version,
 patch digest, and summary version. Compare the actual commit scope with the
 approved patch and feedback; later shared-tree changes do not acquire permission.

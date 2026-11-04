@@ -377,10 +377,12 @@ is `POST /api/conversation/status` and accepts the same JSON as the CLI.
 
 ## LGTM and commit approval
 
-When the user or project adopts this rule, clicking the LGTM image grants
-conditional approval to commit the reviewed scope, including requested fixes.
-The image stays visible: gray means unapproved, green means approved. A second
-click revokes approval and returns it to gray. Hover does not change its color.
+The header's approval button is commit approval for the reviewed scope, including
+requested fixes: **Approve as-is**, or **Approve after comments are addressed** from
+its menu once every included comment has completion evidence (see
+[approval modes](approval-modes.md)). After the checks below, commit without asking
+again in chat. The button turns accent-colored when approved and yellow while
+conditional approval is pending; **Revoke approval** in its menu withdraws it.
 The server stays running. Approval is scoped to the displayed selection and is
 restored after browser refresh; a server restart resets it to unapproved.
 
@@ -403,7 +405,7 @@ Match immutable targets to the saved SHA and mutable targets to the recorded
 patch scope. A closed tab, quiet stream, timeout, resolved thread, answer, or
 ordinary process exit is not approval.
 
-The toggle uses `GET /api/approval?base=<base>&target=<target>` and
+The approval button uses `GET /api/approval?base=<base>&target=<target>` and
 `POST /api/approval` with the same query. Approve with
 `{"approved":true,"summaryVersion":0}` using the displayed summary version;
 revoke with `{"approved":false}`. Include `baseMode=merge-base` where applicable.
@@ -412,8 +414,8 @@ For a named review, use `?review=<name>` and approve with
 using the displayed capture and summary values. Both
 require `--ship-it`. GET is read-only and returns the current approval; it also
 works without conversation mode. The legacy `POST /api/ship-it` approve-and-exit
-endpoint remains available to old clients, but the toggle never calls it. An old
-server without `/api/approval` must be rebuilt before using the toggle.
+endpoint remains available to old clients, but the button never calls it. An old
+server without `/api/approval` must be rebuilt before using the button.
 
 After LGTM, address every comment (answer questions or implement requested
 changes), run the relevant checks, and obtain LAND from both Codex and Claude
