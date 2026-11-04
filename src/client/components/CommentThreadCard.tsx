@@ -178,22 +178,27 @@ function ThreadMessageItem({
               filename={filename}
               syntaxTheme={syntaxTheme}
             />
+          </div>
+          <div className="flex shrink-0 items-start gap-2 pt-0.5">
             {message.origin === 'agent' && readState && (
               <button
                 type="button"
                 disabled={!readState.enabled}
+                title={unread ? 'Mark reply as read' : 'Mark reply as unread'}
                 aria-label={unread ? 'Mark reply as read' : 'Mark reply as unread'}
-                className="mt-2 rounded border border-github-border bg-github-bg-primary px-2 py-1 text-xs text-github-text-primary hover:bg-github-bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded border border-github-border bg-github-bg-tertiary p-1.5 transition-all hover:bg-github-bg-primary disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={(event) => {
                   event.stopPropagation();
                   readState.setRead(threadId, message.id, agentMessageRevision(message), unread);
                 }}
               >
-                {unread ? 'Mark read' : 'Mark unread'}
+                {/* A filled dot means unread, a hollow ring read; 8px plus margin fills the 12px icon box. */}
+                <span
+                  aria-hidden="true"
+                  className={`m-0.5 block h-2 w-2 rounded-full ${unread ? 'bg-blue-500' : 'border border-blue-500'}`}
+                />
               </button>
             )}
-          </div>
-          <div className="flex shrink-0 items-start gap-2 pt-0.5">
             {!isRootMessage && (
               <button
                 type="button"

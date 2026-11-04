@@ -4,6 +4,7 @@ import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { CommentThread } from '../../types/diff';
+import { AgentUpdatesContext, type AgentUpdatesReadState } from '../contexts/AgentUpdatesContext';
 
 import { CommentThreadCard } from './CommentThreadCard';
 import { copyTextToClipboard } from '../utils/clipboard';
@@ -491,6 +492,55 @@ describe('reply copy actions', () => {
 
     expect(screen.queryByTitle('Copy message')).not.toBeInTheDocument();
   });
+});
+
+describe('reply read state', () => {
+  const agentThread: CommentThread = {
+    ...mockThread,
+    messages: [
+      mockThread.messages[0]!,
+      { ...mockThread.messages[1]!, origin: 'agent', author: 'Agent' },
+    ],
+  };
+
+  const renderWithReadState = (readState: AgentUpdatesReadState) =>
+    render(
+      <AgentUpdatesContext.Provider value={readState}>
+        <CommentThreadCard
+          thread={agentThread}
+          onGeneratePrompt={() => ''}
+          onToggleThreadResolved={vi.fn()}
+          onRemoveThread={vi.fn()}
+          onReplyToThread={vi.fn().mockResolvedValue(undefined)}
+          onRemoveMessage={vi.fn()}
+          onUpdateMessage={vi.fn()}
+        />
+      </AgentUpdatesContext.Provider>,
+    );
+
+  it.each([
+    { unread: true, name: 'Mark reply as read', dot: 'bg-blue-500' },
+    { unread: false, name: 'Mark reply as unread', dot: 'border-blue-500' },
+  ])(
+    'shows the $dot dot first among the reply actions (unread: $unread)',
+    ({ unread, name, dot }) => {
+      const setRead = vi.fn();
+      renderWithReadState({
+        enabled: true,
+        unreadKeys: new Set(unread ? [JSON.stringify(['thread-1', 'message-2'])] : []),
+        setRead,
+      });
+
+      const button = screen.getByRole('button', { name });
+      expect(button).toHaveAttribute('title', name);
+      expect(button).toHaveTextContent('');
+      expect(button.querySelector('span')).toHaveClass(dot);
+      expect(button.nextElementSibling).toBe(screen.getByTitle('Copy message'));
+
+      fireEvent.click(button);
+      expect(setRead).toHaveBeenCalledWith('thread-1', 'message-2', expect.any(String), unread);
+    },
+  );
 });
 
 describe('thread disclosure and replies', () => {

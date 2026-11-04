@@ -351,8 +351,8 @@ export function CommentsListModal({
             </div>
           </fieldset>
           <p className="mt-3 text-xs text-github-text-secondary">
-            Blue dots mark unread replies. Click a reply or use Mark read; Mark unread reverses it.
-            Scrolling and closing this panel never mark replies read.
+            Blue dots mark unread replies. Click a reply or its filled dot to mark it read; click a
+            hollow dot to mark it unread. Scrolling and closing this panel never mark replies read.
           </p>
           <div className="mt-2 text-xs text-github-text-secondary">
             <span className="font-mono">j/k</span> or <span className="font-mono">↑/↓</span> to
