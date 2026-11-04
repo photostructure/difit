@@ -62,6 +62,13 @@ describe('observing agent messages', () => {
     rerender(<ObservedMessage enabled={false} markSeen={markSeen} />);
     visibility.mockReturnValue('visible');
     act(() => document.dispatchEvent(new Event('visibilitychange')));
+    // A queued observer callback from before the drawer opened must not mark background content seen.
+    act(() =>
+      observerCallback?.(
+        [{ isIntersecting: true, intersectionRatio: 0.2 } as IntersectionObserverEntry],
+        {} as IntersectionObserver,
+      ),
+    );
     expect(markSeen).not.toHaveBeenCalled();
     rerender(<ObservedMessage enabled markSeen={markSeen} />);
     act(() =>

@@ -1,5 +1,5 @@
 import { X } from 'lucide-react';
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo, type ReactNode } from 'react';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 
 import type { CommentIntent, CommentThread } from '../../types/diff';
@@ -11,6 +11,7 @@ import { CommentThreadCard } from './CommentThreadCard';
 import type { AppearanceSettings } from './SettingsModal';
 
 interface CommentsListModalProps {
+  headerActions?: ReactNode;
   focusedMessage?: { threadId: string; messageId: string } | null;
   onAgentMessageSeen?: (threadId: string, messageId: string, revision: string) => void;
   isOpen: boolean;
@@ -36,6 +37,7 @@ interface CommentsListModalProps {
 }
 
 export function CommentsListModal({
+  headerActions,
   focusedMessage,
   onAgentMessageSeen,
   isOpen,
@@ -220,11 +222,11 @@ export function CommentsListModal({
           className="relative flex h-full w-full max-w-2xl flex-col overflow-hidden border border-github-border bg-github-bg-primary shadow-lg"
         >
           <div className="sticky top-0 border-b border-github-border bg-github-bg-primary px-6 py-4">
+            {headerActions && (
+              <div className="mb-3 flex flex-wrap items-center gap-3">{headerActions}</div>
+            )}
             <div className="mb-2 flex items-center justify-between">
-              <h2
-                id="conversation-title"
-                className="text-lg font-semibold text-github-text-primary"
-              >
+              <h2 id="conversation-title" className="text-lg font-semibold ui-label">
                 Conversation
               </h2>
               <button

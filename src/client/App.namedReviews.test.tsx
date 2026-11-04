@@ -489,7 +489,7 @@ describe('named captures in the browser', () => {
       ),
     );
     expect(screen.queryByText('1 / 0 files viewed')).not.toBeInTheDocument();
-    expect(screen.getByText('All diffs difit-ed!')).toBeVisible();
+    expect(screen.getByText('0 / 0 files viewed')).toBeVisible();
     state.hideFiles = false;
     state.capture = { ...state.capture, version: 5, patchDigest: 'e'.repeat(64) };
     await act(async () => watch.captureChanged?.('task-a'));
@@ -518,7 +518,11 @@ describe('named captures in the browser', () => {
       state.capture.name = reviewName;
       window.history.replaceState(null, '', `/?review=${reviewName}`);
       renderApp();
-      await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: /^(Approve as-is|Approved as-is)$/ }),
+        ).toBeEnabled(),
+      );
       const posts = vi
         .mocked(fetch)
         .mock.calls.filter(
@@ -599,6 +603,7 @@ describe('named captures in the browser', () => {
     renderApp();
     const capture = await screen.findByRole('status', { name: 'Named review capture' });
     const identity = capture.textContent;
+    fireEvent.click(await screen.findByRole('button', { name: 'View' }));
     const toggle = screen.getByRole('checkbox', { name: 'Ignore Whitespace' });
     expect(toggle).toBeChecked();
     await screen.findByText('Whitespace-only changes hidden');
@@ -638,7 +643,11 @@ describe('named captures in the browser', () => {
   it('orders same-capture comment refreshes before updating threads and the next write version', async () => {
     const state = fixture([originalThread]);
     renderApp();
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: /^(Approve as-is|Approved as-is)$/ }),
+      ).toBeEnabled(),
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Conversation' }));
     const baseFetch = vi.mocked(fetch).getMockImplementation()!;
     let releaseOld: ((response: Response) => void) | undefined;
@@ -716,7 +725,11 @@ describe('named captures in the browser', () => {
   it('ignores prior-capture comment responses after fresh capture comments are loaded', async () => {
     const state = fixture([originalThread]);
     renderApp();
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: /^(Approve as-is|Approved as-is)$/ }),
+      ).toBeEnabled(),
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Conversation' }));
     const baseFetch = vi.mocked(fetch).getMockImplementation()!;
     let releaseOld: ((response: Response) => void) | undefined;
@@ -788,13 +801,12 @@ describe('named captures in the browser', () => {
     expect(identity).toHaveTextContent('task-a');
     expect(identity).toHaveTextContent('capture v1');
     expect(identity).toHaveTextContent(initialCapture.patchDigest.slice(0, 12));
-    expect(identity).toHaveClass('flex-wrap');
     expect(screen.queryByRole('button', { name: /Expand.*hidden lines/ })).not.toBeInTheDocument();
     expect(screen.getByText('1 line outside this patch')).toBeVisible();
-    const approve = screen.getByRole('button', { name: 'Approve' });
+    const approve = screen.getByRole('button', { name: /^(Approve as-is|Approved as-is)$/ });
     await waitFor(() => expect(approve).toBeEnabled());
     fireEvent.click(approve);
-    await waitFor(() => expect(approve).toHaveAttribute('aria-pressed', 'true'));
+    await waitFor(() => expect(approve).toHaveTextContent(/^Approved as-is$/));
     expect(fetch).toHaveBeenCalledWith(
       '/api/approval?review=task-a',
       expect.objectContaining({

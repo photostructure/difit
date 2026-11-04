@@ -1,0 +1,84 @@
+import { useEffect, useRef } from 'react';
+import { useHotkeysContext } from 'react-hotkeys-hook';
+
+import type { ReviewContext as ReviewContextData } from '../../types/diff';
+
+import { ReviewContext } from './ReviewContext';
+
+export function RepositoryInfoPanel({
+  context,
+  onClose,
+}: {
+  context?: ReviewContextData;
+  onClose: () => void;
+}) {
+  const panel = useRef<HTMLDivElement>(null);
+  const { enableScope, disableScope } = useHotkeysContext();
+  useEffect(() => {
+    const previous = document.activeElement;
+    panel.current?.focus();
+    disableScope('navigation');
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        onClose();
+      }
+      if (event.key !== 'Tab' || !panel.current) return;
+      const controls = [
+        ...panel.current.querySelectorAll<HTMLElement>('button, summary, a[href]'),
+      ].filter((control) => !control.hidden);
+      const first = controls[0],
+        last = controls.at(-1);
+      if (
+        event.shiftKey &&
+        (document.activeElement === first || document.activeElement === panel.current)
+      ) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    };
+    const element = panel.current;
+    element?.addEventListener('keydown', onKey);
+    return () => {
+      element?.removeEventListener('keydown', onKey);
+      enableScope('navigation');
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+    };
+  }, [onClose, enableScope, disableScope]);
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div
+        id="repository-info-panel"
+        ref={panel}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Repository info"
+        className="review-panel relative h-full w-full max-w-lg overflow-y-auto border-l border-github-border bg-github-bg-primary p-5 text-github-text-primary shadow-lg"
+      >
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="ui-label font-semibold">Repository info</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded border border-github-border px-2 py-1 text-sm"
+            aria-label="Close repository info"
+          >
+            Close
+          </button>
+        </div>
+        {context ? (
+          <ReviewContext context={context} />
+        ) : (
+          <p className="text-sm text-github-text-secondary">
+            Repository information is unavailable from this server.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}

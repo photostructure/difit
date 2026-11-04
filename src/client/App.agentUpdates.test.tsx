@@ -3,13 +3,22 @@ import { HotkeysProvider } from 'react-hotkeys-hook';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { DiffCommentThread } from '../types/diff';
+import type { ReviewApproval } from '../types/conversation';
 
 import App from './App';
 
-const callbacks = vi.hoisted(() => ({ comments: undefined as (() => Promise<void>) | undefined }));
+const callbacks = vi.hoisted(() => ({
+  comments: undefined as (() => Promise<void>) | undefined,
+  approval: undefined as (() => Promise<void>) | undefined,
+}));
 vi.mock('./hooks/useFileWatch', () => ({
-  useFileWatch: (_reload: unknown, comments: () => Promise<void>) => {
+  useFileWatch: (
+    _reload: unknown,
+    comments: () => Promise<void>,
+    approval: () => Promise<void>,
+  ) => {
     callbacks.comments = comments;
+    callbacks.approval = approval;
     return {
       shouldReload: false,
       isConnected: true,
@@ -34,8 +43,12 @@ const messages = (id: string, body: string) => [
 
 describe('navigating unseen agent replies', () => {
   let threads: DiffCommentThread[];
+  let inline: boolean;
+  let approvalState: ReviewApproval | null;
   afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
+    inline = false;
+    approvalState = null;
     localStorage.clear();
     window.history.replaceState(null, '', '/?base=HEAD&target=.');
     vi.stubGlobal(
@@ -81,7 +94,29 @@ describe('navigating unseen agent replies', () => {
             targetCommitish: '.',
             requestedBaseCommitish: 'HEAD',
             requestedTargetCommitish: '.',
-            files: [{ path: 'a.ts', status: 'modified', additions: 1, deletions: 0, chunks: [] }],
+            shipIt: approvalState !== null,
+            files: [
+              {
+                path: 'a.ts',
+                status: 'modified',
+                additions: 1,
+                deletions: 0,
+                chunks: inline
+                  ? [
+                      {
+                        header: '@@ -0,0 +1 @@',
+                        oldStart: 0,
+                        oldLines: 0,
+                        newStart: 1,
+                        newLines: 1,
+                        lines: [
+                          { type: 'add', content: 'const example = true;', newLineNumber: 1 },
+                        ],
+                      },
+                    ]
+                  : [],
+              },
+            ],
           }),
         );
       if (url.pathname === '/api/comments-json')
@@ -92,6 +127,8 @@ describe('navigating unseen agent replies', () => {
         return Promise.resolve(Response.json({ cursor: 'stream:0', reviews: [] }));
       if (url.pathname === '/api/review-summary')
         return Promise.resolve(Response.json({ commitMessage: '', rationale: '', version: 0 }));
+      if (url.pathname === '/api/approval' && approvalState)
+        return Promise.resolve(Response.json(approvalState));
       return Promise.resolve(new Response(null, { status: 404 }));
     });
   });
@@ -102,6 +139,97 @@ describe('navigating unseen agent replies', () => {
         <App />
       </HotkeysProvider>,
     );
+
+  it('updates the pending approval label when an approval-change notification arrives', async () => {
+    approvalState = {
+      approved: false,
+      requested: true,
+      mode: 'after-comments',
+      conditionalSupported: true,
+      conditions: threads.map((thread) => ({
+        threadId: thread.id,
+        messageId: thread.messages[0]?.id ?? '',
+        cursor: 'stream:1',
+        intent: 'change',
+      })),
+    };
+    mount();
+    expect(await screen.findByRole('button', { name: 'Approved · 2 pending' })).toBeVisible();
+    const condition = approvalState.conditions?.[0];
+    if (!condition) throw new Error('Missing condition');
+    condition.addressed = {
+      outcome: 'confirmed-by-reviewer',
+      evidence: 'Resolved by reviewer',
+      updatedAt: time,
+    };
+    await act(async () => {
+      await callbacks.approval?.();
+    });
+    expect(screen.getByRole('button', { name: 'Approved · 1 pending' })).toBeVisible();
+    approvalState = { approved: false, conditionalSupported: true };
+    await act(async () => {
+      await callbacks.approval?.();
+    });
+    expect(screen.getByRole('button', { name: 'Approve as-is' }).parentElement).toHaveClass(
+      'bg-github-bg-tertiary',
+    );
+  });
+
+  it('keeps an inline agent reply unseen while Repository covers it', async () => {
+    inline = true;
+    threads.push({
+      id: 'inline',
+      filePath: 'a.ts',
+      position: { side: 'new', line: 1 },
+      createdAt: time,
+      updatedAt: time,
+      messages: messages('inline-answer', 'Inline agent response'),
+    });
+    const probes: Probe[] = [];
+    class Probe {
+      active = false;
+      node?: Element;
+      constructor(readonly callback: IntersectionObserverCallback) {}
+      observe(node: Element) {
+        this.node = node;
+        this.active = true;
+        probes.push(this);
+      }
+      disconnect() {
+        this.active = false;
+      }
+      unobserve() {
+        this.active = false;
+      }
+    }
+    vi.stubGlobal('IntersectionObserver', Probe);
+    const showInline = () =>
+      act(() => {
+        for (const probe of probes)
+          if (
+            probe.active &&
+            probe.node?.getAttribute('data-comment-message-id') === 'inline-answer'
+          )
+            probe.callback(
+              [
+                {
+                  isIntersecting: true,
+                  intersectionRatio: 0.5,
+                  target: probe.node,
+                } as IntersectionObserverEntry,
+              ],
+              probe as unknown as IntersectionObserver,
+            );
+      });
+    mount();
+    await screen.findByRole('button', { name: '3 new agent updates' });
+    fireEvent.click(screen.getByRole('button', { name: 'Repository info' }));
+    showInline();
+    expect(screen.getByRole('button', { name: '3 new agent updates' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Close repository info' }));
+    showInline();
+    await screen.findByRole('button', { name: '2 new agent updates' });
+  });
 
   it('keeps previews unseen, jumps into resolved/outdated conversations, and persists seen revisions', async () => {
     const first = mount();

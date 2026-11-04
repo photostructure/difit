@@ -24,6 +24,7 @@ import {
   normalizeBaseMode,
   getDiffSelectionKey,
 } from '../../utils/diffSelection';
+import { CaptureDetails } from './CaptureDetails';
 
 export interface RecentReview {
   selection: DiffSelection;
@@ -31,9 +32,11 @@ export interface RecentReview {
   threadCount: number;
   capture?: NamedReviewMetadata;
 }
+
 const EMPTY_RECENT_REVIEWS: RecentReview[] = [];
 
 interface DiffQuickMenuProps {
+  capture?: NamedReviewMetadata;
   options: RevisionsResponse;
   selection: DiffSelection;
   resolvedBaseRevision?: string;
@@ -121,6 +124,7 @@ const resolveDisplayLabel = (
 };
 
 export function DiffQuickMenu({
+  capture,
   options,
   selection,
   resolvedBaseRevision,
@@ -455,6 +459,7 @@ export function DiffQuickMenu({
             className="bg-github-bg-secondary border border-github-border rounded shadow-lg z-50 w-[320px] max-h-[400px] overflow-y-auto"
             {...getFloatingProps()}
           >
+            {capture && <CaptureDetails capture={capture} />}
             {/* Search box */}
             <div className="sticky top-0 z-10 border-b border-github-border bg-github-bg-secondary p-2">
               <div className="flex items-center gap-2 rounded border border-github-border bg-github-bg-primary px-2 py-1.5 focus-within:border-blue-600">

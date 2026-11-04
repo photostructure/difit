@@ -14,15 +14,16 @@ This fork builds on Yoshiko's diff viewer with a review workflow for coding agen
   when the agent reports its activity. This does not wake an idle agent automatically.
 - **Named task captures:** freeze selected uncommitted changes, keep discussions
   and the proposed commit under one task name, and explicitly update the capture
-  as fixes land. Capture changes revoke LGTM.
+  as fixes land. Capture changes revoke as-is approval; conditional approval keeps
+  reviewer confirmations and requires fresh agent evidence for the remaining comments.
 - **Reversible LGTM:** approval stays visible and can be revoked. Conversations
-  and the approval toggle are enabled by default; approval starts off.
+  and approval actions are enabled by default; approval starts off.
 - **Intent and retained discussions:** choose Comment, Change request, or Question
   in one radio group, resolve
   and reopen it without losing the history, or explicitly delete it.
-- **Repository information:** expand the Repository info node in the file tree to
-  see the reviewed repository, worktree, server, and launch directory. The browser
-  title identifies the repository and port; the disclosure fits mobile screens.
+- **Repository information:** open **Repository** beside **View** for the reviewed
+  repository, worktree, server, and launch directory in a right-side panel. The
+  browser title identifies the repository and port.
 
 The question marker and explicit thread deletion incorporate
 [upstream PR #482](https://github.com/yoshiko-pg/difit/pull/482).
@@ -40,8 +41,9 @@ If it does not advertise `--jsonl`, that build predates the launch JSONL protoco
 use `--no-conversation` alone to disable conversations, or use a source build
 that advertises `--jsonl` for the JSONL behavior and flags described here.
 
-Live agent conversations and the reversible LGTM approval toggle are enabled by default.
-Approval starts off; click LGTM to approve or revoke. Use `--no-lgtm` for a read-only review
+Live agent conversations and the approval split button are enabled by default.
+Approval starts off. The main area approves as-is; the arrow offers conditional
+approval and **Revoke approval**. Use `--no-lgtm` for a read-only review
 and `--no-jsonl --no-conversation` to disable conversations. `--lgtm` and `--ship-it` are aliases.
 The agent must read the launch process output and answer comments; the viewer does not start an agent.
 See [the agent conversation protocol](docs/agent-conversations.md).
@@ -292,11 +294,24 @@ difit includes a review comment system that makes it easy to provide feedback to
 4. **Copy All**: Use "Copy All Prompt" to copy all comments in a structured format
 5. **Persistent Storage**: Comments are saved in browser localStorage per commit
 
+### Compact review controls
+
+The header keeps the current review, **View**, **Conversation**, **Updates**, and
+approval together. The review picker switches comparisons and shows capture details.
+**Repository** opens repository and server information in a right-side panel.
+**View** contains Split/Unified, whitespace, theme, and settings. Copy-all and agent
+resume actions live in **Conversation**; file-view progress sits above the file list.
+
+The approval split button offers **Approve as-is** and **Approve after comments are
+addressed**. Conditional approval stays pending until every recorded comment revision
+has completion evidence or is confirmed by the reviewer. See [approval modes](docs/approval-modes.md) for
+agent commands, capture guards, and the meaning of the output fields.
+
 ### Review-wide conversations
 
 Open **Conversation** in the header to see the review's discussions in a side panel.
 
-The **Agent updates** button shows how many agent messages you have not seen.
+The **Updates** button shows how many agent messages you have not seen.
 Open it for previews, then select an update to jump to the exact message, including
 replies in resolved or outdated threads. Previews stay unseen. Messages become seen
 when at least 10% of the message card appears in a visible tab, or when selected

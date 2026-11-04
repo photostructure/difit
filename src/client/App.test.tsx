@@ -14,6 +14,11 @@ import { useFileWatch } from './hooks/useFileWatch';
 import { useViewedFiles } from './hooks/useViewedFiles';
 import { useViewport } from './hooks/useViewport';
 
+async function openViewMenu() {
+  const button = await screen.findByRole('button', { name: 'View' });
+  if (!screen.queryByRole('button', { name: 'Unified' })) fireEvent.click(button);
+}
+
 // Mock the useViewport hook
 vi.mock('./hooks/useViewport', () => ({
   useViewport: vi.fn(() => ({ isMobile: false, isDesktop: true })),
@@ -243,6 +248,7 @@ it('filters stdin whitespace locally without replacing the canonical patch', asy
   const diffRequests = () =>
     vi.mocked(fetch).mock.calls.filter(([url]) => String(url).startsWith('/api/diff'));
   const requestsBefore = diffRequests().length;
+  await openViewMenu();
   fireEvent.click(screen.getByRole('checkbox', { name: 'Ignore Whitespace' }));
   await waitFor(() =>
     expect(document.querySelectorAll('[data-diff-line-row="true"]').length).toBeGreaterThan(0),
@@ -298,9 +304,11 @@ describe('App Component - Clear Comments Functionality', () => {
       },
     });
     renderApp();
+    expect(screen.queryByRole('region', { name: 'Review context' })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Repository info' }));
     expect(await screen.findByRole('region', { name: 'Review context' })).toBeVisible();
-    fireEvent.click(screen.getByText('Repository info'));
     expect(screen.getByText('example-project')).toBeVisible();
+    expect(document.title).toBe(`example-project — difit (${window.location.host})`);
     expect(screen.getByText('Files changed (1)')).toBeVisible();
     vi.mocked(useViewport).mockReturnValue({ isMobile: false, isDesktop: true });
   });
@@ -316,6 +324,7 @@ describe('App Component - Clear Comments Functionality', () => {
   describe('Copy All Prompt Button', () => {
     it('toggles between dark and light themes', async () => {
       renderApp();
+      await openViewMenu();
 
       fireEvent.click(
         await screen.findByRole('button', {
@@ -353,6 +362,7 @@ describe('App Component - Clear Comments Functionality', () => {
 
       renderApp();
 
+      fireEvent.click(await screen.findByRole('button', { name: 'Conversation' }));
       fireEvent.click(await screen.findByText(/Copy All Prompt/));
 
       await waitFor(() => {
@@ -387,6 +397,7 @@ describe('App Component - Clear Comments Functionality', () => {
 
       renderApp();
 
+      fireEvent.click(await screen.findByRole('button', { name: 'Conversation' }));
       await waitFor(() => {
         // Find and click the dropdown toggle button (chevron)
         const dropdownToggle = screen.getByTitle('More options');
@@ -406,6 +417,7 @@ describe('App Component - Clear Comments Functionality', () => {
 
       renderApp();
 
+      fireEvent.click(await screen.findByRole('button', { name: 'Conversation' }));
       await waitFor(() => {
         // First, open the dropdown
         const dropdownToggle = screen.getByTitle('More options');
@@ -719,19 +731,20 @@ describe('App Component - Ship it', () => {
     renderApp();
 
     await screen.findByText('0 / 1 files viewed');
-    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /^(Approve as-is|Approved as-is)$/ }),
+    ).not.toBeInTheDocument();
   });
 
-  it('shows a plain approval button and toggles approval on and off', async () => {
+  it('approves from the main button and revokes from its options', async () => {
     mockFetch({ ...mockDiffResponse, shipIt: true });
 
     renderApp();
-    const button = await screen.findByRole('button', { name: 'Approve' });
+    const button = await screen.findByRole('button', { name: /^(Approve as-is|Approved as-is)$/ });
     await waitFor(() => expect(button).toBeEnabled());
-    expect(button).toHaveTextContent(/^Approve$/);
+    expect(button).toHaveTextContent(/^Approve as-is$/);
     expect(button.querySelector('img')).toBeNull();
-    expect(button).toHaveAttribute('aria-pressed', 'false');
-    expect(button).toHaveAttribute('title', 'Approve this review');
+    expect(button).toHaveAttribute('title', 'Approve the reviewed patch as-is');
     fireEvent.click(button);
 
     await waitFor(() => {
@@ -741,16 +754,16 @@ describe('App Component - Ship it', () => {
         body: JSON.stringify({ approved: true, summaryVersion: 0 }),
       });
     });
-    await waitFor(() => expect(button).toHaveAttribute('aria-pressed', 'true'));
+    await waitFor(() => expect(button).toHaveTextContent(/^Approved as-is$/));
     expect(button).toBeEnabled();
-    expect(button).toHaveTextContent(/^Approved$/);
-    expect(button).toHaveAttribute('title', 'Revoke commit approval');
+    expect(button).toHaveAttribute('title', 'Approve the reviewed patch as-is');
     expect(button.querySelector('img')).toBeNull();
     expect(screen.queryByText('Shipped')).not.toBeInTheDocument();
-    fireEvent.click(button);
-    await waitFor(() => expect(button).toHaveAttribute('aria-pressed', 'false'));
-    expect(button).toHaveTextContent(/^Approve$/);
-    expect(button).toHaveAttribute('title', 'Approve this review');
+    fireEvent.click(screen.getByRole('button', { name: 'Approval options' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Revoke approval' }));
+    await waitFor(() => expect(button).toHaveTextContent(/^Approve as-is$/));
+    expect(button).toHaveTextContent(/^Approve as-is$/);
+    expect(button).toHaveAttribute('title', 'Approve the reviewed patch as-is');
     expect(button).toBeEnabled();
     expect(button.querySelector('img')).toBeNull();
     expect(global.fetch).toHaveBeenCalledWith('/api/approval?base=HEAD%5E&target=HEAD', {
@@ -763,7 +776,9 @@ describe('App Component - Ship it', () => {
   it('edits review intent and waits for the summary to be saved before approval', async () => {
     mockFetch({ ...mockDiffResponse, shipIt: true });
     renderApp();
-    const approval = await screen.findByRole('button', { name: 'Approve' });
+    const approval = await screen.findByRole('button', {
+      name: /^(Approve as-is|Approved as-is)$/,
+    });
     await waitFor(() => expect(approval).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: /Change summary/ }));
     fireEvent.change(screen.getByLabelText('Why this change'), {
@@ -869,7 +884,8 @@ describe('App Component - Approval celebration', () => {
       window.dispatchEvent(new PopStateEvent('popstate'));
     });
   };
-  const approveButton = () => screen.getByRole('button', { name: 'Approve' });
+  const approveButton = () =>
+    screen.getByRole('button', { name: /^(Approve as-is|Approved as-is)$/ });
 
   // Before the burst was fired from the click handler, returning to an approved
   // review remounted the celebration and fired a second burst with no click.
@@ -877,19 +893,20 @@ describe('App Component - Approval celebration', () => {
     renderApp();
     await waitFor(() => expect(approveButton()).toBeEnabled());
     fireEvent.click(approveButton());
-    await waitFor(() => expect(approveButton()).toHaveAttribute('aria-pressed', 'true'));
+    await waitFor(() => expect(approveButton()).toHaveTextContent(/^Approved as-is$/));
     expect(bursts).toBe(1);
 
     navigate('?base=main&target=feature');
     await waitFor(() => expect(window.location.search).toContain('base=main'));
-    await waitFor(() => expect(approveButton()).toHaveAttribute('aria-pressed', 'false'));
+    await waitFor(() => expect(approveButton()).toHaveTextContent(/^Approve as-is$/));
 
     navigate('?base=HEAD%5E&target=HEAD');
-    await waitFor(() => expect(approveButton()).toHaveAttribute('aria-pressed', 'true'));
+    await waitFor(() => expect(approveButton()).toHaveTextContent(/^Approved as-is$/));
     expect(bursts).toBe(1);
 
-    fireEvent.click(approveButton());
-    await waitFor(() => expect(approveButton()).toHaveAttribute('aria-pressed', 'false'));
+    fireEvent.click(screen.getByRole('button', { name: 'Approval options' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Revoke approval' }));
+    await waitFor(() => expect(approveButton()).toHaveTextContent(/^Approve as-is$/));
     expect(bursts).toBe(1);
   });
 
@@ -910,14 +927,14 @@ describe('App Component - Approval celebration', () => {
 
     navigate('?base=main&target=feature');
     await waitFor(() => expect(window.location.search).toContain('base=main'));
-    await waitFor(() => expect(approveButton()).toHaveAttribute('aria-pressed', 'false'));
+    await waitFor(() => expect(approveButton()).toHaveTextContent(/^Approve as-is$/));
     await act(async () => {
       releaseApprovalPost();
       await approvalPostGate;
     });
 
     await waitFor(() => expect(approveButton()).toBeEnabled());
-    expect(approveButton()).toHaveAttribute('aria-pressed', 'false');
+    expect(approveButton()).toHaveTextContent(/^Approve as-is$/);
     expect(bursts).toBe(0);
   });
 });
@@ -940,7 +957,9 @@ describe('App Component - Ship it delivery', () => {
 
     renderApp();
 
-    expect(await screen.findByRole('button', { name: 'Approve' })).toBeDisabled();
+    expect(
+      await screen.findByRole('button', { name: /^(Approve as-is|Approved as-is)$/ }),
+    ).toBeDisabled();
   });
 
   it('waits for a final comment save and approves the displayed selection', async () => {
@@ -962,7 +981,7 @@ describe('App Component - Ship it delivery', () => {
     });
 
     renderApp();
-    const button = await screen.findByRole('button', { name: 'Approve' });
+    const button = await screen.findByRole('button', { name: /^(Approve as-is|Approved as-is)$/ });
     await waitFor(() => expect(button).toBeEnabled());
     fireEvent.click(button);
 
@@ -996,7 +1015,7 @@ describe('App Component - Ship it delivery', () => {
     });
 
     renderApp();
-    const button = await screen.findByRole('button', { name: 'Approve' });
+    const button = await screen.findByRole('button', { name: /^(Approve as-is|Approved as-is)$/ });
     await waitFor(() => expect(button).toBeEnabled());
     fireEvent.click(button);
 
@@ -1005,7 +1024,7 @@ describe('App Component - Ship it delivery', () => {
       expect.stringContaining('/api/approval'),
       expect.objectContaining({ method: 'POST' }),
     );
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /^(Approve as-is|Approved as-is)$/ })).toBeEnabled();
   });
 
   it.each([{ failure: 'http' }, { failure: 'network' }])(
@@ -1023,12 +1042,16 @@ describe('App Component - Ship it delivery', () => {
       });
 
       renderApp();
-      const button = await screen.findByRole('button', { name: 'Approve' });
+      const button = await screen.findByRole('button', {
+        name: /^(Approve as-is|Approved as-is)$/,
+      });
       await waitFor(() => expect(button).toBeEnabled());
       fireEvent.click(button);
 
       expect(await screen.findByRole('alert')).toHaveTextContent('Could not update approval');
-      expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
+      expect(
+        screen.getByRole('button', { name: /^(Approve as-is|Approved as-is)$/ }),
+      ).toBeEnabled();
     },
   );
 });
@@ -1294,6 +1317,7 @@ describe('App Component - Viewed files reload', () => {
       expect(getDiffCallCount()).toBe(1);
     });
 
+    await openViewMenu();
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Ignore Whitespace' }));
     await waitFor(() => {
       expect(getDiffCallCount()).toBe(2);
@@ -1451,8 +1475,7 @@ describe('App Component - Comment sync', () => {
 
     renderApp();
 
-    fireEvent.click(await screen.findByTitle('More options'));
-    fireEvent.click(await screen.findByText('View All Comments'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Conversation' }));
 
     expect(await screen.findByText('User')).toBeInTheDocument();
     expect(screen.getByText('Reviewer')).toBeInTheDocument();
@@ -1466,10 +1489,11 @@ describe('App Component - Diff Mode Persistence', () => {
 
     renderApp();
 
+    await openViewMenu();
     const unifiedButton = await screen.findByRole('button', { name: 'Unified' });
 
     await waitFor(() => {
-      expect(unifiedButton).toHaveClass('bg-github-bg-primary');
+      expect(unifiedButton).toHaveAttribute('aria-pressed', 'true');
     });
   });
 
@@ -1478,6 +1502,7 @@ describe('App Component - Diff Mode Persistence', () => {
 
     renderApp();
 
+    await openViewMenu();
     const unifiedButton = await screen.findByRole('button', { name: 'Unified' });
     fireEvent.click(unifiedButton);
 
@@ -1496,11 +1521,12 @@ describe('App Component - Diff Mode Persistence', () => {
 
     renderApp();
 
+    await openViewMenu();
     const unifiedButton = await screen.findByRole('button', { name: 'Unified' });
     fireEvent.click(unifiedButton);
 
     await waitFor(() => {
-      expect(unifiedButton).toHaveClass('bg-github-bg-primary');
+      expect(unifiedButton).toHaveAttribute('aria-pressed', 'true');
     });
 
     const refreshButton = await screen.findByRole('button', { name: 'Refresh' });
@@ -1513,7 +1539,7 @@ describe('App Component - Diff Mode Persistence', () => {
     });
 
     await waitFor(() => {
-      expect(unifiedButton).toHaveClass('bg-github-bg-primary');
+      expect(unifiedButton).toHaveAttribute('aria-pressed', 'true');
     });
     mockWatchState.shouldReload = false;
     mockWatchState.lastChangeType = null;
@@ -1707,7 +1733,7 @@ describe('App Component - Merge-base selection', () => {
     renderApp();
 
     await waitFor(() => {
-      expect(screen.getByText('Reviewing:')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'View' })).toBeInTheDocument();
     });
 
     await act(async () => {
@@ -1793,6 +1819,7 @@ describe('App Component - Revision-aware refetching', () => {
       expect(String(diffCalls[1]?.[0])).toContain('target=HEAD%5E');
     });
 
+    await openViewMenu();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Ignore Whitespace' }));
 
     await waitFor(() => {
@@ -2191,6 +2218,7 @@ describe('App Component - Review navigation', () => {
         expect(vi.mocked(useDiffComments).mock.calls.at(-1)?.slice(0, 2)).toEqual(['base-a', '.']),
       );
       expect(new URLSearchParams(window.location.search).get('base')).toBe('HEAD');
+      await openViewMenu();
       fireEvent.click(screen.getByRole('checkbox', { name: 'Ignore Whitespace' }));
       await waitFor(() => {
         const calls = vi
@@ -2527,7 +2555,17 @@ describe('App Component - Custom tab title', () => {
   });
 
   it('sets document.title from the diff response when --title is provided', async () => {
-    mockFetch({ ...mockDiffResponse, title: 'DEV-1234 review' });
+    mockFetch({
+      ...mockDiffResponse,
+      title: 'DEV-1234 review',
+      reviewContext: {
+        source: 'git',
+        repositoryName: 'example-project',
+        repositoryPath: '/work/repo',
+        workingDirectory: '/work/repo',
+        hostname: 'host',
+      },
+    });
 
     renderApp();
 

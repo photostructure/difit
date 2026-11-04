@@ -27,7 +27,13 @@ export function useSeenAgentMessage(
     let visible = false;
     let seen = false;
     const observeVisibility = () => {
-      if (seen || !visible || document.visibilityState !== 'visible') return;
+      if (
+        seen ||
+        !visible ||
+        !latest.current.context?.enabled ||
+        document.visibilityState !== 'visible'
+      )
+        return;
       seen = true;
       context.markSeen(threadId, message.id, revision);
       observer.disconnect();

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import type { ReviewContext as ReviewContextData } from '../../types/diff';
@@ -15,11 +15,8 @@ const context: ReviewContextData = {
 describe('ReviewContext', () => {
   it('identifies the review and exposes selectable details on demand', () => {
     const { container } = render(<ReviewContext context={context} />);
-    expect(screen.getByText('Repository info')).toBeVisible();
-    const details = container.querySelector('details')!;
-    expect(details.open).toBe(false);
-    fireEvent.click(container.querySelector('summary')!);
-    expect(details.open).toBe(true);
+    expect(screen.getByRole('region', { name: 'Review context' })).toBeVisible();
+    expect(container.querySelector('details')).toBeNull();
     expect(screen.getByText('Repository')).toBeVisible();
     expect(screen.getByText('review-host')).toBeVisible();
     expect(screen.getByText(context.workingDirectory)).toBeVisible();
@@ -31,16 +28,15 @@ describe('ReviewContext', () => {
         context={{ source: 'stdin', workingDirectory: '/launcher', hostname: 'host' }}
       />,
     );
-    fireEvent.click(screen.getByText('Repository info'));
     expect(screen.getByText('Imported diff')).toBeVisible();
     expect(screen.queryByText('Repository')).not.toBeInTheDocument();
     expect(screen.getByText('Launched from')).toBeInTheDocument();
   });
 
-  it('includes the repository and page address in the tab title and restores it on unmount', () => {
+  it('keeps the tab title unchanged while metadata is opened and closed', () => {
     const previousTitle = document.title;
     const { unmount } = render(<ReviewContext context={context} />);
-    expect(document.title).toBe(`difit — difit (${window.location.host})`);
+    expect(document.title).toBe(previousTitle);
     unmount();
     expect(document.title).toBe(previousTitle);
   });

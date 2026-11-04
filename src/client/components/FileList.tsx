@@ -12,20 +12,23 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
 } from 'lucide-react';
-import { memo, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
-
 import {
-  type DiffFile,
-  type CommentThread,
-  type ReviewContext as ReviewContextData,
-} from '../../types/diff';
+  memo,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent,
+  type ReactNode,
+} from 'react';
+
+import { type DiffFile, type CommentThread } from '../../types/diff';
 import { isSafariBrowser } from '../utils/browser';
 
 import { Checkbox } from './Checkbox';
-import { ReviewContext } from './ReviewContext';
 
 interface FileListProps {
-  reviewContext?: ReviewContextData;
+  headerStatus?: ReactNode;
   files: DiffFile[];
   onScrollToFile: (path: string) => void;
   onScrollToFirstComment?: (path: string) => void;
@@ -162,7 +165,7 @@ function buildFileTree(files: DiffFile[]): TreeNode {
 }
 
 export const FileList = memo(function FileList({
-  reviewContext,
+  headerStatus,
   files,
   onScrollToFile,
   onScrollToFirstComment,
@@ -479,9 +482,7 @@ export const FileList = memo(function FileList({
     <div className="h-full flex flex-col">
       <div className="px-4 py-3 border-b border-github-border bg-github-bg-tertiary">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-github-text-primary m-0">
-            Files changed ({files.length})
-          </h3>
+          <h3 className="text-sm font-semibold ui-label m-0">Files changed ({files.length})</h3>
           <div className="ml-auto flex items-center gap-2">
             <span
               className="inline-flex gap-1 text-right text-xs font-medium whitespace-nowrap"
@@ -504,6 +505,7 @@ export const FileList = memo(function FileList({
             </button>
           </div>
         </div>
+        {headerStatus}
         <div className="relative">
           <Search
             size={16}
@@ -524,7 +526,6 @@ export const FileList = memo(function FileList({
         style={stickyContainerStyle}
         ref={scrollContainerRef}
       >
-        <ReviewContext context={reviewContext} />
         {filteredFileTree.children?.map((child) => renderTreeNode(child))}
       </div>
     </div>
