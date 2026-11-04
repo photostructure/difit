@@ -419,11 +419,11 @@ export function DiffQuickMenu({
   };
 
   return (
-    <div className="relative min-w-0 max-w-full">
+    <div className="relative flex min-w-0 max-w-full self-stretch">
       <button
         ref={refs.setReference}
         type="button"
-        className="flex max-w-full items-center gap-1.5 cursor-pointer group"
+        className="flex max-w-full items-stretch gap-1.5 cursor-pointer group"
         aria-haspopup="menu"
         aria-expanded={isOpen}
         aria-label={`Revision menu: ${currentLabel}`}
@@ -440,6 +440,7 @@ export function DiffQuickMenu({
           </div>
         ) : (
           <div className="flex min-w-0 max-w-full items-center gap-1 px-2 py-1 bg-github-bg-tertiary border border-github-border rounded hover:border-github-text-secondary transition-colors">
+            <GitBranch size={14} aria-hidden="true" className="shrink-0" />
             <code className="min-w-0 max-w-[24ch] truncate text-xs text-github-text-primary">
               {currentLabel}
             </code>

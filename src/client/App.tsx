@@ -1,4 +1,12 @@
-import { PanelLeftClose, PanelLeft, Keyboard } from 'lucide-react';
+import {
+  Bell,
+  FolderGit2,
+  GitBranch,
+  MessageSquare,
+  PanelLeftClose,
+  PanelLeft,
+  Keyboard,
+} from 'lucide-react';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
 import type { ApprovalMode, ConversationSnapshot } from '../types/conversation';
@@ -1696,7 +1704,7 @@ function App() {
     <ReviewProviders agentUpdates={inlineAgentReadContext}>
       <div className="h-screen flex flex-col" onClickCapture={handleGlobalClick}>
         <header
-          className="review-toolbar flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-github-border bg-github-bg-secondary px-3 py-2 text-sm text-github-text-primary"
+          className="review-toolbar flex shrink-0 flex-wrap items-stretch gap-2 border-b border-github-border bg-github-bg-secondary px-3 py-2 text-sm text-github-text-primary"
           data-testid="compact-review-header"
         >
           {diffData.capture && (
@@ -1706,7 +1714,7 @@ function App() {
               <span>{diffData.capture.patchDigest.slice(0, 12)}</span>
             </div>
           )}
-          <div className="flex min-w-0 max-w-full flex-1 items-center gap-2">
+          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => setIsFileTreeOpen(!isFileTreeOpen)}
@@ -1721,38 +1729,6 @@ function App() {
             <h1 className="shrink-0">
               <Logo style={{ height: '18px', color: 'var(--color-github-text-secondary)' }} />
             </h1>
-            {revisionOptions ? (
-              <DiffQuickMenu
-                options={revisionOptions}
-                selection={selectedRevision}
-                resolvedBaseRevision={resolvedBaseRevision}
-                resolvedTargetRevision={resolvedTargetRevision}
-                capture={diffData.capture}
-                onSelectDiff={(selection) => void handleRevisionChange(selection)}
-                onSelectReview={(selection) =>
-                  void handleRevisionChange({ ...selection, retained: true })
-                }
-                onOpen={loadRecentReviews}
-                recentReviews={recentReviews.filter(
-                  (review) => !diffSelectionsEqual(review.selection, resolvedSelection),
-                )}
-                onOpenAdvanced={() => setIsRevisionModalOpen(true)}
-              />
-            ) : (
-              <HeaderMenu
-                label={
-                  <span className="max-w-[24ch] truncate">
-                    {diffData.capture?.name ?? diffData.commit}
-                  </span>
-                }
-              >
-                {diffData.capture ? (
-                  <CaptureDetails capture={diffData.capture} />
-                ) : (
-                  <code className="break-all">{diffData.commit}</code>
-                )}
-              </HeaderMenu>
-            )}
             {(!isFileTreeOpen || isMobile) && (
               <span className="relative shrink-0 text-xs ui-value">
                 <span role="status" title="Files viewed">
@@ -1776,113 +1752,149 @@ function App() {
               </span>
             )}
           </div>
-          <div className="flex max-w-full flex-wrap items-stretch justify-end gap-2">
-            <ViewMenu
-              mode={diffMode}
-              mobile={isMobile}
-              onModeChange={handleDiffModeChange}
-              ignoreWhitespace={ignoreWhitespace}
-              onWhitespaceChange={setIgnoreWhitespace}
-              nextTheme={nextTheme}
-              onThemeToggle={handleThemeToggle}
-              onSettings={() => setIsSettingsOpen(true)}
-            />
-            <button
-              type="button"
-              aria-expanded={isRepositoryInfoOpen}
-              aria-controls="repository-info-panel"
-              aria-haspopup="dialog"
-              aria-label="Repository info"
-              className="rounded-md border border-github-border px-3 py-1.5 font-medium hover:bg-github-bg-tertiary"
-              onClick={() => {
-                setIsCommentsListOpen(false);
-                setIsAgentUpdatesOpen(false);
-                setIsRepositoryInfoOpen(true);
-              }}
-            >
-              Repository
-            </button>
-            <ReloadButton
-              shouldReload={shouldReload}
-              isReloading={watchState.isReloading}
-              onReload={reload}
-              changeType={watchState.lastChangeType}
-              compact
-            />
-            <button
-              type="button"
-              aria-label="Conversation"
-              title={
-                reviewPresence?.listeners
-                  ? 'Conversation — agent listener attached'
-                  : 'Conversation — no agent listener attached'
+          {revisionOptions ? (
+            <DiffQuickMenu
+              options={revisionOptions}
+              selection={selectedRevision}
+              resolvedBaseRevision={resolvedBaseRevision}
+              resolvedTargetRevision={resolvedTargetRevision}
+              capture={diffData.capture}
+              onSelectDiff={(selection) => void handleRevisionChange(selection)}
+              onSelectReview={(selection) =>
+                void handleRevisionChange({ ...selection, retained: true })
               }
-              onClick={() => {
-                setFocusedAgentMessage(null);
-                setIsRepositoryInfoOpen(false);
-                setIsCommentsListOpen(true);
-              }}
-              className="inline-flex items-center gap-1.5 rounded-md border border-github-border px-3 py-1.5 font-medium hover:bg-github-bg-tertiary"
-            >
-              <span
-                aria-hidden="true"
-                className={`h-2 w-2 rounded-full ${reviewPresence?.listeners ? 'bg-github-accent' : 'bg-github-warning'}`}
-              />
-              Conversation
-            </button>
-            <button
-              type="button"
-              aria-expanded={isAgentUpdatesOpen}
-              aria-controls="agent-updates-panel"
-              aria-haspopup="dialog"
-              aria-busy={!hasBootstrappedComments}
-              disabled={!hasBootstrappedComments}
-              aria-label={
-                agentUpdates.length
-                  ? `${agentUpdates.length} new agent update${agentUpdates.length === 1 ? '' : 's'}`
-                  : 'Agent updates'
+              onOpen={loadRecentReviews}
+              recentReviews={recentReviews.filter(
+                (review) => !diffSelectionsEqual(review.selection, resolvedSelection),
+              )}
+              onOpenAdvanced={() => setIsRevisionModalOpen(true)}
+            />
+          ) : (
+            <HeaderMenu
+              label={
+                <>
+                  <GitBranch size={14} aria-hidden="true" />
+                  <span className="max-w-[24ch] truncate">
+                    {diffData.capture?.name ?? diffData.commit}
+                  </span>
+                </>
               }
-              title="Unseen agent replies and edited messages"
-              className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 font-medium ${agentUpdates.length ? 'border-github-accent text-github-accent' : 'border-github-border text-github-text-primary'} hover:bg-github-bg-tertiary`}
-              onClick={() => {
-                setIsCommentsListOpen(false);
-                setIsRepositoryInfoOpen(false);
-                setFocusedAgentMessage(null);
-                setIsAgentUpdatesOpen(true);
-              }}
             >
-              Updates{' '}
-              <span aria-live="polite" aria-atomic="true" className="tabular-nums">
-                {agentUpdates.length || ''}
-                <span className="sr-only">
-                  {agentUpdates.length
-                    ? ` new agent update${agentUpdates.length === 1 ? '' : 's'}`
-                    : 'No new agent updates'}
-                </span>
+              {diffData.capture ? (
+                <CaptureDetails capture={diffData.capture} />
+              ) : (
+                <code className="break-all">{diffData.commit}</code>
+              )}
+            </HeaderMenu>
+          )}
+          <ViewMenu
+            mode={diffMode}
+            mobile={isMobile}
+            onModeChange={handleDiffModeChange}
+            ignoreWhitespace={ignoreWhitespace}
+            onWhitespaceChange={setIgnoreWhitespace}
+            nextTheme={nextTheme}
+            onThemeToggle={handleThemeToggle}
+            onSettings={() => setIsSettingsOpen(true)}
+          />
+          <button
+            type="button"
+            aria-expanded={isRepositoryInfoOpen}
+            aria-controls="repository-info-panel"
+            aria-haspopup="dialog"
+            aria-label="Repository info"
+            className="inline-flex items-center gap-1.5 rounded-md border border-github-border px-3 py-1.5 font-medium hover:bg-github-bg-tertiary"
+            onClick={() => {
+              setIsCommentsListOpen(false);
+              setIsAgentUpdatesOpen(false);
+              setIsRepositoryInfoOpen(true);
+            }}
+          >
+            <FolderGit2 size={14} aria-hidden="true" />
+            Repository
+          </button>
+          <ReloadButton
+            shouldReload={shouldReload}
+            isReloading={watchState.isReloading}
+            onReload={reload}
+            changeType={watchState.lastChangeType}
+            compact
+          />
+          <button
+            type="button"
+            aria-label="Conversation"
+            title={
+              reviewPresence?.listeners
+                ? 'Conversation — agent listener attached'
+                : 'Conversation — no agent listener attached'
+            }
+            onClick={() => {
+              setFocusedAgentMessage(null);
+              setIsRepositoryInfoOpen(false);
+              setIsCommentsListOpen(true);
+            }}
+            className="inline-flex items-center gap-1.5 rounded-md border border-github-border px-3 py-1.5 font-medium hover:bg-github-bg-tertiary"
+          >
+            <MessageSquare size={14} aria-hidden="true" />
+            <span
+              aria-hidden="true"
+              className={`h-2 w-2 rounded-full ${reviewPresence?.listeners ? 'bg-github-accent' : 'bg-github-warning'}`}
+            />
+            Conversation
+          </button>
+          <button
+            type="button"
+            aria-expanded={isAgentUpdatesOpen}
+            aria-controls="agent-updates-panel"
+            aria-haspopup="dialog"
+            aria-busy={!hasBootstrappedComments}
+            disabled={!hasBootstrappedComments}
+            aria-label={
+              agentUpdates.length
+                ? `${agentUpdates.length} new agent update${agentUpdates.length === 1 ? '' : 's'}`
+                : 'Agent updates'
+            }
+            title="Unseen agent replies and edited messages"
+            className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 font-medium ${agentUpdates.length ? 'border-github-accent text-github-accent' : 'border-github-border text-github-text-primary'} hover:bg-github-bg-tertiary`}
+            onClick={() => {
+              setIsCommentsListOpen(false);
+              setIsRepositoryInfoOpen(false);
+              setFocusedAgentMessage(null);
+              setIsAgentUpdatesOpen(true);
+            }}
+          >
+            <Bell size={14} aria-hidden="true" />
+            Updates{' '}
+            <span aria-live="polite" aria-atomic="true" className="tabular-nums">
+              {agentUpdates.length || ''}
+              <span className="sr-only">
+                {agentUpdates.length
+                  ? ` new agent update${agentUpdates.length === 1 ? '' : 's'}`
+                  : 'No new agent updates'}
               </span>
-            </button>
-            {diffData.shipIt && (
-              <ApprovalSplitButton
-                key={commentsContextKey}
-                buttonRef={approveButtonRef}
-                requested={approval.requested}
-                approved={approval.approved}
-                mode={approval.mode}
-                pendingCount={approval.pendingCount}
-                conditionalSupported={approval.conditionalSupported}
-                busy={isShipping || captureReloading}
-                disabled={
-                  !approval.ready ||
-                  !hasBootstrappedComments ||
-                  !summary.ready ||
-                  summary.dirty ||
-                  summary.saving
-                }
-                onApprove={(mode) => void handleShipIt(mode)}
-                onRevoke={() => void handleShipIt('as-is', true)}
-              />
-            )}
-          </div>
+            </span>
+          </button>
+          {diffData.shipIt && (
+            <ApprovalSplitButton
+              key={commentsContextKey}
+              buttonRef={approveButtonRef}
+              requested={approval.requested}
+              approved={approval.approved}
+              mode={approval.mode}
+              pendingCount={approval.pendingCount}
+              conditionalSupported={approval.conditionalSupported}
+              busy={isShipping || captureReloading}
+              disabled={
+                !approval.ready ||
+                !hasBootstrappedComments ||
+                !summary.ready ||
+                summary.dirty ||
+                summary.saving
+              }
+              onApprove={(mode) => void handleShipIt(mode)}
+              onRevoke={() => void handleShipIt('as-is', true)}
+            />
+          )}
           {(shipItError || approval.error) && (
             <span role="alert" className="w-full text-xs text-github-danger">
               {shipItError || approval.error}

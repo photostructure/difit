@@ -210,6 +210,34 @@ const mockDiffResponse: DiffResponse = {
   isEmpty: false,
 };
 
+it('opens the detailed comparison picker and changes the diff only after Apply', async () => {
+  mockFetch(mockDiffResponse, {
+    specialOptions: [],
+    commits: [],
+    branches: [{ name: 'main', current: true }],
+  });
+  renderApp();
+  fireEvent.click(await screen.findByRole('button', { name: /^Revision menu:/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Detailed...' }));
+  expect(await screen.findByRole('heading', { name: 'Detailed Diff' })).toBeVisible();
+  const diffRequests = () =>
+    vi.mocked(fetch).mock.calls.filter(([url]) => String(url).startsWith('/api/diff'));
+  const beforeSelection = diffRequests().length;
+  fireEvent.click(screen.getByRole('button', { name: /^Base:/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'main (current)' }));
+  expect(diffRequests()).toHaveLength(beforeSelection);
+  fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+  await waitFor(() =>
+    expect(
+      diffRequests().some(([url]) => {
+        const params = new URL(String(url), window.location.origin).searchParams;
+        return params.get('base') === 'main' && params.get('target') === 'HEAD';
+      }),
+    ).toBe(true),
+  );
+  expect(screen.queryByRole('heading', { name: 'Detailed Diff' })).not.toBeInTheDocument();
+});
+
 it('filters stdin whitespace locally without replacing the canonical patch', async () => {
   vi.clearAllMocks();
   mockComments = [];
