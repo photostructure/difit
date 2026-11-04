@@ -36,6 +36,7 @@
     "docs/server-addresses.md",
     "docs/waiting-for-review.md",
     "docs/codex-review-integration.md",
+    "docs/approval-modes.md",
     "!dist/**/*.test.*",
     "!dist/**/*.spec.*",
     "!dist/**/*.map"

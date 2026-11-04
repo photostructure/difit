@@ -1078,7 +1078,10 @@ export async function startServer(options: ServerOptions): Promise<{
     }
 
     session.version += 1;
+    const previousApprovalCursor = conversation?.getApproval(selection).cursor;
     conversation?.update(selection, previousThreads, nextThreads, origin);
+    if (previousApprovalCursor !== conversation?.getApproval(selection).cursor)
+      fileWatcher.broadcast({ type: 'approvalChanged', timestamp: new Date().toISOString() });
     fileWatcher.broadcast({
       type: 'commentsChanged',
       version: session.version,
@@ -1101,6 +1104,7 @@ export async function startServer(options: ServerOptions): Promise<{
           timestamp: new Date().toISOString(),
         }),
       presence,
+      () => fileWatcher.broadcast({ type: 'approvalChanged', timestamp: new Date().toISOString() }),
     );
   }
 
@@ -1190,9 +1194,11 @@ export async function startServer(options: ServerOptions): Promise<{
         };
         summaries.set(getDiffSelectionKey(selection), summary);
         conversation?.setSummary(selection, summary, origin);
+        if (conversation)
+          fileWatcher.broadcast({ type: 'approvalChanged', timestamp: new Date().toISOString() });
         const approval =
           conversation?.getApproval(selection) ?? approvals.get(getDiffSelectionKey(selection));
-        if (approval?.approved) {
+        if (approval?.approved || approval?.requested) {
           const revoked = conversation?.setApproval(selection, false, origin) ?? {
             approved: false,
             updatedAt: new Date().toISOString(),
@@ -1497,19 +1503,37 @@ export async function startServer(options: ServerOptions): Promise<{
       );
     });
 
-    app.post('/api/approval', (req, res) => {
+    app.post(['/api/approval', '/api/approval/conditional'], (req, res) => {
       if (!req.is('application/json')) {
         res.status(415).json({ error: 'Approval requires application/json' });
         return;
       }
       const input = req.body as {
         approved?: unknown;
+        mode?: unknown;
         summaryVersion?: unknown;
         captureVersion?: unknown;
         patchDigest?: unknown;
       } | null;
       if (!input || typeof input.approved !== 'boolean') {
         res.status(400).json({ error: 'Expected approved: true or false' });
+        return;
+      }
+      if (
+        req.path === '/api/approval/conditional' &&
+        (!input.approved || input.mode !== 'after-comments')
+      ) {
+        res
+          .status(400)
+          .json({ error: 'Conditional approval requires approved: true and mode: after-comments' });
+        return;
+      }
+      if (input.mode !== undefined && input.mode !== 'as-is' && input.mode !== 'after-comments') {
+        res.status(400).json({ error: 'Expected mode: as-is or after-comments' });
+        return;
+      }
+      if (input.approved && input.mode === 'after-comments' && !conversation) {
+        res.status(400).json({ error: 'Conditional approval requires conversations' });
         return;
       }
       if (
@@ -1550,14 +1574,20 @@ export async function startServer(options: ServerOptions): Promise<{
       const key = getDiffSelectionKey(selection);
       const previous = conversation?.getApproval(selection) ?? approvals.get(key);
       const approval = conversation
-        ? conversation.setApproval(selection, input.approved)
+        ? conversation.setApproval(selection, input.approved, 'user', input.mode ?? 'as-is')
         : previous?.approved === input.approved
           ? previous
           : { approved: input.approved, updatedAt: new Date().toISOString() };
       approvals.set(key, approval);
-      if (previous?.approved !== approval.approved) {
+      if (previous?.cursor !== approval.cursor || previous?.approved !== approval.approved) {
         humanLog(
-          `LGTM ${approval.approved ? 'approved' : 'revoked'}: ${selection.targetCommitish}`,
+          `LGTM ${
+            approval.requested && approval.mode === 'after-comments'
+              ? `approved after comments are addressed (${approval.conditions?.filter((condition) => !condition.addressed).length ?? 0} pending; commit ${approval.approved ? 'ready' : 'blocked'})`
+              : approval.approved
+                ? 'approved as-is'
+                : 'revoked'
+          }: ${selection.targetCommitish}`,
         );
         fileWatcher.broadcast({ type: 'approvalChanged', timestamp: new Date().toISOString() });
       }

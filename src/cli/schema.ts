@@ -275,9 +275,39 @@ const definitions: Record<string, Schema> = {
     'rationale',
     'version',
   ]),
+  ApprovalMode: enumeration('as-is', 'after-comments'),
+  ApprovalCondition: object(
+    {
+      threadId: string,
+      messageId: string,
+      cursor: revisionCursor,
+      intent: ref('CommentIntent'),
+      addressed: object({
+        outcome: enumeration('fixed', 'answered', 'acknowledged', 'confirmed-by-reviewer'),
+        evidence: nonblank,
+        updatedAt: timestamp,
+      }),
+    },
+    ['threadId', 'messageId', 'cursor', 'intent'],
+  ),
+  AddressRequest: object({
+    reviewId: string,
+    approvalCursor: cursor,
+    threadId: string,
+    messageId: string,
+    cursor: revisionCursor,
+    outcome: enumeration('fixed', 'answered', 'acknowledged'),
+    evidence: nonblank,
+  }),
+  AddressResponse: object({ success: { const: true }, approval: ref('ReviewApproval') }),
   ReviewApproval: object(
     {
       approved: boolean,
+      conditionalSupported: boolean,
+      mode: ref('ApprovalMode'),
+      requested: boolean,
+      conditions: array(ref('ApprovalCondition')),
+      baselineCapture: ref('CaptureAnchor'),
       updatedAt: timestamp,
       cursor,
       captureVersion,
@@ -385,6 +415,7 @@ const definitions: Record<string, Schema> = {
     {
       ...streamFields,
       type: { const: 'review.approval' },
+      approval: ref('ReviewApproval'),
       capture: ref('NamedReviewMetadata'),
       approved: boolean,
       summaryVersion: version,
@@ -613,6 +644,7 @@ const definitions: Record<string, Schema> = {
     ...object(
       {
         approved: boolean,
+        mode: ref('ApprovalMode'),
         summaryVersion: version,
         captureVersion,
         patchDigest: ref('PatchDigest'),
@@ -620,7 +652,7 @@ const definitions: Record<string, Schema> = {
       ['approved'],
     ),
     description:
-      'POST /api/approval. Named review approval requires captureVersion, patchDigest and summaryVersion matching the displayed capture and proposal. Unnamed approval requires the current summaryVersion (omission means 0). Stale approval returns HTTP 409; revocation requires no matching versions.',
+      'POST /api/approval for as-is or revocation; POST /api/approval/conditional for after-comments. mode defaults to as-is. after-comments records conditional permission; approved stays false until every recorded comment revision has evidence via comment address or its thread is resolved by the reviewer. New human feedback or summary edits revoke it. Recapturing clears agent evidence but preserves reviewer confirmations while their threads remain resolved. Named review approval requires captureVersion, patchDigest and summaryVersion matching the displayed capture and proposal. Unnamed approval requires the current summaryVersion (omission means 0). Stale approval returns HTTP 409; revocation requires no matching versions.',
   },
   ApprovalResponse: ref('ReviewApproval'),
 };
@@ -637,6 +669,7 @@ const roots = {
   comments: 'CommentsRequest',
   import: 'CommentImportRequest',
   approval: 'ApprovalRequest',
+  address: 'AddressRequest',
   capture: 'ReviewCapture',
   'capture-update': 'ReviewCaptureUpdate',
 };

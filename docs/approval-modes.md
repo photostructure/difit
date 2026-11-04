@@ -1,0 +1,86 @@
+# Approval modes
+
+The approval split button has two actions. **Approve as-is** approves the displayed
+patch. **Approve after comments are addressed** authorizes the fixes and answers
+needed for the recorded feedback, subject to the existing review and commit rules.
+Neither action authorizes a push, publication, or unrelated changes.
+
+Approval snapshots and `review.approval` events carry the mode:
+
+- `mode: "as-is"`: `approved: true` means the reviewed patch is approved.
+- `mode: "after-comments", requested: true`: conditional permission is recorded.
+  `conditions` identifies every included user message by thread, message, and exact
+  revision cursor. Already-resolved threads are excluded. `approved` remains false
+  until every condition has completion evidence or the reviewer confirms it by
+  resolving its thread.
+- `approved: false` without `requested: true`: there is no active approval.
+
+The nested `approval` object on approval events has the same fields as snapshots.
+Conditional requests use `POST /api/approval/conditional`; an older server returns
+404 instead of silently treating them as as-is approval. The browser checks
+`conditionalSupported` before offering the action. The existing top-level
+`approved` boolean remains a commit-readiness signal, so
+older agents cannot mistake pending conditional permission for completed approval.
+
+## Completing conditional approval
+
+1. Read `comment snapshot` and save the conditional approval, its comment revisions,
+   and its original `baselineCapture`, when present. Reconcile all outstanding
+   feedback, including messages already Delivered or Read.
+2. Address the recorded feedback within the approved scope. Answer questions in
+   their threads. A reply, Noted receipt, or seen-message indicator does not certify
+   a requested change is complete. If a request cannot be completed or its meaning
+   is disputed, explain the problem and leave approval pending.
+3. Run the required checks and independent review. For a named review, recapture
+   the final patch before certifying completion. Compare it against the baseline
+   and ensure the changes implement only the approved feedback. The server records
+   agent attestations; it cannot judge the correctness or scope of source changes.
+4. Skip conditions already confirmed by the reviewer. Certify each remaining
+   condition with `difit comment address --host <host> --port <port>`.
+   Use the checkout's prescribed difit launcher. Supply JSON on stdin:
+
+   ```json
+   {
+     "reviewId": "from-snapshot",
+     "approvalCursor": "from-current-approval",
+     "threadId": "from-condition",
+     "messageId": "from-condition",
+     "cursor": "exact-comment-revision-from-condition",
+     "outcome": "fixed",
+     "evidence": "Explain the fix and the checks that verified it."
+   }
+   ```
+
+   First post a revision-aware reply for a fix or answer; the server requires its
+   Replied receipt before accepting completion. Change requests require `fixed`;
+   questions require `answered`. Ordinary
+   comments may use `acknowledged` when no action or answer is needed. An agent
+   acknowledgement cannot waive a change request or question. Each response
+   includes the updated `approval`; use its new cursor for the next condition.
+   HTTP 409 requires a fresh snapshot and reconciliation, without blind retries.
+
+5. Immediately before committing, read a fresh snapshot. Require `approved: true`
+   and matching final capture/digest and summary versions when present. Honor the
+   user's saved commit message and all existing repository checks. Conditional
+   permission does not authorize extra changes made in a shared working tree.
+
+Completion evidence stays separate from thread resolution. Addressing a comment
+does not resolve or delete it. Keep the existing rule to resolve/delete only on
+request.
+
+New or edited human feedback, deletion, a reopened thread, or a changed summary
+revokes approval. Resolving a thread as the reviewer confirms its included
+conditions and decreases the pending count without fabricating agent receipts.
+Reconcile still-Queued messages in resolved threads against that confirmation;
+report Noted explicitly rather than restarting work the reviewer has closed.
+Repeated approval of the same mode is idempotent, including while pending.
+A changed named capture revokes as-is approval. Conditional permission with
+recorded comments survives a capture update, retaining its baseline and conditions,
+but agent completion attestations are cleared and must be made against the final
+capture. Reviewer confirmations persist while their threads remain resolved;
+when all conditions are reviewer-confirmed, approval stays ready across captures
+within the approved scope. With no recorded conditions, capture updates revoke
+approval as usual.
+Server restart loses approval. Presence and browser closure never grant approval.
+
+Use `difit schema approval` and `difit schema address` for request schemas.

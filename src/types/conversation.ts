@@ -30,7 +30,27 @@ export interface ConversationEvent {
   timestamp: string;
 }
 
+export type ApprovalMode = 'as-is' | 'after-comments';
+
+export interface ApprovalCondition {
+  threadId: string;
+  messageId: string;
+  cursor: string;
+  intent: CommentIntent;
+  addressed?: {
+    outcome: 'fixed' | 'answered' | 'acknowledged' | 'confirmed-by-reviewer';
+    evidence: string;
+    updatedAt: string;
+  };
+}
+
 export interface ReviewApproval {
+  conditionalSupported?: boolean;
+  mode?: ApprovalMode;
+  /** Conditional permission is recorded, but approved stays false until every condition is addressed. */
+  requested?: boolean;
+  conditions?: ApprovalCondition[];
+  baselineCapture?: Pick<NamedReviewMetadata, 'version' | 'patchDigest'>;
   captureVersion?: number;
   patchDigest?: string;
   summaryVersion?: number;
@@ -58,6 +78,7 @@ interface ReviewSummaryEvent {
 }
 
 interface ReviewApprovalEvent {
+  approval?: ReviewApproval;
   capture?: NamedReviewMetadata;
   type: 'review.approval';
   origin: 'user' | 'agent';

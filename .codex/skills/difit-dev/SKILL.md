@@ -62,6 +62,20 @@ server process. Use message `progress.cursor` for status/reply,
 not a progress event's stream cursor or the snapshot's cursor. Do not promise
 listening after ending the turn without host support that forwards process output.
 
+The approval split button distinguishes `as-is` from `after-comments`. For
+conditional approval, `requested: true` records permission to address the listed
+feedback; `approved: false` blocks committing until every included revision has
+evidence through `comment address` or reviewer resolution. Skip conditions already
+confirmed by the reviewer; reconcile any Queued messages in those resolved threads
+and report Noted explicitly without restarting their work. Replies and Noted do not satisfy
+conditions. Finish checks and final capture first, then certify `fixed`, `answered`,
+or ordinary-comment `acknowledged` using the current approval cursor and exact
+comment cursor. A new capture clears agent evidence but keeps reviewer
+confirmations. New or edited human feedback, deletion, a reopened thread, or a
+summary edit revokes permission. Keep baseline-to-final changes within the approved
+feedback. Do not resolve/delete threads merely to satisfy conditions. See the
+[approval guide](../../../docs/approval-modes.md) and `schema address`.
+
 With an adopted LGTM rule, commit only the recorded scope/requested fixes after
 addressing comments, passing checks, and independent Codex/Claude LAND on final code.
 Require matching `approval.approved: true` in a fresh snapshot immediately before

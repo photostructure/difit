@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { ReviewApproval } from '../../types/conversation';
+import type { ApprovalMode, ReviewApproval } from '../../types/conversation';
 import type { NamedReviewMetadata } from '../../types/review';
 
 type CaptureIdentity = Pick<NamedReviewMetadata, 'version' | 'patchDigest'>;
@@ -50,14 +50,23 @@ export function useReviewApproval(
   }, [refresh]);
 
   const setApproved = useCallback(
-    async (approved: boolean, summaryVersion = 0) => {
+    async (approved: boolean, summaryVersion = 0, mode: ApprovalMode = 'as-is') => {
       if (!url || activeKey.current !== key)
         throw new Error('Approval is unavailable for this capture');
-      const response = await fetch(url, {
+      const destination = new URL(url, window.location.origin);
+      if (approved && mode === 'after-comments') destination.pathname = '/api/approval/conditional';
+      const requestUrl =
+        approved && mode === 'after-comments'
+          ? url.startsWith('/')
+            ? `${destination.pathname}${destination.search}`
+            : destination.href
+          : url;
+      const response = await fetch(requestUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           approved,
+          ...(approved && mode === 'after-comments' ? { mode } : {}),
           ...(approved || captureVersion !== undefined ? { summaryVersion } : {}),
           ...(captureVersion !== undefined ? { captureVersion, patchDigest } : {}),
         }),
@@ -76,6 +85,10 @@ export function useReviewApproval(
       (displayedSummaryVersion === undefined ||
         current.summaryVersion === displayedSummaryVersion));
   return {
+    conditionalSupported: current?.conditionalSupported === true,
+    mode: current?.mode,
+    requested: matchesCapture && Boolean(current?.requested || current?.approved),
+    pendingCount: current?.conditions?.filter((condition) => !condition.addressed).length ?? 0,
     approved: current?.approved === true && matchesCapture,
     ready: current !== null,
     error,

@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [Unreleased (minor)]
 
 ### Added in the PhotoStructure fork
 

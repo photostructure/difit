@@ -8,6 +8,34 @@ const response = (approved: boolean) => new Response(JSON.stringify({ approved }
 afterEach(() => vi.unstubAllGlobals());
 
 describe('review approval', () => {
+  it('uses the distinct conditional endpoint so an old server cannot silently approve as-is', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async (_url, init) =>
+        init?.method === 'POST' ? new Response('{}', { status: 404 }) : response(false),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() =>
+      useReviewApproval('http://10.1.1.24:4966/api/approval?review=task'),
+    );
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    await act(async () => {
+      await expect(result.current.setApproved(true, 0, 'after-comments')).rejects.toThrow(
+        'Could not update approval',
+      );
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://10.1.1.24:4966/api/approval/conditional?review=task',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(result.current.approved).toBe(false);
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          String(url).endsWith('/api/approval?review=task') && init?.method === 'POST',
+      ),
+    ).toHaveLength(0);
+  });
   it('restores server approval and preserves it when revocation fails', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response(true));
     vi.stubGlobal('fetch', fetchMock);

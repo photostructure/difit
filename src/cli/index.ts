@@ -137,12 +137,8 @@ program
   )
   .option('--pr <url>', 'GitHub PR URL to review (e.g., https://github.com/owner/repo/pull/123)')
   .option('--clean', 'start with a clean slate by clearing all existing comments')
-  .option(
-    '--lgtm, --ship-it',
-    'show an LGTM toggle to approve or revoke approval while the review stays open',
-    true,
-  )
-  .option('--no-lgtm, --no-ship-it', 'hide the LGTM approval toggle')
+  .option('--lgtm, --ship-it', 'show approval actions: as-is or after comments are addressed', true)
+  .option('--no-lgtm, --no-ship-it', 'hide the LGTM approval actions')
   .option(
     '--conversation',
     'enable conversation APIs (replies, progress, snapshots); required by --jsonl',
@@ -522,6 +518,7 @@ Agent protocol:
   difit comment status --help   Explicit delivery and progress receipts
   difit comment snapshot --host <host> --port <port>  Recover current review state
   Address examples: docs/server-addresses.md
+  Approval modes and completion: docs/approval-modes.md (schema approval, schema address)
 
 Summary JSON: {"reviewId":"...","commitMessage":"fix: ...","rationale":"Short TLDR","baseVersion":0}
 Comment JSON events include type, reviewId, threadId, messageId, cursor, and body.

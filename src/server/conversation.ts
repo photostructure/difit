@@ -9,6 +9,8 @@ import type {
   ConversationBatch,
   ReviewApproval,
   ReviewSummary,
+  ApprovalMode,
+  ApprovalCondition,
 } from '../types/conversation.js';
 import type { CommentProgress, DiffCommentThread, DiffSelection } from '../types/diff.js';
 import { getDiffSelectionKey } from '../utils/diffSelection.js';
@@ -110,14 +112,36 @@ export class Conversation {
   }
 
   getApproval(selection: DiffSelection): ReviewApproval {
-    return { ...this.getReview(selection).approval };
+    return { ...structuredClone(this.getReview(selection).approval), conditionalSupported: true };
   }
 
   setCapture(selection: DiffSelection, capture: NamedReviewMetadata): void {
     const review = this.getReview(selection);
     review.selection = { ...selection };
     review.capture = { ...capture };
-    if (review.approval.approved) this.setApproval(selection, false, 'agent');
+    if (
+      review.approval.requested &&
+      review.approval.mode === 'after-comments' &&
+      review.approval.conditions?.length
+    ) {
+      const conditions = review.approval.conditions.map((condition) => {
+        if (condition.addressed?.outcome === 'confirmed-by-reviewer') return condition;
+        const pending = { ...condition };
+        delete pending.addressed;
+        return pending;
+      });
+      this.recordApproval(
+        review,
+        {
+          ...review.approval,
+          approved: conditions.every((condition) => condition.addressed),
+          captureVersion: capture.version,
+          patchDigest: capture.patchDigest,
+          conditions,
+        },
+        'agent',
+      );
+    } else if (review.approval.approved) this.setApproval(selection, false, 'agent');
     this.sequence += 1;
     this.emit({
       type: 'review.capture',
@@ -148,41 +172,160 @@ export class Conversation {
       ...(review.capture ? { capture: { ...review.capture } } : {}),
       timestamp: new Date().toISOString(),
     });
+    if (review.approval.approved || review.approval.requested)
+      this.setApproval(selection, false, origin);
   }
 
   setApproval(
     selection: DiffSelection,
     approved: boolean,
     origin: 'user' | 'agent' = 'user',
+    mode: ApprovalMode = 'as-is',
   ): ReviewApproval {
     const review = this.getReview(selection);
-    if (review.approval.approved === approved) return { ...review.approval };
+    if (!approved && !review.approval.approved && !review.approval.requested)
+      return this.getApproval(selection);
+    if (approved && review.approval.requested && review.approval.mode === mode)
+      return this.getApproval(selection);
+    const conditions: ApprovalCondition[] =
+      approved && mode === 'after-comments'
+        ? review.threads
+            .filter((thread) => !thread.resolution?.resolved)
+            .flatMap((thread) =>
+              thread.messages.flatMap((message, index) => {
+                const progress = review.progress.get(JSON.stringify([thread.id, message.id]));
+                return progress
+                  ? [
+                      {
+                        threadId: thread.id,
+                        messageId: message.id,
+                        cursor: progress.cursor,
+                        intent:
+                          message.intent ??
+                          (index === 0 && thread.isQuestion ? 'question' : 'comment'),
+                      },
+                    ]
+                  : [];
+              }),
+            )
+        : [];
+    return this.recordApproval(
+      review,
+      {
+        approved: approved && (mode === 'as-is' || conditions.length === 0),
+        ...(approved ? { mode, requested: true, summaryVersion: review.summary.version } : {}),
+        ...(approved && mode === 'after-comments'
+          ? {
+              conditions,
+              ...(review.capture
+                ? {
+                    baselineCapture: {
+                      version: review.capture.version,
+                      patchDigest: review.capture.patchDigest,
+                    },
+                  }
+                : {}),
+            }
+          : {}),
+        ...(review.capture
+          ? {
+              captureVersion: review.capture.version,
+              patchDigest: review.capture.patchDigest,
+              summaryVersion: review.summary.version,
+            }
+          : {}),
+      },
+      origin,
+    );
+  }
+
+  addressCondition(input: {
+    reviewId: string;
+    approvalCursor: string;
+    threadId: string;
+    messageId: string;
+    cursor: string;
+    outcome: 'fixed' | 'answered' | 'acknowledged';
+    evidence: string;
+  }): ReviewApproval {
+    if (!input.evidence.trim())
+      throw new ProgressError(400, 'Completion evidence must not be blank');
+    const review = this.findReview(input.reviewId);
+    if (!review) throw new ProgressError(404, 'Review no longer exists');
+    const approval = review.approval;
+    if (
+      !approval.requested ||
+      approval.mode !== 'after-comments' ||
+      approval.cursor !== input.approvalCursor
+    )
+      throw new ProgressError(409, 'Conditional approval changed; read a fresh snapshot');
+    const condition = approval.conditions?.find(
+      (item) => item.threadId === input.threadId && item.messageId === input.messageId,
+    );
+    const progress = review.progress.get(JSON.stringify([input.threadId, input.messageId]));
+    if (!condition || condition.cursor !== input.cursor || progress?.cursor !== input.cursor)
+      throw new ProgressError(
+        409,
+        'Comment revision changed or is outside the approved conditions',
+      );
+    if (condition.addressed?.outcome === 'confirmed-by-reviewer')
+      return this.getApproval(review.selection);
+    if (
+      (condition.intent === 'change' && input.outcome !== 'fixed') ||
+      (condition.intent === 'question' && input.outcome !== 'answered')
+    )
+      throw new ProgressError(400, 'Change requests require fixed; questions require answered');
+    if (input.outcome !== 'acknowledged' && progress.status !== 'replied')
+      throw new ProgressError(
+        400,
+        'Reply to the exact comment revision before certifying completion',
+      );
+    if (input.outcome === 'acknowledged')
+      this.setProgress(input.reviewId, input.threadId, input.messageId, input.cursor, 'noted');
+    const conditions = (approval.conditions ?? []).map((item) =>
+      item === condition
+        ? {
+            ...item,
+            addressed: {
+              outcome: input.outcome,
+              evidence: input.evidence.trim(),
+              updatedAt: new Date().toISOString(),
+            },
+          }
+        : item,
+    );
+    return this.recordApproval(
+      review,
+      { ...approval, conditions, approved: conditions.every((item) => item.addressed) },
+      'agent',
+    );
+  }
+
+  private recordApproval(
+    review: Review,
+    approval: ReviewApproval,
+    origin: 'user' | 'agent',
+  ): ReviewApproval {
     this.sequence += 1;
     const timestamp = new Date().toISOString();
     review.approval = {
-      approved,
+      ...approval,
       cursor: this.cursor,
       updatedAt: timestamp,
-      ...(review.capture
-        ? {
-            captureVersion: review.capture.version,
-            patchDigest: review.capture.patchDigest,
-            summaryVersion: review.summary.version,
-          }
-        : {}),
     };
     this.emit({
       type: 'review.approval',
       origin,
       cursor: this.cursor,
       reviewId: review.id,
-      selection: { ...selection },
-      approved,
+      selection: { ...review.selection },
+      approved: review.approval.approved,
+      approval: structuredClone(review.approval),
       ...(review.capture ? { summaryVersion: review.summary.version } : {}),
       ...(review.capture ? { capture: { ...review.capture } } : {}),
       timestamp,
     });
-    return { ...review.approval };
+    return this.getApproval(review.selection);
   }
 
   update(
@@ -287,6 +430,48 @@ export class Conversation {
       }
     }
     for (const event of pending) this.emit(event);
+    if (
+      (review.approval.approved || review.approval.requested) &&
+      pending.some((event) => event.origin === 'user' && event.type !== 'thread.resolved')
+    )
+      this.setApproval(selection, false, 'user');
+    else if (review.approval.requested && review.approval.mode === 'after-comments') {
+      const resolved = new Set(
+        pending
+          .filter((event) => event.origin === 'user' && event.type === 'thread.resolved')
+          .map((event) => ('threadId' in event ? event.threadId : '')),
+      );
+      if (
+        review.approval.conditions?.some(
+          (condition) =>
+            condition.addressed?.outcome !== 'confirmed-by-reviewer' &&
+            resolved.has(condition.threadId),
+        )
+      ) {
+        const conditions = review.approval.conditions.map((condition) =>
+          condition.addressed?.outcome === 'confirmed-by-reviewer' ||
+          !resolved.has(condition.threadId)
+            ? condition
+            : {
+                ...condition,
+                addressed: {
+                  outcome: 'confirmed-by-reviewer' as const,
+                  evidence: 'The reviewer marked this thread resolved.',
+                  updatedAt: new Date().toISOString(),
+                },
+              },
+        );
+        this.recordApproval(
+          review,
+          {
+            ...review.approval,
+            conditions,
+            approved: conditions.every((condition) => condition.addressed),
+          },
+          'user',
+        );
+      }
+    }
   }
 
   get cursor(): string {
@@ -304,7 +489,7 @@ export class Conversation {
         id: review.id,
         selection: { ...review.selection },
         threads: structuredClone(this.withProgress(review.selection, review.threads)),
-        approval: { ...review.approval },
+        approval: this.getApproval(review.selection),
         summary: { ...review.summary },
         ...(review.capture ? { capture: { ...review.capture } } : {}),
       })),
@@ -380,7 +565,40 @@ export function registerConversationRoutes(
   update: (selection: DiffSelection, threads: DiffCommentThread[]) => void,
   progressChanged: (selection: DiffSelection) => void,
   presence?: ReviewPresence,
+  approvalChanged?: () => void,
 ): void {
+  app.post('/api/conversation/address', (req, res) => {
+    if (!req.is('application/json')) {
+      res.status(415).json({ error: 'Addressing comments requires application/json' });
+      return;
+    }
+    const input = req.body as Record<string, unknown> | null;
+    if (
+      !input ||
+      !['reviewId', 'approvalCursor', 'threadId', 'messageId', 'cursor', 'evidence'].every(
+        (key) => typeof input[key] === 'string' && (input[key] as string).trim(),
+      ) ||
+      !['fixed', 'answered', 'acknowledged'].includes(String(input.outcome))
+    ) {
+      res.status(400).json({
+        error:
+          'Expected reviewId, approvalCursor, threadId, messageId, cursor, outcome (fixed, answered, acknowledged), and nonblank evidence',
+      });
+      return;
+    }
+    try {
+      const approval = conversation.addressCondition(
+        input as Parameters<Conversation['addressCondition']>[0],
+      );
+      const review = conversation.findReview(String(input.reviewId));
+      if (review) progressChanged(review.selection);
+      approvalChanged?.();
+      res.json({ success: true, approval });
+    } catch (error) {
+      if (!(error instanceof ProgressError)) throw error;
+      res.status(error.status).json({ error: error.message });
+    }
+  });
   app.get('/api/conversation/snapshot', (_req, res) => {
     res.json({
       ...conversation.snapshot(),

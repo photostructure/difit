@@ -2204,6 +2204,121 @@ describe('Server Integration Tests', () => {
     });
   });
 
+  describe('conditional approval notifications', () => {
+    it.each([
+      {
+        conversation: true,
+        path: '/api/approval/conditional',
+        body: { approved: true, mode: 'as-is' },
+      },
+      {
+        conversation: true,
+        path: '/api/approval/conditional',
+        body: { approved: false, mode: 'after-comments' },
+      },
+      { conversation: true, path: '/api/approval', body: { approved: true, mode: 'unknown' } },
+      {
+        conversation: false,
+        path: '/api/approval/conditional',
+        body: { approved: true, mode: 'after-comments' },
+      },
+    ])(
+      'rejects incompatible approval requests: $path $body.mode conversation=$conversation',
+      async ({ conversation, path, body }) => {
+        const result = await startServer({
+          preferredPort: 0,
+          keepAlive: true,
+          conversation,
+          shipIt: true,
+          jsonl: false,
+        });
+        servers.push(result.server);
+        try {
+          const response = await fetch(`${result.url}${path}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          expect(response.status).toBe(400);
+          expect(await (await fetch(`${result.url}/api/approval`)).json()).toMatchObject({
+            approved: false,
+          });
+        } finally {
+          await result.shutdown('closed');
+        }
+      },
+    );
+
+    it('notifies the browser when edited human feedback revokes pending approval', async () => {
+      const broadcast = vi.spyOn(FileWatcherService.prototype, 'broadcast');
+      const result = await startServer({
+        preferredPort: 0,
+        keepAlive: true,
+        conversation: true,
+        shipIt: true,
+      });
+      servers.push(result.server);
+      const post = (path: string, body: unknown) =>
+        fetch(`${result.url}${path}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      const now = new Date().toISOString();
+      const discussion: DiffCommentThread = {
+        id: 'conditional',
+        scope: 'review',
+        createdAt: now,
+        updatedAt: now,
+        messages: [
+          {
+            id: 'human',
+            origin: 'user',
+            intent: 'change',
+            body: 'Please fix this',
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      };
+      try {
+        expect((await post('/api/comments', { threads: [discussion] })).status).toBe(200);
+        const summary = (await (await fetch(`${result.url}/api/review-summary`)).json()) as {
+          version: number;
+        };
+        const response = await post('/api/approval/conditional', {
+          approved: true,
+          mode: 'after-comments',
+          summaryVersion: summary.version,
+        });
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          requested: true,
+          approved: false,
+          conditions: [expect.any(Object)],
+        });
+        broadcast.mockClear();
+        const edited = structuredClone(discussion);
+        const message = edited.messages[0];
+        if (!message) throw new Error('Missing message');
+        message.body = 'Please fix this differently';
+        message.updatedAt = new Date(Date.now() + 1000).toISOString();
+        expect((await post('/api/comments', { threads: [edited] })).status).toBe(200);
+        const approval = (await (await fetch(`${result.url}/api/approval`)).json()) as {
+          approved: boolean;
+          requested?: boolean;
+        };
+        expect(approval.approved).toBe(false);
+        expect(approval.requested).not.toBe(true);
+        expect(broadcast).toHaveBeenCalledWith(
+          expect.objectContaining({ type: 'approvalChanged' }),
+        );
+      } finally {
+        await result.shutdown('closed');
+      }
+    });
+  });
+
   describe('Keep-alive option', () => {
     it('keeps the server alive when one of two browser tabs disconnects', async () => {
       const result = await startServer({ preferredPort: 0, keepAlive: false, conversation: true });
@@ -2293,7 +2408,7 @@ describe('Server Integration Tests', () => {
           expect(output).not.toContain('Press Ctrl+C');
           if (jsonl) expect(log).not.toHaveBeenCalled();
           else {
-            expect(output).toContain('LGTM approved: abc1234');
+            expect(output).toContain('LGTM approved as-is: abc1234');
             if (!keepAlive) expect(output).toContain('Human comment transcript');
           }
           if (keepAlive) expect(process.exit).not.toHaveBeenCalled();
