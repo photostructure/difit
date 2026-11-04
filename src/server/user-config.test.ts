@@ -6,10 +6,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import {
   getUserConfigPath,
-  readUserConfig,
-  parseUserSettingsPatch,
-  updateUserClientSettings,
   MAX_USER_CONFIG_BYTES,
+  parseAutoViewedPatternsBody,
+  readUserConfig,
+  writeAutoViewedPatterns,
 } from './user-config.js';
 
 describe('user-config', () => {
@@ -50,19 +50,18 @@ describe('user-config', () => {
   describe('readUserConfig', () => {
     it('returns defaults when the file does not exist', async () => {
       const config = await readUserConfig(configPath);
-      expect(config).toEqual({ version: 1, client: {} });
+      expect(config).toEqual({ version: 1, client: {}, autoViewedPatterns: [] });
     });
 
-    it('returns defaults when the file is corrupt', async () => {
+    it('rejects a file that is not valid JSON, naming the file', async () => {
       await fs.writeFile(configPath, 'not json', 'utf-8');
-      const config = await readUserConfig(configPath);
-      expect(config).toEqual({ version: 1, client: {} });
+      await expect(readUserConfig(configPath)).rejects.toThrow(configPath);
     });
 
     it('returns defaults when client is not an object', async () => {
       await fs.writeFile(configPath, JSON.stringify({ version: 1, client: [1, 2] }), 'utf-8');
       const config = await readUserConfig(configPath);
-      expect(config).toEqual({ version: 1, client: {} });
+      expect(config).toEqual({ version: 1, client: {}, autoViewedPatterns: [] });
     });
 
     it('reads stored client settings', async () => {
@@ -76,60 +75,75 @@ describe('user-config', () => {
     });
   });
 
-  describe('updateUserClientSettings', () => {
-    it('creates the config directory and file on first write', async () => {
-      const nestedPath = join(configDir, 'nested', 'config.json');
-      const config = await updateUserClientSettings({ sidebarOpen: false }, nestedPath);
-
-      expect(config).toEqual({ version: 1, client: { sidebarOpen: false } });
-      const stored = JSON.parse(await fs.readFile(nestedPath, 'utf-8'));
-      expect(stored).toEqual({ version: 1, client: { sidebarOpen: false } });
-    });
-
-    it('shallow-merges the patch into existing settings', async () => {
-      await updateUserClientSettings({ diffViewMode: 'split', sidebarWidth: 300 }, configPath);
-      const config = await updateUserClientSettings({ sidebarWidth: 400 }, configPath);
-
-      expect(config.client).toEqual({
-        diffViewMode: 'split',
-        sidebarWidth: 400,
-      });
-    });
-
-    it('rejects settings exceeding the size limit', async () => {
-      const huge = { blob: 'x'.repeat(MAX_USER_CONFIG_BYTES) };
-      await expect(updateUserClientSettings(huge, configPath)).rejects.toThrow(
-        'maximum allowed size',
+  describe('auto-viewed patterns', () => {
+    it('reads patterns saved inside the old appearance settings', async () => {
+      await fs.writeFile(
+        configPath,
+        JSON.stringify({ version: 1, client: { appearance: { autoViewedPatterns: ['*.snap'] } } }),
+        'utf-8',
       );
+      const config = await readUserConfig(configPath);
+      expect(config.autoViewedPatterns).toEqual(['*.snap']);
+      // Browsers copy `client` into a size-limited cookie; the patterns stay out of it.
+      expect(config.client).toEqual({ appearance: {} });
     });
 
-    it('leaves no temp file behind', async () => {
-      await updateUserClientSettings({ sidebarOpen: true }, configPath);
-      const entries = await fs.readdir(configDir);
-      expect(entries).toEqual(['config.json']);
-    });
-  });
-
-  describe('parseUserSettingsPatch', () => {
-    it('accepts a body with a client object', () => {
-      expect(parseUserSettingsPatch({ client: { diffViewMode: 'split' } })).toEqual({
-        diffViewMode: 'split',
-      });
-    });
-
-    it('rejects missing or non-object client', () => {
-      expect(parseUserSettingsPatch(undefined)).toBeNull();
-      expect(parseUserSettingsPatch({})).toBeNull();
-      expect(parseUserSettingsPatch({ client: 'dark' })).toBeNull();
-      expect(parseUserSettingsPatch({ client: [1] })).toBeNull();
-    });
-
-    it('rejects oversized patches', () => {
-      expect(
-        parseUserSettingsPatch({
-          client: { blob: 'x'.repeat(MAX_USER_CONFIG_BYTES) },
+    it('prefers patterns saved under their own key', async () => {
+      await fs.writeFile(
+        configPath,
+        JSON.stringify({
+          version: 1,
+          client: { appearance: { autoViewedPatterns: ['*.snap'] } },
+          autoViewedPatterns: [],
         }),
-      ).toBeNull();
+        'utf-8',
+      );
+      const config = await readUserConfig(configPath);
+      expect(config.autoViewedPatterns).toEqual([]);
+    });
+
+    it('saves patterns without touching the other settings', async () => {
+      await fs.writeFile(
+        configPath,
+        JSON.stringify({ version: 1, client: { diffViewMode: 'split' } }),
+        'utf-8',
+      );
+
+      await writeAutoViewedPatterns(['vendor/**'], configPath);
+
+      expect(JSON.parse(await fs.readFile(configPath, 'utf-8'))).toEqual({
+        version: 1,
+        client: { diffViewMode: 'split' },
+        autoViewedPatterns: ['vendor/**'],
+      });
+      expect(await fs.readdir(configDir)).toEqual(['config.json']);
+    });
+
+    it('leaves a file that is not valid JSON untouched', async () => {
+      const broken = '{"version":1,"autoViewedPatterns":["*.snap",]}';
+      await fs.writeFile(configPath, broken, 'utf-8');
+
+      await expect(writeAutoViewedPatterns(['*.lock'], configPath)).rejects.toThrow(configPath);
+      expect(await fs.readFile(configPath, 'utf-8')).toBe(broken);
+    });
+
+    it('creates the config directory on first write', async () => {
+      const nestedPath = join(configDir, 'nested', 'config.json');
+      await writeAutoViewedPatterns(['*.lock'], nestedPath);
+      expect((await readUserConfig(nestedPath)).autoViewedPatterns).toEqual(['*.lock']);
+    });
+
+    it('rejects patterns over the size limit', async () => {
+      await expect(
+        writeAutoViewedPatterns(['x'.repeat(MAX_USER_CONFIG_BYTES)], configPath),
+      ).rejects.toThrow('maximum allowed size');
+    });
+
+    it('accepts only a list of strings in a request body', () => {
+      expect(parseAutoViewedPatternsBody({ patterns: ['*.snap'] })).toEqual(['*.snap']);
+      expect(parseAutoViewedPatternsBody({ patterns: '*.snap' })).toBeNull();
+      expect(parseAutoViewedPatternsBody({ patterns: [1] })).toBeNull();
+      expect(parseAutoViewedPatternsBody(undefined)).toBeNull();
     });
   });
 });

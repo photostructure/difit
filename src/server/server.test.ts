@@ -1750,57 +1750,65 @@ describe('Server Integration Tests', () => {
 
         expect(response.ok).toBe(true);
         const data = (await response.json()) as any;
-        expect(data).toEqual({ version: 1, client: {} });
+        expect(data).toEqual({ version: 1, client: {}, autoViewedPatterns: [] });
       });
 
-      it('PUT /api/user-settings merges and persists client settings', async () => {
-        const first = await fetch(`http://localhost:${port}/api/user-settings`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            client: { diffViewMode: 'split', sidebarWidth: 320 },
-          }),
-        });
-        expect(first.ok).toBe(true);
+      it('GET /api/user-settings returns settings saved before they moved to a cookie', async () => {
+        await fs.writeFile(
+          join(configDir, 'config.json'),
+          JSON.stringify({ version: 1, client: { diffViewMode: 'split', sidebarWidth: 400 } }),
+          'utf-8',
+        );
 
-        const second = await fetch(`http://localhost:${port}/api/user-settings`, {
+        const response = await fetch(`http://localhost:${port}/api/user-settings`);
+        const data = (await response.json()) as any;
+        expect(data.client).toEqual({ diffViewMode: 'split', sidebarWidth: 400 });
+      });
+
+      it('PUT /api/user-settings no longer writes the config file', async () => {
+        const response = await fetch(`http://localhost:${port}/api/user-settings`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ client: { sidebarWidth: 400 } }),
         });
-        expect(second.ok).toBe(true);
-        const merged = (await second.json()) as any;
-        expect(merged.client).toEqual({
-          diffViewMode: 'split',
-          sidebarWidth: 400,
-        });
 
-        const getResponse = await fetch(`http://localhost:${port}/api/user-settings`);
-        const data = (await getResponse.json()) as any;
-        expect(data.client).toEqual({
-          diffViewMode: 'split',
-          sidebarWidth: 400,
-        });
-
-        const stored = JSON.parse(
-          await fs.readFile(join(configDir, 'config.json'), 'utf-8'),
-        ) as any;
-        expect(stored.client).toEqual({
-          diffViewMode: 'split',
-          sidebarWidth: 400,
-        });
+        expect(response.status).toBe(404);
+        await expect(fs.readdir(configDir)).resolves.toEqual([]);
       });
 
-      it('PUT /api/user-settings rejects invalid payloads', async () => {
-        const response = await fetch(`http://localhost:${port}/api/user-settings`, {
+      it('PUT /api/auto-viewed-patterns saves the patterns that /api/diff returns', async () => {
+        const put = await fetch(`http://localhost:${port}/api/auto-viewed-patterns`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ client: 'dark' }),
+          body: JSON.stringify({ patterns: ['*.snap', 'vendor/**'] }),
+        });
+        expect(put.ok).toBe(true);
+
+        const diff = (await (await fetch(`http://localhost:${port}/api/diff`)).json()) as any;
+        expect(diff.autoViewedPatterns).toEqual(['*.snap', 'vendor/**']);
+        const stored = JSON.parse(await fs.readFile(join(configDir, 'config.json'), 'utf-8'));
+        expect(stored.autoViewedPatterns).toEqual(['*.snap', 'vendor/**']);
+      });
+
+      it('GET /api/diff names a config.json that is not valid JSON', async () => {
+        await fs.writeFile(join(configDir, 'config.json'), '{"autoViewedPatterns":[', 'utf-8');
+
+        const response = await fetch(`http://localhost:${port}/api/diff`);
+
+        expect(response.status).toBe(500);
+        const data = (await response.json()) as any;
+        expect(data.error).toContain(join(configDir, 'config.json'));
+      });
+
+      it('PUT /api/auto-viewed-patterns rejects anything but a list of strings', async () => {
+        const response = await fetch(`http://localhost:${port}/api/auto-viewed-patterns`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ patterns: '*.snap' }),
         });
 
         expect(response.status).toBe(400);
-        const data = (await response.json()) as any;
-        expect(data).toHaveProperty('error');
+        await expect(fs.readdir(configDir)).resolves.toEqual([]);
       });
     });
 

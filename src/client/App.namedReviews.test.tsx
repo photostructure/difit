@@ -584,7 +584,7 @@ describe('named captures in the browser', () => {
     const search = `?review=${encodeURIComponent(name)}`;
     window.history.replaceState(null, '', `/${search}`);
     renderApp();
-    expect(await screen.findByText('Failed to fetch diff data')).toBeVisible();
+    expect(await screen.findByText('Named review unavailable')).toBeVisible();
     expect(diffRequests().length).toBeGreaterThan(0);
     for (const [input] of diffRequests()) {
       const url = new URL(String(input), window.location.origin);

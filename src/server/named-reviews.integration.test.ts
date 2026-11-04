@@ -603,7 +603,7 @@ describe('named review HTTP integration', () => {
     const statuses: number[] = [];
     for (const [path, method, contentType] of [
       ['/api/comments', 'POST', 'application/json'],
-      ['/api/user-settings', 'PUT', 'application/json'],
+      ['/api/auto-viewed-patterns', 'PUT', 'application/json'],
       ['/api/comments', 'POST', 'text/plain'],
     ] as const) {
       const response = await fetch(`${running.url}${path}`, {

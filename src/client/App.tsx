@@ -66,7 +66,13 @@ import { useReviewSummary } from './hooks/useReviewSummary';
 import { useReviewPresence } from './hooks/useReviewPresence';
 import { useViewedFiles } from './hooks/useViewedFiles';
 import { useViewport } from './hooks/useViewport';
-import { fetchClientSettings, saveClientSettings } from './services/userSettings';
+import {
+  migrateServerSettings,
+  onSettingsSaveError,
+  readClientSettings,
+  saveClientSettings,
+} from './services/userSettings';
+import { saveAutoViewedPatterns } from './services/autoViewedPatterns';
 import { celebrateApproval } from './utils/approvalCelebration';
 import { hasMultipleCommentAuthors } from './utils/commentAuthors';
 import { copyTextToClipboard } from './utils/clipboard';
@@ -88,9 +94,6 @@ import { hideWhitespaceChanges, remapWhitespaceCursor } from './utils/ignoreWhit
 
 const EMPTY_COMMENT_THREADS: CommentThread[] = [];
 const EMPTY_MERGED_CHUNKS: MergedChunk[] = [];
-const DIFF_VIEW_MODE_STORAGE_KEY = 'difit.diffViewMode';
-const SIDEBAR_WIDTH_STORAGE_KEY = 'difit.sidebarWidth';
-const SIDEBAR_OPEN_STORAGE_KEY = 'difit.sidebarOpen';
 const SIDEBAR_MIN_WIDTH = 200;
 const SIDEBAR_MAX_WIDTH = 600;
 const SIDEBAR_DEFAULT_WIDTH = 280;
@@ -107,55 +110,22 @@ const parseDiffViewMode = (value: unknown): DiffViewMode | null => {
   }
 };
 
-const getStoredDiffViewMode = (): DiffViewMode | null => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  try {
-    return parseDiffViewMode(window.localStorage.getItem(DIFF_VIEW_MODE_STORAGE_KEY));
-  } catch {
-    return null;
-  }
-};
-
-const getInitialDiffViewMode = () => getStoredDiffViewMode() ?? DEFAULT_DIFF_VIEW_MODE;
+const getInitialDiffViewMode = () =>
+  parseDiffViewMode(readClientSettings().diffViewMode) ?? DEFAULT_DIFF_VIEW_MODE;
 
 const clampSidebarWidth = (width: number) =>
   Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, width));
 
-const getStoredSidebarWidth = (): number | null => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-  const stored = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
-  if (!stored) {
-    return null;
-  }
-  const parsed = Number.parseInt(stored, 10);
-  if (!Number.isFinite(parsed)) {
-    return null;
-  }
-  return clampSidebarWidth(parsed);
-};
+const parseSidebarWidth = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? clampSidebarWidth(value) : null;
 
-const getInitialSidebarWidth = () => getStoredSidebarWidth() ?? SIDEBAR_DEFAULT_WIDTH;
+const getInitialSidebarWidth = () =>
+  parseSidebarWidth(readClientSettings().sidebarWidth) ?? SIDEBAR_DEFAULT_WIDTH;
 
-const getStoredSidebarOpen = (): boolean | null => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-  const stored = window.localStorage.getItem(SIDEBAR_OPEN_STORAGE_KEY);
-  if (stored === 'true') {
-    return true;
-  }
-  if (stored === 'false') {
-    return false;
-  }
-  return null;
-};
+const parseSidebarOpen = (value: unknown): boolean | null =>
+  typeof value === 'boolean' ? value : null;
 
-const getInitialFileTreeOpen = () => getStoredSidebarOpen() ?? true;
+const getInitialFileTreeOpen = () => parseSidebarOpen(readClientSettings().sidebarOpen) ?? true;
 
 const readEditorSessionToken = (): string | null =>
   new URLSearchParams(window.location.hash.slice(1)).get(EDITOR_SESSION_FRAGMENT_KEY);
@@ -188,6 +158,8 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [captureReloading, setCaptureReloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [settingsSaveError, setSettingsSaveError] = useState<string | null>(null);
+  useEffect(() => onSettingsSaveError(setSettingsSaveError), []);
   const [isCopiedAll, setIsCopiedAll] = useState(false);
   const [isShipping, setIsShipping] = useState(false);
   const approveButtonRef = useRef<HTMLButtonElement>(null);
@@ -470,6 +442,16 @@ function App() {
     }
   };
 
+  // The server sends its saved patterns with each diff. After an edit in
+  // Settings, this page uses its own value until a page reload; a change made
+  // in another browser meanwhile is overwritten by the next edit here.
+  const [editedAutoViewedPatterns, setEditedAutoViewedPatterns] = useState<string[] | null>(null);
+  const autoViewedPatterns = editedAutoViewedPatterns ?? diffData?.autoViewedPatterns ?? [];
+  const handleAutoViewedPatternsChange = useCallback((patterns: string[]) => {
+    setEditedAutoViewedPatterns(patterns);
+    saveAutoViewedPatterns(patterns);
+  }, []);
+
   // Viewed files management
   const {
     viewedFiles,
@@ -485,7 +467,7 @@ function App() {
     undefined,
     diffData?.files,
     diffData?.repositoryId, // Repository identifier for storage isolation
-    settings.autoViewedPatterns,
+    autoViewedPatterns,
     storageSelection?.baseMode,
     commentsCaptureKey ?? undefined,
     reloadVersion,
@@ -686,11 +668,6 @@ function App() {
 
   const handleDiffModeChange = useCallback((mode: DiffViewMode) => {
     setDiffMode(mode);
-    try {
-      window.localStorage.setItem(DIFF_VIEW_MODE_STORAGE_KEY, mode);
-    } catch {
-      // Ignore localStorage errors (e.g. disabled storage).
-    }
     saveClientSettings({ diffViewMode: mode });
   }, []);
 
@@ -1058,7 +1035,12 @@ function App() {
         const response = await fetch(`/api/diff?${params}`, {
           signal: controller.signal,
         });
-        if (!response.ok) throw new Error('Failed to fetch diff data');
+        if (!response.ok) {
+          // The server explains some failures (e.g. a broken ~/.difit/config.json)
+          // in a JSON body; Express's own error pages are HTML.
+          const body = (await response.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(body?.error ?? 'Failed to fetch diff data');
+        }
         const data = (await response.json()) as DiffResponse;
         if (diffRequestIdRef.current !== requestId) {
           return;
@@ -1170,49 +1152,26 @@ function App() {
     }
   }, [diffMode, isMobile]);
 
-  // Hydrate UI settings from the server-persisted config so they survive
-  // across ports (localStorage is origin-scoped and resets on a new port).
-  // Settings the server doesn't know yet are seeded from localStorage.
+  // A browser without its own settings copies them once from the server's old
+  // config file.
   useEffect(() => {
     let cancelled = false;
 
-    void fetchClientSettings().then((client) => {
+    void migrateServerSettings().then((client) => {
       if (cancelled || !client) {
         return;
       }
-
-      const seed: Record<string, unknown> = {};
-
-      const remoteDiffViewMode = parseDiffViewMode(client.diffViewMode);
-      if (remoteDiffViewMode) {
-        setDiffMode(remoteDiffViewMode);
-      } else {
-        const localDiffViewMode = getStoredDiffViewMode();
-        if (localDiffViewMode) {
-          seed.diffViewMode = localDiffViewMode;
-        }
+      const migratedDiffViewMode = parseDiffViewMode(client.diffViewMode);
+      if (migratedDiffViewMode) {
+        setDiffMode(migratedDiffViewMode);
       }
-
-      if (typeof client.sidebarWidth === 'number' && Number.isFinite(client.sidebarWidth)) {
-        setSidebarWidth(clampSidebarWidth(client.sidebarWidth));
-      } else {
-        const localSidebarWidth = getStoredSidebarWidth();
-        if (localSidebarWidth !== null) {
-          seed.sidebarWidth = localSidebarWidth;
-        }
+      const migratedSidebarWidth = parseSidebarWidth(client.sidebarWidth);
+      if (migratedSidebarWidth !== null) {
+        setSidebarWidth(migratedSidebarWidth);
       }
-
-      if (typeof client.sidebarOpen === 'boolean') {
-        setIsFileTreeOpen(client.sidebarOpen);
-      } else {
-        const localSidebarOpen = getStoredSidebarOpen();
-        if (localSidebarOpen !== null) {
-          seed.sidebarOpen = localSidebarOpen;
-        }
-      }
-
-      if (Object.keys(seed).length > 0) {
-        saveClientSettings(seed);
+      const migratedSidebarOpen = parseSidebarOpen(client.sidebarOpen);
+      if (migratedSidebarOpen !== null) {
+        setIsFileTreeOpen(migratedSidebarOpen);
       }
     });
 
@@ -1221,32 +1180,23 @@ function App() {
     };
   }, []);
 
-  const skipInitialSidebarWidthSaveRef = useRef(true);
+  // Save only values that changed, so opening difit writes no settings cookie,
+  // including when development mode runs mount effects twice.
+  const savedSidebarWidthRef = useRef(sidebarWidth);
   useEffect(() => {
-    try {
-      window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
-    } catch {
-      // Ignore localStorage errors (e.g. disabled storage).
-    }
-    // Skip the mount run so simply opening difit doesn't write the config file.
-    if (skipInitialSidebarWidthSaveRef.current) {
-      skipInitialSidebarWidthSaveRef.current = false;
+    if (sidebarWidth === savedSidebarWidthRef.current) {
       return;
     }
+    savedSidebarWidthRef.current = sidebarWidth;
     saveClientSettings({ sidebarWidth });
   }, [sidebarWidth]);
 
-  const skipInitialSidebarOpenSaveRef = useRef(true);
+  const savedSidebarOpenRef = useRef(isFileTreeOpen);
   useEffect(() => {
-    try {
-      window.localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, String(isFileTreeOpen));
-    } catch {
-      // Ignore localStorage errors (e.g. disabled storage).
-    }
-    if (skipInitialSidebarOpenSaveRef.current) {
-      skipInitialSidebarOpenSaveRef.current = false;
+    if (isFileTreeOpen === savedSidebarOpenRef.current) {
       return;
     }
+    savedSidebarOpenRef.current = isFileTreeOpen;
     saveClientSettings({ sidebarOpen: isFileTreeOpen });
   }, [isFileTreeOpen]);
 
@@ -1826,6 +1776,11 @@ function App() {
               {shipItError || approval.error}
             </span>
           )}
+          {settingsSaveError && (
+            <span role="alert" className="w-full text-xs text-github-danger">
+              {settingsSaveError}
+            </span>
+          )}
         </header>
         <ReviewSummaryPanel
           key={commentsContextKey}
@@ -2045,6 +2000,8 @@ function App() {
             onClose={() => setIsSettingsOpen(false)}
             settings={settings}
             onSettingsChange={updateSettings}
+            autoViewedPatterns={autoViewedPatterns}
+            onAutoViewedPatternsChange={handleAutoViewedPatternsChange}
           />
         )}
 

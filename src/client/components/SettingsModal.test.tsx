@@ -33,7 +33,6 @@ const baseSettings = {
     lasers: true,
     disco: true,
   },
-  autoViewedPatterns: [],
 } satisfies React.ComponentProps<typeof SettingsModal>['settings'];
 
 describe('SettingsModal', () => {
@@ -44,6 +43,8 @@ describe('SettingsModal', () => {
         onClose={vi.fn()}
         settings={baseSettings}
         onSettingsChange={vi.fn()}
+        autoViewedPatterns={[]}
+        onAutoViewedPatternsChange={vi.fn()}
       />,
       { wrapper },
     );
@@ -80,6 +81,8 @@ describe('SettingsModal', () => {
         onClose={vi.fn()}
         settings={baseSettings}
         onSettingsChange={vi.fn()}
+        autoViewedPatterns={[]}
+        onAutoViewedPatternsChange={vi.fn()}
       />,
       { wrapper },
     );
@@ -112,6 +115,8 @@ describe('SettingsModal', () => {
         onClose={vi.fn()}
         settings={baseSettings}
         onSettingsChange={vi.fn()}
+        autoViewedPatterns={[]}
+        onAutoViewedPatternsChange={vi.fn()}
       />,
       { wrapper },
     );
@@ -141,6 +146,8 @@ describe('SettingsModal', () => {
         onClose={vi.fn()}
         settings={settings}
         onSettingsChange={onSettingsChange}
+        autoViewedPatterns={[]}
+        onAutoViewedPatternsChange={vi.fn()}
       />,
       { wrapper },
     );
@@ -183,6 +190,8 @@ describe('SettingsModal', () => {
         onClose={vi.fn()}
         settings={settings}
         onSettingsChange={onSettingsChange}
+        autoViewedPatterns={[]}
+        onAutoViewedPatternsChange={vi.fn()}
       />,
       { wrapper },
     );
@@ -209,14 +218,16 @@ describe('SettingsModal', () => {
   });
 
   it('edits auto-viewed patterns from the system section as newline-delimited values', () => {
-    const onSettingsChange = vi.fn();
+    const onAutoViewedPatternsChange = vi.fn();
 
     render(
       <SettingsModal
         isOpen={true}
         onClose={vi.fn()}
         settings={baseSettings}
-        onSettingsChange={onSettingsChange}
+        onSettingsChange={vi.fn()}
+        autoViewedPatterns={['*.snap']}
+        onAutoViewedPatternsChange={onAutoViewedPatternsChange}
       />,
       { wrapper },
     );
@@ -224,11 +235,12 @@ describe('SettingsModal', () => {
     fireEvent.click(screen.getByRole('button', { name: /^System/ }));
 
     const textarea = screen.getByLabelText('Auto-Mark Viewed Patterns');
+    expect(textarea).toHaveValue('*.snap');
     fireEvent.change(textarea, { target: { value: '*.test.ts\nsrc/generated/**' } });
+    expect(onAutoViewedPatternsChange).toHaveBeenLastCalledWith(['*.test.ts', 'src/generated/**']);
 
-    expect(onSettingsChange).toHaveBeenLastCalledWith({
-      ...baseSettings,
-      autoViewedPatterns: ['*.test.ts', 'src/generated/**'],
-    });
+    fireEvent.click(screen.getByRole('button', { name: 'Reset System Defaults' }));
+    expect(onAutoViewedPatternsChange).toHaveBeenLastCalledWith([]);
+    expect(textarea).toHaveValue('');
   });
 });

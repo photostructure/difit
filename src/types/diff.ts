@@ -80,6 +80,9 @@ export interface DiffResponse {
   commentImportId?: string;
   title?: string;
   targetCommitMessage?: string;
+  // Patterns saved in ~/.difit/config.json (in localStorage on the static demo
+  // site); /api/diff adds them to each response.
+  autoViewedPatterns?: string[];
 }
 
 export interface GeneratedStatusResponse {

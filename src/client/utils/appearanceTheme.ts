@@ -1,10 +1,10 @@
+import { APPEARANCE_SETTINGS_KEY, readClientSettings } from '../services/userSettings';
+
 type ThemePreference = 'light' | 'dark' | 'auto';
 
 export type ColorVisionMode = 'normal' | 'deuteranopia';
 
 export type ResolvedTheme = 'light' | 'dark';
-
-type ThemeStorage = Pick<Storage, 'getItem'>;
 
 type ThemeWindow = Pick<Window, 'matchMedia'>;
 
@@ -81,8 +81,6 @@ const THEME_VALUES: Record<ResolvedTheme, Record<string, string>> = {
   light: LIGHT_THEME_VALUES,
 };
 
-export const APPEARANCE_STORAGE_KEY = 'reviewit-appearance-settings';
-
 const isThemePreference = (value: unknown): value is ThemePreference =>
   value === 'light' || value === 'dark' || value === 'auto';
 
@@ -91,18 +89,6 @@ const isColorVisionMode = (value: unknown): value is ColorVisionMode =>
 
 const isResolvedTheme = (value: string | null): value is ResolvedTheme =>
   value === 'light' || value === 'dark';
-
-const getThemeStorage = (): ThemeStorage | undefined => {
-  if (typeof window === 'undefined') {
-    return undefined;
-  }
-
-  try {
-    return window.localStorage;
-  } catch {
-    return undefined;
-  }
-};
 
 const getThemeWindow = (): ThemeWindow | undefined => {
   if (typeof window === 'undefined') {
@@ -117,39 +103,21 @@ type StoredAppearanceSettings = {
   theme?: ThemePreference;
 };
 
-function getStoredAppearanceSettings(
-  storage: ThemeStorage | undefined = getThemeStorage(),
-): StoredAppearanceSettings | null {
-  if (!storage) {
-    return null;
+function getStoredAppearanceSettings(): StoredAppearanceSettings {
+  const appearance = readClientSettings()[APPEARANCE_SETTINGS_KEY];
+  if (typeof appearance !== 'object' || appearance === null) {
+    return {};
   }
 
-  try {
-    const raw = storage.getItem(APPEARANCE_STORAGE_KEY);
-    if (!raw) {
-      return null;
-    }
-
-    const parsed: unknown = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object') {
-      const settings: StoredAppearanceSettings = {};
-      const candidate = parsed as { colorVision?: unknown; theme?: unknown };
-
-      if (isThemePreference(candidate.theme)) {
-        settings.theme = candidate.theme;
-      }
-
-      if (isColorVisionMode(candidate.colorVision)) {
-        settings.colorVision = candidate.colorVision;
-      }
-
-      return settings;
-    }
-  } catch {
-    return null;
+  const candidate = appearance as { colorVision?: unknown; theme?: unknown };
+  const settings: StoredAppearanceSettings = {};
+  if (isThemePreference(candidate.theme)) {
+    settings.theme = candidate.theme;
   }
-
-  return null;
+  if (isColorVisionMode(candidate.colorVision)) {
+    settings.colorVision = candidate.colorVision;
+  }
+  return settings;
 }
 
 function getSystemTheme(themeWindow: ThemeWindow | undefined = getThemeWindow()): ResolvedTheme {
@@ -170,7 +138,6 @@ export function resolveThemePreference(
 
 export function getResolvedTheme(
   doc: Document | undefined = typeof document === 'undefined' ? undefined : document,
-  storage: ThemeStorage | undefined = getThemeStorage(),
   themeWindow: ThemeWindow | undefined = getThemeWindow(),
 ): ResolvedTheme {
   const documentTheme = doc?.documentElement.getAttribute(THEME_ATTRIBUTE) ?? null;
@@ -178,10 +145,7 @@ export function getResolvedTheme(
     return documentTheme;
   }
 
-  return resolveThemePreference(
-    getStoredAppearanceSettings(storage)?.theme,
-    getSystemTheme(themeWindow),
-  );
+  return resolveThemePreference(getStoredAppearanceSettings().theme, getSystemTheme(themeWindow));
 }
 
 // Color overrides for deuteranopia (red-green color blindness)
@@ -238,16 +202,15 @@ export function applyResolvedTheme(
 
 export function bootstrapAppearanceTheme(
   doc: Document | undefined = typeof document === 'undefined' ? undefined : document,
-  storage: ThemeStorage | undefined = getThemeStorage(),
   themeWindow: ThemeWindow | undefined = getThemeWindow(),
 ) {
   if (!doc) {
     return null;
   }
 
-  const storedSettings = getStoredAppearanceSettings(storage);
-  const resolvedTheme = resolveThemePreference(storedSettings?.theme, getSystemTheme(themeWindow));
-  const colorVision = storedSettings?.colorVision ?? 'normal';
+  const storedSettings = getStoredAppearanceSettings();
+  const resolvedTheme = resolveThemePreference(storedSettings.theme, getSystemTheme(themeWindow));
+  const colorVision = storedSettings.colorVision ?? 'normal';
   applyResolvedTheme(resolvedTheme, colorVision, doc);
   return resolvedTheme;
 }

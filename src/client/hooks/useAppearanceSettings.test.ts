@@ -1,8 +1,11 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { resetClientSettingsForTests } from '../services/userSettings';
-import { APPEARANCE_STORAGE_KEY } from '../utils/appearanceTheme';
+import {
+  readClientSettings,
+  resetClientSettingsForTests,
+  saveClientSettings,
+} from '../services/userSettings';
 
 import { useAppearanceSettings } from './useAppearanceSettings';
 
@@ -51,7 +54,7 @@ const setMatchMedia = (initialMatches: boolean) => {
 
 describe('useAppearanceSettings', () => {
   beforeEach(() => {
-    localStorage.clear();
+    resetClientSettingsForTests();
   });
 
   describe('theme', () => {
@@ -63,13 +66,12 @@ describe('useAppearanceSettings', () => {
     });
 
     it('updates syntax highlighting theme when auto theme follows OS changes', async () => {
-      localStorage.setItem(
-        APPEARANCE_STORAGE_KEY,
-        JSON.stringify({
+      saveClientSettings({
+        appearance: {
           theme: 'auto',
           syntaxTheme: 'vsDark',
-        }),
-      );
+        },
+      });
       const matchMedia = setMatchMedia(true);
 
       const { result } = renderHook(() => useAppearanceSettings());
@@ -88,7 +90,7 @@ describe('useAppearanceSettings', () => {
         expect(result.current.settings.syntaxTheme).toBe('github');
       });
 
-      expect(JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY) ?? '{}')).toMatchObject({
+      expect(readClientSettings().appearance).toMatchObject({
         theme: 'auto',
         syntaxTheme: 'github',
       });
@@ -114,17 +116,25 @@ describe('useAppearanceSettings', () => {
   describe('legacy editor storage', () => {
     it('discards browser-stored editor commands', () => {
       setMatchMedia(false);
-      localStorage.setItem(
-        APPEARANCE_STORAGE_KEY,
-        JSON.stringify({
+      saveClientSettings({
+        appearance: {
           theme: 'dark',
           editor: { id: 'custom', command: 'untrusted', argsTemplate: '%file' },
-        }),
-      );
+        },
+      });
 
       const { result } = renderHook(() => useAppearanceSettings());
 
       expect(result.current.settings).not.toHaveProperty('editor');
+    });
+
+    it('leaves auto-viewed patterns to the server', () => {
+      setMatchMedia(false);
+      saveClientSettings({ appearance: { theme: 'dark', autoViewedPatterns: ['*.snap'] } });
+
+      const { result } = renderHook(() => useAppearanceSettings());
+
+      expect(result.current.settings).not.toHaveProperty('autoViewedPatterns');
     });
   });
 
@@ -134,13 +144,12 @@ describe('useAppearanceSettings', () => {
     });
 
     it('falls back to the default font when fontFamily is unknown', () => {
-      localStorage.setItem(
-        APPEARANCE_STORAGE_KEY,
-        JSON.stringify({
+      saveClientSettings({
+        appearance: {
           theme: 'dark',
           fontFamily: 'Comic Sans MS, cursive',
-        }),
-      );
+        },
+      });
 
       const { result } = renderHook(() => useAppearanceSettings());
 
@@ -148,13 +157,12 @@ describe('useAppearanceSettings', () => {
     });
 
     it('turns on approval animations that saved settings predate', () => {
-      localStorage.setItem(
-        APPEARANCE_STORAGE_KEY,
-        JSON.stringify({
+      saveClientSettings({
+        appearance: {
           theme: 'dark',
           approvalAnimations: { confetti: false, streamers: true, sparkles: true },
-        }),
-      );
+        },
+      });
 
       const { result } = renderHook(() => useAppearanceSettings());
 
@@ -170,13 +178,13 @@ describe('useAppearanceSettings', () => {
     });
   });
 
-  describe('server-persisted settings', () => {
+  describe('settings saved on the server before they moved to a cookie', () => {
     beforeEach(() => {
       setMatchMedia(false);
       resetClientSettingsForTests();
     });
 
-    it('hydrates settings from the server config and caches them locally', async () => {
+    it('copies the server settings into this browser on first load', async () => {
       (global.fetch as any).mockImplementation((url: string) => {
         if (url.includes('/api/user-settings')) {
           return Promise.resolve({
@@ -197,36 +205,10 @@ describe('useAppearanceSettings', () => {
         expect(result.current.settings.fontSize).toBe(16);
       });
 
-      expect(JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY) ?? '{}')).toMatchObject({
+      expect(readClientSettings().appearance).toMatchObject({
         theme: 'light',
         fontSize: 16,
       });
-    });
-
-    it('seeds the server from localStorage when the server has no appearance settings', async () => {
-      localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify({ theme: 'light' }));
-
-      const putBodies: any[] = [];
-      (global.fetch as any).mockImplementation((url: string, init?: RequestInit) => {
-        if (url.includes('/api/user-settings') && init?.method === 'PUT') {
-          putBodies.push(JSON.parse(String(init.body)));
-          return Promise.resolve({ ok: true, json: async () => ({}) });
-        }
-        if (url.includes('/api/user-settings')) {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({ version: 1, client: {} }),
-          });
-        }
-        return Promise.resolve({ ok: false });
-      });
-
-      renderHook(() => useAppearanceSettings());
-
-      await waitFor(() => {
-        expect(putBodies.length).toBeGreaterThan(0);
-      });
-      expect(putBodies[0].client.appearance).toMatchObject({ theme: 'light' });
     });
   });
 });

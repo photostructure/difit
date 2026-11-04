@@ -1,23 +1,23 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 
 import {
   DEFAULT_SETTINGS,
   FONT_FAMILIES,
   type AppearanceSettings,
 } from '../components/SettingsModal';
-import { fetchClientSettings, saveClientSettings } from '../services/userSettings';
-import { normalizeAutoViewedPatterns } from '../utils/autoViewedPatterns';
 import {
-  APPEARANCE_STORAGE_KEY,
+  APPEARANCE_SETTINGS_KEY,
+  migrateServerSettings,
+  readClientSettings,
+  saveClientSettings,
+} from '../services/userSettings';
+import {
   applyResolvedTheme,
   resolveThemePreference,
   type ColorVisionMode,
   type ResolvedTheme,
 } from '../utils/appearanceTheme';
 import { getFallbackSyntaxTheme, isSyntaxThemeForResolvedTheme } from '../utils/themeLoader';
-
-// Key for appearance settings inside the server-persisted client settings object.
-const APPEARANCE_SETTINGS_KEY = 'appearance';
 
 const normalizeStoredSettings = (raw: unknown): AppearanceSettings | null => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -30,6 +30,9 @@ const normalizeStoredSettings = (raw: unknown): AppearanceSettings | null => {
   };
   const sanitized = { ...parsed };
   delete sanitized.editor;
+  // Auto-viewed patterns live on the server. Pre-release builds of the cookie
+  // storage saved them inside the appearance settings, so cookies may hold them.
+  delete sanitized.autoViewedPatterns;
 
   const fontFamilyPrefix =
     typeof parsed.fontFamily === 'string' ? (parsed.fontFamily.split(',').at(0) ?? '') + ',' : '';
@@ -43,7 +46,6 @@ const normalizeStoredSettings = (raw: unknown): AppearanceSettings | null => {
     fontFamily,
     // Animations added since the settings were saved start out on.
     approvalAnimations: { ...DEFAULT_SETTINGS.approvalAnimations, ...parsed.approvalAnimations },
-    autoViewedPatterns: normalizeAutoViewedPatterns(parsed.autoViewedPatterns),
   };
 };
 
@@ -53,55 +55,23 @@ interface UseAppearanceSettingsReturn {
 }
 
 export function useAppearanceSettings(): UseAppearanceSettingsReturn {
-  const [settings, setSettings] = useState<AppearanceSettings>(() => {
-    try {
-      const stored = localStorage.getItem(APPEARANCE_STORAGE_KEY);
-      if (stored) {
-        const normalized = normalizeStoredSettings(JSON.parse(stored));
-        if (normalized) {
-          return normalized;
-        }
-      }
-    } catch (error) {
-      console.warn('Failed to load appearance settings from localStorage:', error);
-    }
-    return DEFAULT_SETTINGS;
-  });
+  const [settings, setSettings] = useState<AppearanceSettings>(
+    () =>
+      normalizeStoredSettings(readClientSettings()[APPEARANCE_SETTINGS_KEY]) ?? DEFAULT_SETTINGS,
+  );
 
-  const settingsRef = useRef(settings);
-  useEffect(() => {
-    settingsRef.current = settings;
-  }, [settings]);
-
-  // Hydrate from the server-persisted settings (shared across ports); if the
-  // server has none yet but localStorage does, seed the server from it.
+  // A browser without its own settings copies them once from the server's old
+  // config file.
   useEffect(() => {
     let cancelled = false;
 
-    void fetchClientSettings().then((client) => {
+    void migrateServerSettings().then((client) => {
       if (cancelled || !client) {
         return;
       }
-
-      const remote = normalizeStoredSettings(client[APPEARANCE_SETTINGS_KEY]);
-      if (remote) {
-        setSettings(remote);
-        try {
-          localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify(remote));
-        } catch {
-          // localStorage is only a cache here; ignore write failures.
-        }
-        return;
-      }
-
-      let hasLocalSettings = false;
-      try {
-        hasLocalSettings = localStorage.getItem(APPEARANCE_STORAGE_KEY) !== null;
-      } catch {
-        // Treat unreadable localStorage as empty.
-      }
-      if (hasLocalSettings) {
-        saveClientSettings({ [APPEARANCE_SETTINGS_KEY]: settingsRef.current });
+      const migrated = normalizeStoredSettings(client[APPEARANCE_SETTINGS_KEY]);
+      if (migrated) {
+        setSettings(migrated);
       }
     });
 
@@ -118,11 +88,6 @@ export function useAppearanceSettings(): UseAppearanceSettingsReturn {
   );
 
   const saveSettings = useCallback((newSettings: AppearanceSettings) => {
-    try {
-      localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify(newSettings));
-    } catch (error) {
-      console.warn('Failed to save appearance settings to localStorage:', error);
-    }
     saveClientSettings({ [APPEARANCE_SETTINGS_KEY]: newSettings });
   }, []);
 

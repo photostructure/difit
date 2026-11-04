@@ -117,10 +117,28 @@ const resolveRequestedSnapshotId = (manifest: StaticDiffManifest): string | null
   return resolveInitialRevisionId(manifest);
 };
 
+// The demo site has no server, so this browser keeps the auto-viewed patterns.
+const AUTO_VIEWED_PATTERNS_STORAGE_KEY = 'difit-demo.autoViewedPatterns';
+
+// Before they had their own key, the demo kept them with the appearance settings.
+const LEGACY_APPEARANCE_STORAGE_KEY = 'reviewit-appearance-settings';
+
+const readAutoViewedPatterns = (): string[] => {
+  const saved = localStorage.getItem(AUTO_VIEWED_PATTERNS_STORAGE_KEY);
+  if (saved !== null) {
+    return JSON.parse(saved) as string[];
+  }
+  const legacy = JSON.parse(localStorage.getItem(LEGACY_APPEARANCE_STORAGE_KEY) ?? '{}') as {
+    autoViewedPatterns?: string[];
+  };
+  return legacy.autoViewedPatterns ?? [];
+};
+
 const buildDiffPayload = (diff: DiffResponse): DiffResponse => ({
   ...diff,
   clearComments: false,
   openInEditorAvailable: false,
+  autoViewedPatterns: readAutoViewedPatterns(),
 });
 
 export const installStaticApiBridge = (dataset: StaticDiffDataset): StaticApiBridge => {
@@ -223,6 +241,12 @@ export const installStaticApiBridge = (dataset: StaticDiffDataset): StaticApiBri
 
     if (requestUrl.pathname === '/api/open-in-editor') {
       return jsonResponse({ error: 'Open in editor is disabled in static mode' }, 400);
+    }
+
+    if (requestUrl.pathname === '/api/auto-viewed-patterns' && init?.method === 'PUT') {
+      const { patterns } = JSON.parse(String(init.body)) as { patterns: string[] };
+      localStorage.setItem(AUTO_VIEWED_PATTERNS_STORAGE_KEY, JSON.stringify(patterns));
+      return jsonResponse({ patterns });
     }
 
     return originalFetch(input, init);

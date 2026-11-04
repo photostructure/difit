@@ -29,6 +29,8 @@ All notable changes to this project will be documented in this file.
 - Rename the header's **Repository** button to **About**.
 - Stop two ✨ emoji from rising beside the files-viewed status when the last file is marked **Viewed**; **All files viewed** and the full progress bar still mark completion.
 - Open **Settings** from its own gear button instead of from **View**, and drop **View**'s light/dark switch, which duplicated **Settings** → **Theme**. Below 1024px wide, **View**, **Settings**, **About**, and **Conversation** show only their icons, so the header fits one row on an iPad in portrait.
+- Keep UI settings (appearance, Split/Unified, file tree width and visibility) in a cookie in each browser instead of `~/.difit/config.json`, so an iPad and a desktop keep separate font sizes and themes. Cookies ignore the port, so settings still survive difit starting on a new port. Each browser copies the settings already saved in `~/.difit/config.json` once. Auto-viewed patterns stay in `~/.difit/config.json`, shared by every browser, and save through `PUT /api/auto-viewed-patterns`; `PUT /api/user-settings` is removed. A browser that refuses the cookie shows an error in the header instead of losing settings changes silently.
+- Stop loading the diff when `~/.difit/config.json` is not valid JSON or does not hold an object, and name the file on the page; difit used to ignore such a file. Diff load errors now show the server's message instead of "Failed to fetch diff data" when it sends one.
 
 ## [5.1.0] - 2026-10-29
 

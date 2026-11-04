@@ -48,7 +48,11 @@ import { Conversation, registerConversationRoutes } from './conversation.js';
 import { ReviewPresence } from './review-presence.js';
 import { emptyReviewSummary, parseReviewSummaryInput } from './review-summary.js';
 import { GitDiffParser } from './git-diff.js';
-import { parseUserSettingsPatch, readUserConfig, updateUserClientSettings } from './user-config.js';
+import {
+  parseAutoViewedPatternsBody,
+  readUserConfig,
+  writeAutoViewedPatterns,
+} from './user-config.js';
 
 import {
   type BaseMode,
@@ -661,6 +665,16 @@ export async function startServer(options: ServerOptions): Promise<{
       (requestedSelection.targetCommitish || (options.stdinDiff ? 'stdin' : undefined));
     const requestedBaseMode = responseDiffData.requestedBaseMode ?? requestedSelection.baseMode;
 
+    // A config.json the user broke by hand blocks the diff; the message names
+    // the file so the page can say what to fix.
+    let autoViewedPatterns: string[];
+    try {
+      ({ autoViewedPatterns } = await readUserConfig());
+    } catch (error) {
+      res.status(500).json({ error: (error as Error).message });
+      return;
+    }
+
     res.json({
       ...responseDiffData,
       ignoreWhitespace,
@@ -677,6 +691,7 @@ export async function startServer(options: ServerOptions): Promise<{
       title: options.title,
       commentImports: shouldIncludeCommentImports ? initialCommentImports : undefined,
       commentImportId: shouldIncludeCommentImports ? commentImportId : undefined,
+      autoViewedPatterns,
     });
   });
 
@@ -1371,31 +1386,32 @@ export async function startServer(options: ServerOptions): Promise<{
     }
   });
 
+  // Read-only: browsers copy settings saved here before they moved to a cookie.
   app.get('/api/user-settings', async (_req, res) => {
     const config = await readUserConfig();
     res.json(config);
   });
 
-  app.put('/api/user-settings', async (req, res) => {
-    let patch: Record<string, unknown> | null;
+  app.put('/api/auto-viewed-patterns', async (req, res) => {
+    let patterns: string[] | null;
     try {
       const body: unknown = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-      patch = parseUserSettingsPatch(body);
+      patterns = parseAutoViewedPatternsBody(body);
     } catch {
-      patch = null;
+      patterns = null;
     }
 
-    if (!patch) {
-      res.status(400).json({ error: 'Invalid user settings payload' });
+    if (!patterns) {
+      res.status(400).json({ error: 'Expected { patterns: string[] }' });
       return;
     }
 
     try {
-      const config = await updateUserClientSettings(patch);
-      res.json(config);
+      await writeAutoViewedPatterns(patterns);
+      res.json({ patterns });
     } catch (error) {
-      console.error('Error saving user settings:', error);
-      res.status(500).json({ error: 'Failed to save user settings' });
+      console.error('Error saving auto-viewed patterns:', error);
+      res.status(500).json({ error: 'Failed to save auto-viewed patterns' });
     }
   });
 

@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  APPEARANCE_STORAGE_KEY,
   bootstrapAppearanceTheme,
   getResolvedTheme,
   resolveThemePreference,
 } from './appearanceTheme';
+import { resetClientSettingsForTests, saveClientSettings } from '../services/userSettings';
 
 const setMatchMedia = (matches: boolean) => {
   Object.defineProperty(window, 'matchMedia', {
@@ -21,7 +21,7 @@ const setMatchMedia = (matches: boolean) => {
 
 describe('appearanceTheme', () => {
   beforeEach(() => {
-    localStorage.clear();
+    resetClientSettingsForTests();
     document.documentElement.removeAttribute('data-color-vision');
     document.documentElement.removeAttribute('data-theme');
     document.documentElement.removeAttribute('style');
@@ -35,12 +35,11 @@ describe('appearanceTheme', () => {
   });
 
   it('bootstraps the saved light theme before app mount', () => {
-    localStorage.setItem(
-      APPEARANCE_STORAGE_KEY,
-      JSON.stringify({
+    saveClientSettings({
+      appearance: {
         theme: 'light',
-      }),
-    );
+      },
+    });
 
     expect(bootstrapAppearanceTheme()).toBe('light');
     expect(document.documentElement.getAttribute('data-theme')).toBe('light');
@@ -50,13 +49,12 @@ describe('appearanceTheme', () => {
   });
 
   it('bootstraps the saved color vision mode before app mount', () => {
-    localStorage.setItem(
-      APPEARANCE_STORAGE_KEY,
-      JSON.stringify({
+    saveClientSettings({
+      appearance: {
         colorVision: 'deuteranopia',
         theme: 'dark',
-      }),
-    );
+      },
+    });
 
     expect(bootstrapAppearanceTheme()).toBe('dark');
     expect(document.documentElement.getAttribute('data-color-vision')).toBe('deuteranopia');
@@ -66,12 +64,11 @@ describe('appearanceTheme', () => {
   });
 
   it('resolves auto theme from system preference when no attribute is present', () => {
-    localStorage.setItem(
-      APPEARANCE_STORAGE_KEY,
-      JSON.stringify({
+    saveClientSettings({
+      appearance: {
         theme: 'auto',
-      }),
-    );
+      },
+    });
     setMatchMedia(false);
 
     expect(getResolvedTheme()).toBe('light');

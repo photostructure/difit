@@ -1,3 +1,7 @@
+// ~/.difit/config.json holds the auto-viewed patterns, which apply to files
+// rather than screens and so are shared by every browser. Its `client` object
+// holds UI settings that difit saved before they moved to a per-browser
+// cookie; browsers read it once to copy them.
 import { promises as fs } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
@@ -5,6 +9,7 @@ import { dirname, join } from 'path';
 export interface UserConfig {
   version: 1;
   client: Record<string, unknown>;
+  autoViewedPatterns: string[];
 }
 
 const CONFIG_VERSION = 1 as const;
@@ -20,49 +25,69 @@ export function getUserConfigPath(): string {
   return join(homedir(), '.difit', 'config.json');
 }
 
-function createDefaultUserConfig(): UserConfig {
-  return { version: CONFIG_VERSION, client: {} };
-}
-
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-export function parseUserSettingsPatch(body: unknown): Record<string, unknown> | null {
-  if (!isPlainObject(body) || !isPlainObject(body.client)) {
-    return null;
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+// A missing file means nothing is saved yet. Any other failure throws, so a
+// hand-edited file with a typo is reported instead of overwritten.
+async function readConfigFile(path: string): Promise<Record<string, unknown>> {
+  let text: string;
+  try {
+    text = await fs.readFile(path, 'utf-8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return {};
+    }
+    throw error;
   }
-  if (Buffer.byteLength(JSON.stringify(body.client), 'utf-8') > MAX_USER_CONFIG_BYTES) {
-    return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`${path} is not valid JSON: ${(error as Error).message}`);
   }
-  return body.client;
+  if (!isPlainObject(parsed)) {
+    throw new Error(`${path} does not hold a JSON object`);
+  }
+  return parsed;
 }
 
 export async function readUserConfig(path: string = getUserConfigPath()): Promise<UserConfig> {
-  try {
-    const raw = await fs.readFile(path, 'utf-8');
-    const parsed: unknown = JSON.parse(raw);
-    if (isPlainObject(parsed) && isPlainObject(parsed.client)) {
-      return { version: CONFIG_VERSION, client: parsed.client };
-    }
-  } catch {
-    // Missing or unreadable config falls back to defaults.
-  }
-  return createDefaultUserConfig();
+  const raw = await readConfigFile(path);
+  const client = isPlainObject(raw.client) ? raw.client : {};
+  // Patterns saved before they had their own key sit in the appearance
+  // settings. Browsers copy `client` into a size-limited cookie, so the
+  // patterns are returned only under their own key.
+  const legacyAppearance = isPlainObject(client.appearance) ? client.appearance : undefined;
+  const { autoViewedPatterns: legacyPatterns, ...appearance } = legacyAppearance ?? {};
+  const autoViewedPatterns = isStringArray(raw.autoViewedPatterns)
+    ? raw.autoViewedPatterns
+    : isStringArray(legacyPatterns)
+      ? legacyPatterns
+      : [];
+  return {
+    version: CONFIG_VERSION,
+    client: legacyAppearance ? { ...client, appearance } : client,
+    autoViewedPatterns,
+  };
 }
 
-// Shallow-merges the patch into the stored client settings. Concurrent difit
-// servers may write the same file; settings changes are rare enough that
-// last-write-wins per top-level key is acceptable.
-export async function updateUserClientSettings(
-  patch: Record<string, unknown>,
+export function parseAutoViewedPatternsBody(body: unknown): string[] | null {
+  return isPlainObject(body) && isStringArray(body.patterns) ? body.patterns : null;
+}
+
+export async function writeAutoViewedPatterns(
+  patterns: string[],
   path: string = getUserConfigPath(),
-): Promise<UserConfig> {
-  const current = await readUserConfig(path);
-  const next: UserConfig = {
-    version: CONFIG_VERSION,
-    client: { ...current.client, ...patch },
-  };
+): Promise<void> {
+  const raw = await readConfigFile(path);
+  const next = { ...raw, version: CONFIG_VERSION, autoViewedPatterns: patterns };
 
   const serialized = `${JSON.stringify(next, null, 2)}\n`;
   if (Buffer.byteLength(serialized, 'utf-8') > MAX_USER_CONFIG_BYTES) {
@@ -74,5 +99,4 @@ export async function updateUserClientSettings(
   const tmpPath = `${path}.${process.pid}.tmp`;
   await fs.writeFile(tmpPath, serialized, 'utf-8');
   await fs.rename(tmpPath, path);
-  return next;
 }

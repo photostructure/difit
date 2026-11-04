@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { HotkeysProvider } from 'react-hotkeys-hook';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '@testing-library/jest-dom';
@@ -13,6 +14,11 @@ import { useDiffComments } from './hooks/useDiffComments';
 import { useFileWatch } from './hooks/useFileWatch';
 import { useViewedFiles } from './hooks/useViewedFiles';
 import { useViewport } from './hooks/useViewport';
+import {
+  readClientSettings,
+  resetClientSettingsForTests,
+  saveClientSettings,
+} from './services/userSettings';
 
 async function openViewMenu() {
   const button = await screen.findByRole('button', { name: 'View' });
@@ -182,6 +188,7 @@ const renderApp = () => {
 beforeEach(() => {
   window.history.replaceState(null, '', '/');
   window.localStorage.clear();
+  resetClientSettingsForTests();
   vi.unstubAllEnvs();
   MockEventSource.clearInstances();
   mockViewedFiles = new Set<string>();
@@ -687,6 +694,127 @@ describe('App Component - Header display controls', () => {
 
     await waitFor(() => {
       expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
+    });
+  });
+});
+
+describe('App Component - Diff load errors', () => {
+  it("shows the server's explanation when the diff fails to load", async () => {
+    vi.mocked(global.fetch).mockImplementation(async (url) =>
+      String(url).startsWith('/api/diff')
+        ? ({
+            ok: false,
+            status: 500,
+            json: async () => ({ error: '/home/u/.difit/config.json is not valid JSON' }),
+          } as Response)
+        : ({ ok: false, status: 404, json: async () => ({}) } as Response),
+    );
+
+    renderApp();
+
+    expect(
+      await screen.findByText('/home/u/.difit/config.json is not valid JSON'),
+    ).toBeInTheDocument();
+  });
+
+  it('falls back to a generic message when the error page is not JSON', async () => {
+    vi.mocked(global.fetch).mockImplementation(
+      async () =>
+        ({
+          ok: false,
+          status: 400,
+          json: async () => {
+            throw new SyntaxError("Unexpected token '<'");
+          },
+        }) as unknown as Response,
+    );
+
+    renderApp();
+
+    expect(await screen.findByText('Failed to fetch diff data')).toBeInTheDocument();
+  });
+});
+
+describe('App Component - Settings copied from the server', () => {
+  it('keeps the server sidebar settings when development mode replays mount effects', async () => {
+    mockFetch(mockDiffResponse);
+    const baseFetch = vi.mocked(global.fetch).getMockImplementation()!;
+    vi.mocked(global.fetch).mockImplementation(async (url, init) =>
+      String(url) === '/api/user-settings'
+        ? ({
+            ok: true,
+            json: async () => ({ version: 1, client: { sidebarWidth: 420, sidebarOpen: false } }),
+          } as Response)
+        : baseFetch(url, init),
+    );
+
+    render(
+      <StrictMode>
+        <HotkeysProvider initiallyActiveScopes={['navigation']}>
+          <App />
+        </HotkeysProvider>
+      </StrictMode>,
+    );
+
+    await waitFor(() => {
+      expect(readClientSettings()).toMatchObject({ sidebarWidth: 420, sidebarOpen: false });
+    });
+  });
+});
+
+describe('App Component - Settings the browser refuses to keep', () => {
+  afterEach(() => {
+    delete (document as { cookie?: string }).cookie;
+  });
+
+  it('says so in the header and keeps the page', async () => {
+    mockFetch(mockDiffResponse);
+    // As Chromium does in a cross-site frame, or with cookies blocked.
+    Object.defineProperty(document, 'cookie', { configurable: true, get: () => '', set: () => {} });
+    renderApp();
+
+    fireEvent.click(await screen.findByRole('button', { name: /toggle file tree panel/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/did not keep/);
+    expect(screen.getByRole('button', { name: /toggle file tree panel/i })).toBeInTheDocument();
+  });
+});
+
+describe('App Component - Auto-viewed patterns', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockComments = [];
+    mockConfirm.mockReturnValue(false);
+  });
+
+  it('auto-marks files with the patterns saved on the server', async () => {
+    mockFetch({ ...mockDiffResponse, autoViewedPatterns: ['*.snap'] });
+    renderApp();
+
+    await waitFor(() => {
+      expect(vi.mocked(useViewedFiles).mock.lastCall?.[6]).toEqual(['*.snap']);
+    });
+  });
+
+  it('saves edited patterns to the server and uses them', async () => {
+    mockFetch({ ...mockDiffResponse, autoViewedPatterns: ['*.snap'] });
+    renderApp();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: /^System/ }));
+    const textarea = screen.getByLabelText('Auto-Mark Viewed Patterns');
+    expect(textarea).toHaveValue('*.snap');
+    fireEvent.change(textarea, { target: { value: 'vendor/**' } });
+
+    expect(vi.mocked(useViewedFiles).mock.lastCall?.[6]).toEqual(['vendor/**']);
+    await waitFor(() => {
+      expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+        '/api/auto-viewed-patterns',
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify({ patterns: ['vendor/**'] }),
+        }),
+      );
     });
   });
 });
@@ -1524,9 +1652,9 @@ describe('App Component - Comment sync', () => {
 });
 
 describe('App Component - Diff Mode Persistence', () => {
-  it('initializes the selected view mode from localStorage', async () => {
+  it('initializes the selected view mode from the settings cookie', async () => {
     mockFetch(mockDiffResponse);
-    window.localStorage.setItem('difit.diffViewMode', 'unified');
+    saveClientSettings({ diffViewMode: 'unified' });
 
     renderApp();
 
@@ -1538,7 +1666,7 @@ describe('App Component - Diff Mode Persistence', () => {
     });
   });
 
-  it('persists the selected view mode to localStorage', async () => {
+  it('persists the selected view mode to the settings cookie', async () => {
     mockFetch(mockDiffResponse);
 
     renderApp();
@@ -1547,7 +1675,7 @@ describe('App Component - Diff Mode Persistence', () => {
     const unifiedButton = await screen.findByRole('button', { name: 'Unified' });
     fireEvent.click(unifiedButton);
 
-    expect(window.localStorage.getItem('difit.diffViewMode')).toBe('unified');
+    expect(readClientSettings().diffViewMode).toBe('unified');
   });
 
   it('keeps the selected view mode after triggering refresh', async () => {
@@ -1883,8 +2011,8 @@ describe('App Component - Sidebar persistence', () => {
     mockFetch(mockDiffResponse);
   });
 
-  it('restores file tree open state from localStorage', async () => {
-    window.localStorage.setItem('difit.sidebarOpen', 'false');
+  it('restores file tree open state from the settings cookie', async () => {
+    saveClientSettings({ sidebarOpen: false });
 
     renderApp();
 
@@ -1899,12 +2027,12 @@ describe('App Component - Sidebar persistence', () => {
 
     fireEvent.click(toggleButton);
     await waitFor(() => {
-      expect(window.localStorage.getItem('difit.sidebarOpen')).toBe('false');
+      expect(readClientSettings().sidebarOpen).toBe(false);
     });
 
     fireEvent.click(toggleButton);
     await waitFor(() => {
-      expect(window.localStorage.getItem('difit.sidebarOpen')).toBe('true');
+      expect(readClientSettings().sidebarOpen).toBe(true);
     });
   });
 });

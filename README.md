@@ -308,9 +308,12 @@ and approval together. The review picker switches comparisons and shows capture 
 **About** opens agent, session, repository, and server information in a right-side panel.
 **View** switches between Split and Unified and toggles whitespace. The gear button
 opens **Settings** for font size, font family, theme, syntax theme, color vision,
-approval animations, and auto-viewed patterns. Below 1024px wide, **View**,
-**Settings**, **About**, and **Conversation** show only their icons. Copy-all and agent
-resume actions live in **Conversation**; file-view progress sits above the file list.
+approval animations, and auto-viewed patterns. Each browser keeps its own settings in a
+cookie, so a tablet and a desktop can use different font sizes; auto-viewed patterns
+are saved in `~/.difit/config.json` and shared by every browser. Below 1024px wide,
+**View**, **Settings**, **About**, and **Conversation** show only their icons. Copy-all
+and agent resume actions live in **Conversation**; file-view progress sits above the
+file list.
 
 The approval split button offers **Approve as-is** and **Approve after comments are
 addressed**. Conditional approval stays pending until every recorded comment revision

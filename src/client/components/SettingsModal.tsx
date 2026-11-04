@@ -32,7 +32,6 @@ interface AppearanceSettings {
   colorVision: ColorVisionMode;
   /** Which bursts the Approve button may fire; each approval picks one at random. */
   approvalAnimations: Record<ApprovalAnimation, boolean>;
-  autoViewedPatterns: string[];
 }
 
 interface SettingsModalProps {
@@ -40,6 +39,9 @@ interface SettingsModalProps {
   onClose: () => void;
   settings: AppearanceSettings;
   onSettingsChange: (settings: AppearanceSettings) => void;
+  // Saved on the server, not with the per-browser appearance settings.
+  autoViewedPatterns: string[];
+  onAutoViewedPatternsChange: (patterns: string[]) => void;
 }
 
 type SettingsSection = 'appearance' | 'system';
@@ -60,7 +62,6 @@ export const DEFAULT_SETTINGS: AppearanceSettings = {
     lasers: true,
     disco: true,
   },
-  autoViewedPatterns: [],
 };
 
 export const FONT_FAMILIES = [
@@ -95,9 +96,16 @@ const SETTINGS_SECTIONS = [
   },
 ] as const;
 
-export function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: SettingsModalProps) {
+export function SettingsModal({
+  isOpen,
+  onClose,
+  settings,
+  onSettingsChange,
+  autoViewedPatterns,
+  onAutoViewedPatternsChange,
+}: SettingsModalProps) {
   const [autoViewedPatternsInput, setAutoViewedPatternsInput] = useState(
-    formatAutoViewedPatterns(settings.autoViewedPatterns),
+    formatAutoViewedPatterns(autoViewedPatterns),
   );
   const [activeSection, setActiveSection] = useState<SettingsSection>('appearance');
   const { enableScope, disableScope } = useHotkeysContext();
@@ -170,11 +178,8 @@ export function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: S
       return;
     }
 
-    onSettingsChange({
-      ...settings,
-      autoViewedPatterns: DEFAULT_SETTINGS.autoViewedPatterns,
-    });
-    setAutoViewedPatternsInput(formatAutoViewedPatterns(DEFAULT_SETTINGS.autoViewedPatterns));
+    onAutoViewedPatternsChange([]);
+    setAutoViewedPatternsInput('');
   };
 
   const setAllApprovalAnimations = (enabled: boolean) => {
@@ -411,10 +416,7 @@ export function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: S
                     value={autoViewedPatternsInput}
                     onChange={(e) => {
                       setAutoViewedPatternsInput(e.target.value);
-                      onSettingsChange({
-                        ...settings,
-                        autoViewedPatterns: parseAutoViewedPatterns(e.target.value),
-                      });
+                      onAutoViewedPatternsChange(parseAutoViewedPatterns(e.target.value));
                     }}
                     rows={6}
                     spellCheck={false}
