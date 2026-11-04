@@ -286,6 +286,18 @@ export function CommentsListModal({
         className="relative flex h-full w-full max-w-2xl flex-col overflow-hidden border border-github-border bg-github-bg-primary shadow-lg"
       >
         <div className="sticky top-0 border-b border-github-border bg-github-bg-primary px-6 py-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 id="conversation-title" className="text-lg font-semibold ui-label">
+              Conversation
+            </h2>
+            <button
+              onClick={onClose}
+              className="text-github-text-secondary transition-colors hover:text-github-text-primary"
+              aria-label="Close conversation"
+            >
+              <X size={20} />
+            </button>
+          </div>
           {(headerActions || onMarkAllRead) && (
             <div className="mb-3 flex flex-wrap items-center gap-3">
               {headerActions}
@@ -302,19 +314,47 @@ export function CommentsListModal({
               )}
             </div>
           )}
-          <div className="mb-2 flex items-center justify-between">
-            <h2 id="conversation-title" className="text-lg font-semibold ui-label">
-              Conversation
-            </h2>
-            <button
-              onClick={onClose}
-              className="text-github-text-secondary transition-colors hover:text-github-text-primary"
-              aria-label="Close conversation"
-            >
-              <X size={20} />
-            </button>
-          </div>
-          <div className="text-xs text-github-text-secondary">
+          <fieldset role="radiogroup" aria-label="Conversation filter">
+            <legend className="mb-2 text-xs text-github-text-secondary">Show conversations</legend>
+            <div className="flex flex-wrap gap-2">
+              {(
+                [
+                  ['all', 'All'],
+                  ['open', 'Open'],
+                  ['resolved', 'Resolved'],
+                  ['unread', 'Unread'],
+                ] as const
+              ).map(([value, label]) => (
+                <label key={value} className="cursor-pointer">
+                  <input
+                    type="radio"
+                    name={filterName}
+                    value={value}
+                    checked={filter === value}
+                    onChange={() => {
+                      setFilter(value);
+                      setSelectedIndex(0);
+                    }}
+                    className="peer sr-only"
+                  />
+                  <span
+                    className={`inline-flex rounded-full border px-3 py-1.5 text-sm transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-github-accent ${
+                      filter === value
+                        ? 'bg-github-accent text-white border-github-accent'
+                        : 'bg-github-bg-tertiary text-github-text-secondary border-github-border hover:text-github-text-primary'
+                    }`}
+                  >
+                    {label}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <p className="mt-3 text-xs text-github-text-secondary">
+            Blue dots mark unread replies. Click a reply or use Mark read; Mark unread reverses it.
+            Scrolling and closing this panel never mark replies read.
+          </p>
+          <div className="mt-2 text-xs text-github-text-secondary">
             <span className="font-mono">j/k</span> or <span className="font-mono">↑/↓</span> to
             navigate • <span className="font-mono">Enter</span> to jump •{' '}
             <span className="font-mono">d</span> to resolve/reopen •{' '}
@@ -324,50 +364,6 @@ export function CommentsListModal({
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="p-6">
-            <div className="mb-5 border-b border-github-border pb-5">
-              <fieldset role="radiogroup" aria-label="Conversation filter">
-                <legend className="mb-2 text-xs text-github-text-secondary">
-                  Show conversations
-                </legend>
-                <div className="flex flex-wrap gap-2">
-                  {(
-                    [
-                      ['all', 'All'],
-                      ['open', 'Open'],
-                      ['resolved', 'Resolved'],
-                      ['unread', 'Unread'],
-                    ] as const
-                  ).map(([value, label]) => (
-                    <label key={value} className="cursor-pointer">
-                      <input
-                        type="radio"
-                        name={filterName}
-                        value={value}
-                        checked={filter === value}
-                        onChange={() => {
-                          setFilter(value);
-                          setSelectedIndex(0);
-                        }}
-                        className="peer sr-only"
-                      />
-                      <span
-                        className={`inline-flex rounded-full border px-3 py-1.5 text-sm transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-github-accent ${
-                          filter === value
-                            ? 'bg-github-accent text-white border-github-accent'
-                            : 'bg-github-bg-tertiary text-github-text-secondary border-github-border hover:text-github-text-primary'
-                        }`}
-                      >
-                        {label}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-              <p className="mt-3 text-xs text-github-text-secondary">
-                Blue dots mark unread replies. Click a reply or use Mark read; Mark unread reverses
-                it. Scrolling and closing this panel never mark replies read.
-              </p>
-            </div>
             {onAddGeneralComment && (
               <div className="mb-6 border-b border-github-border pb-5">
                 <CommentForm

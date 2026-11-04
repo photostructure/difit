@@ -188,6 +188,30 @@ describe('CommentsListModal', () => {
     expect(screen.getByText('src/file2.ts:20-25')).toBeInTheDocument();
   });
 
+  it('heads the panel with its title, then actions, then filters, outside the scrolling threads', () => {
+    render(
+      <CommentsListModal
+        isOpen
+        onClose={vi.fn()}
+        onNavigate={vi.fn()}
+        comments={mockThreads}
+        onToggleThreadResolved={mockRemoveThread}
+        onGenerateThreadPrompt={mockGenerateThreadPrompt}
+        onReplyToThread={mockReplyToThread}
+        onRemoveMessage={mockRemoveMessage}
+        onUpdateMessage={mockUpdateMessage}
+        headerActions={<button type="button">Copy All Prompt</button>}
+      />,
+      { wrapper },
+    );
+    const title = screen.getByRole('heading', { name: 'Conversation' });
+    const action = screen.getByRole('button', { name: 'Copy All Prompt' });
+    const filter = screen.getByRole('radiogroup', { name: 'Conversation filter' });
+    expect(title.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(action.compareDocumentPosition(filter) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(filter.closest('.overflow-y-auto')).toBeNull();
+  });
+
   it('shows author badges when enabled', () => {
     render(
       <CommentsListModal
