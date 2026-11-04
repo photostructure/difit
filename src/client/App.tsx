@@ -1,12 +1,4 @@
-import {
-  Bell,
-  Info,
-  GitBranch,
-  MessageSquare,
-  PanelLeftClose,
-  PanelLeft,
-  Keyboard,
-} from 'lucide-react';
+import { Info, GitBranch, MessageSquare, PanelLeftClose, PanelLeft, Keyboard } from 'lucide-react';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
 import type { ApprovalMode, ConversationSnapshot } from '../types/conversation';
@@ -45,7 +37,7 @@ import { Logo } from './components/Logo';
 import { ReloadButton } from './components/ReloadButton';
 import { ReviewSummaryPanel } from './components/ReviewSummaryPanel';
 import { ReviewPresenceIndicator } from './components/ReviewPresenceIndicator';
-import { AgentUpdatesPanel } from './components/AgentUpdatesPanel';
+import { UnreadBadge } from './components/UnreadBadge';
 import { useAgentUpdates } from './hooks/useAgentUpdates';
 import { RevisionDetailModal } from './components/RevisionDetailModal';
 import { SettingsModal } from './components/SettingsModal';
@@ -204,14 +196,8 @@ function App() {
   const sparkleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(sparkleTimer.current), []);
   const [isCommentsListOpen, setIsCommentsListOpen] = useState(false);
-  const [isAgentUpdatesOpen, setIsAgentUpdatesOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const closeAbout = useCallback(() => setIsAboutOpen(false), []);
-  const [focusedAgentMessage, setFocusedAgentMessage] = useState<{
-    threadId: string;
-    messageId: string;
-  } | null>(null);
-  const closeAgentUpdates = useCallback(() => setIsAgentUpdatesOpen(false), []);
   const [isRevisionModalOpen, setIsRevisionModalOpen] = useState(false);
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
   const collapsedInitializedRef = useRef(false);
@@ -803,7 +789,7 @@ function App() {
       })),
     [threads, deletedComments, fileLineIndexByPath, diffData?.capture],
   );
-  const { updates: agentUpdates, markSeen: markAgentMessageSeen } = useAgentUpdates(
+  const { updates: agentUpdates, setRead: setAgentMessageRead } = useAgentUpdates(
     normalizedThreads,
     commentsContextKey,
     hasBootstrappedComments,
@@ -1519,30 +1505,19 @@ function App() {
       document.title = previous;
     };
   }, [reviewContext, diffData?.title]);
-  const inlineAgentReadContext = useMemo(
+  const agentReadContext = useMemo(
     () => ({
-      enabled:
-        !isCommentsListOpen &&
-        !isAgentUpdatesOpen &&
-        !isAboutOpen &&
-        !isSettingsOpen &&
-        !isHelpOpen &&
-        !isRevisionModalOpen &&
-        !(isMobile && isFileTreeOpen),
-      markSeen: markAgentMessageSeen,
+      enabled: hasBootstrappedComments && !captureReloading,
+      unreadKeys: new Set(agentUpdates.map((update) => update.key)),
+      setRead: setAgentMessageRead,
     }),
-    [
-      isCommentsListOpen,
-      isAgentUpdatesOpen,
-      isAboutOpen,
-      isSettingsOpen,
-      isHelpOpen,
-      isRevisionModalOpen,
-      isMobile,
-      isFileTreeOpen,
-      markAgentMessageSeen,
-    ],
+    [hasBootstrappedComments, captureReloading, agentUpdates, setAgentMessageRead],
   );
+  const markAllAgentRepliesRead = useCallback(() => {
+    for (const update of agentUpdates) {
+      setAgentMessageRead(update.thread.id, update.message.id, update.revision, true);
+    }
+  }, [agentUpdates, setAgentMessageRead]);
 
   const handleAddComment = useCallback(
     (
@@ -1701,7 +1676,7 @@ function App() {
   const canOpenInEditor = diffData.openInEditorAvailable !== false && Boolean(editorSessionToken);
 
   return (
-    <ReviewProviders agentUpdates={inlineAgentReadContext}>
+    <ReviewProviders agentUpdates={agentReadContext}>
       <div className="h-screen flex flex-col" onClickCapture={handleGlobalClick}>
         <header
           className="review-toolbar flex shrink-0 flex-wrap items-stretch justify-end gap-2 border-b border-github-border bg-github-bg-secondary px-3 py-2 text-sm text-github-text-primary"
@@ -1806,7 +1781,6 @@ function App() {
             className="inline-flex items-center gap-1.5 rounded-md border border-github-border px-3 py-1.5 font-medium hover:bg-github-bg-tertiary"
             onClick={() => {
               setIsCommentsListOpen(false);
-              setIsAgentUpdatesOpen(false);
               setIsAboutOpen(true);
             }}
           >
@@ -1823,54 +1797,34 @@ function App() {
           <button
             type="button"
             aria-label="Conversation"
+            aria-expanded={isCommentsListOpen}
+            aria-controls="conversation-panel"
+            aria-haspopup="dialog"
+            aria-describedby="conversation-unread-status"
             title={
               reviewPresence?.listeners
                 ? 'Conversation — agent listener attached'
                 : 'Conversation — no agent listener attached'
             }
             onClick={() => {
-              setFocusedAgentMessage(null);
               setIsAboutOpen(false);
               setIsCommentsListOpen(true);
             }}
             className="inline-flex items-center gap-1.5 rounded-md border border-github-border px-3 py-1.5 font-medium hover:bg-github-bg-tertiary"
           >
             <MessageSquare size={14} aria-hidden="true" />
-            <span
-              aria-hidden="true"
-              className={`h-2 w-2 rounded-full ${reviewPresence?.listeners ? 'bg-github-accent' : 'bg-github-warning'}`}
-            />
             Conversation
-          </button>
-          <button
-            type="button"
-            aria-expanded={isAgentUpdatesOpen}
-            aria-controls="agent-updates-panel"
-            aria-haspopup="dialog"
-            aria-busy={!hasBootstrappedComments}
-            disabled={!hasBootstrappedComments}
-            aria-label={
-              agentUpdates.length
-                ? `${agentUpdates.length} new agent update${agentUpdates.length === 1 ? '' : 's'}`
-                : 'Agent updates'
-            }
-            title="Unseen agent replies and edited messages"
-            className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 font-medium ${agentUpdates.length ? 'border-github-accent text-github-accent' : 'border-github-border text-github-text-primary'} hover:bg-github-bg-tertiary`}
-            onClick={() => {
-              setIsCommentsListOpen(false);
-              setIsAboutOpen(false);
-              setFocusedAgentMessage(null);
-              setIsAgentUpdatesOpen(true);
-            }}
-          >
-            <Bell size={14} aria-hidden="true" />
-            Updates{' '}
-            <span aria-live="polite" aria-atomic="true" className="tabular-nums">
-              {agentUpdates.length || ''}
+            <span
+              id="conversation-unread-status"
+              aria-live="polite"
+              aria-atomic="true"
+              className="inline-flex tabular-nums"
+            >
+              <UnreadBadge count={agentUpdates.length} />
               <span className="sr-only">
                 {agentUpdates.length
-                  ? ` new agent update${agentUpdates.length === 1 ? '' : 's'}`
-                  : 'No new agent updates'}
+                  ? `${agentUpdates.length} unread agent message${agentUpdates.length === 1 ? '' : 's'}`
+                  : 'No unread agent messages'}
               </span>
             </span>
           </button>
@@ -2125,23 +2079,10 @@ function App() {
 
         <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
         {isAboutOpen && <AboutPanel context={diffData.reviewContext} onClose={closeAbout} />}
-        {isAgentUpdatesOpen && (
-          <AgentUpdatesPanel
-            updates={agentUpdates}
-            onClose={closeAgentUpdates}
-            onSelect={(update) => {
-              setIsAgentUpdatesOpen(false);
-              setFocusedAgentMessage({ threadId: update.thread.id, messageId: update.message.id });
-              setIsCommentsListOpen(true);
-            }}
-          />
-        )}
-
         <CommentsListModal
           isOpen={isCommentsListOpen}
           onClose={() => {
             setIsCommentsListOpen(false);
-            setFocusedAgentMessage(null);
           }}
           headerActions={
             <>
@@ -2156,12 +2097,9 @@ function App() {
               )}
             </>
           }
-          focusedMessage={focusedAgentMessage}
-          onAgentMessageSeen={
-            !isSettingsOpen && !isHelpOpen && !isRevisionModalOpen && !isAboutOpen
-              ? markAgentMessageSeen
-              : undefined
-          }
+          unreadUpdates={agentUpdates}
+          readScope={commentsContextKey}
+          onMarkAllRead={markAllAgentRepliesRead}
           onNavigate={handleNavigateToComment}
           comments={displayThreads}
           onAddGeneralComment={(body, options) => {

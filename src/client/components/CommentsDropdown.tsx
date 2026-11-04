@@ -57,7 +57,7 @@ export function CommentsDropdown({
       <div className="flex">
         <button
           onClick={handleCopyAll}
-          className={`text-xs px-3 py-1.5 pr-2 rounded-l transition-all flex items-center gap-1.5 ${
+          className={`h-8 text-xs px-3 pr-2 rounded-l transition-all flex items-center gap-1.5 ${
             isCompact ? 'whitespace-normal' : 'whitespace-nowrap'
           }`}
           style={{
@@ -81,7 +81,7 @@ export function CommentsDropdown({
         </button>
         <button
           onClick={() => setIsOpen(!isOpen)}
-          className="text-xs px-2 py-1.5 rounded-r transition-all flex items-center border-l"
+          className="h-8 text-xs px-2 rounded-r transition-all flex items-center border-l"
           style={{
             backgroundColor: 'var(--color-yellow-btn-bg)',
             color: 'var(--color-yellow-btn-text)',

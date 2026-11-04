@@ -2,7 +2,8 @@ import { createContext } from 'react';
 
 export interface AgentUpdatesReadState {
   enabled: boolean;
-  markSeen: (threadId: string, messageId: string, revision: string) => void;
+  unreadKeys: ReadonlySet<string>;
+  setRead: (threadId: string, messageId: string, revision: string, read: boolean) => void;
 }
 
 export const AgentUpdatesContext = createContext<AgentUpdatesReadState | null>(null);

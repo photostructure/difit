@@ -140,6 +140,15 @@ describe('navigating unseen agent replies', () => {
       </HotkeysProvider>,
     );
 
+  const expectUnread = (count: number) =>
+    waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Conversation' })).toHaveAccessibleDescription(
+        count
+          ? `${count} unread agent message${count === 1 ? '' : 's'}`
+          : 'No unread agent messages',
+      ),
+    );
+
   it('updates the pending approval label when an approval-change notification arrives', async () => {
     approvalState = {
       approved: false,
@@ -222,62 +231,187 @@ describe('navigating unseen agent replies', () => {
             );
       });
     mount();
-    await screen.findByRole('button', { name: '3 new agent updates' });
+    await expectUnread(3);
     fireEvent.click(screen.getByRole('button', { name: 'About' }));
     showInline();
-    expect(screen.getByRole('button', { name: '3 new agent updates' })).toBeVisible();
+    await expectUnread(3);
     fireEvent.click(screen.getByRole('button', { name: 'Close About' }));
     showInline();
-    await screen.findByRole('button', { name: '2 new agent updates' });
+    await expectUnread(3);
+    const reply = screen
+      .getByText('Inline agent response')
+      .closest<HTMLElement>('[data-comment-message-id]')!;
+    fireEvent.click(within(reply).getByRole('button', { name: 'Mark reply as read' }));
+    await expectUnread(2);
   });
 
-  it('keeps previews unseen, jumps into resolved/outdated conversations, and persists seen revisions', async () => {
+  it('changes one reply at a time, ignores closing, and marks all read across filters', async () => {
+    threads[0]!.messages.push({
+      id: 'second-general-answer',
+      origin: 'agent',
+      author: 'Agent',
+      body: 'Another agent reply in the same thread',
+      createdAt: time,
+      updatedAt: time,
+    });
+    mount();
+    await expectUnread(3);
+    fireEvent.click(screen.getByRole('button', { name: 'Conversation' }));
+    const firstReply = screen
+      .getByText('Agent answer about the whole review')
+      .closest<HTMLElement>('[data-comment-message-id]')!;
+    const selection = document.getSelection()!;
+    const range = document.createRange();
+    range.selectNodeContents(screen.getByText('Agent answer about the whole review'));
+    selection.addRange(range);
+    try {
+      fireEvent.click(screen.getByText('Agent answer about the whole review'));
+      await expectUnread(3);
+    } finally {
+      selection.removeAllRanges();
+    }
+    fireEvent.click(screen.getByText('Agent answer about the whole review'));
+    await expectUnread(2);
+    fireEvent.click(within(firstReply).getByRole('button', { name: 'Mark reply as unread' }));
+    await expectUnread(3);
+    fireEvent.click(within(firstReply).getByRole('button', { name: 'Mark reply as read' }));
+    await expectUnread(2);
+    expect(within(firstReply).getByRole('button', { name: 'Mark reply as unread' })).toBeVisible();
+    const sibling = screen
+      .getByText('Another agent reply in the same thread')
+      .closest<HTMLElement>('[data-comment-message-id]')!;
+    expect(within(sibling).getByRole('button', { name: 'Mark reply as read' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Close conversation' }));
+    await expectUnread(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Conversation' }));
+    const reopened = screen
+      .getByText('Agent answer about the whole review')
+      .closest<HTMLElement>('[data-comment-message-id]')!;
+    fireEvent.click(within(reopened).getByRole('button', { name: 'Mark reply as unread' }));
+    await expectUnread(3);
+    fireEvent.click(screen.getByRole('radio', { name: 'Resolved' }));
+    expect(screen.queryByText('Another agent reply in the same thread')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Mark all read' }));
+    await expectUnread(0);
+    expect(screen.getByRole('button', { name: 'Mark all read' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('radio', { name: 'Unread' }));
+    expect(screen.getByText('No unread threads')).toBeVisible();
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/api/conversation/status')),
+    ).toBe(false);
+  });
+
+  it('finds unread replies in Conversation and remembers explicitly marked revisions', async () => {
     const first = mount();
-    const updates = await screen.findByRole('button', { name: '2 new agent updates' });
-    fireEvent.click(updates);
-    const panel = screen.getByRole('dialog', { name: 'Unseen agent updates' });
-    expect(screen.getByRole('button', { name: '2 new agent updates' })).toBeInTheDocument();
+    await expectUnread(2);
+    expect(
+      screen.queryByRole('button', { name: /Agent updates|new agent update/ }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Conversation' }));
+    const panel = screen.getByRole('dialog', { name: 'Conversation' });
+    const filter = within(panel).getByRole('radio', { name: 'Unread' });
+    fireEvent.click(filter);
+    expect(screen.queryByText('Agent answer about the hidden file')).not.toBeInTheDocument();
     fireEvent.click(
       within(panel).getByRole('button', {
-        name: /not-in-diff.ts:999.*Agent answer about the hidden file/,
+        name: 'Jump to 1 unread agent message in not-in-diff.ts:999',
       }),
     );
-    expect(await screen.findByRole('dialog', { name: 'Conversation' })).toBeInTheDocument();
     await waitFor(() =>
       expect(document.activeElement).toHaveAttribute('data-comment-message-id', 'hidden-answer'),
     );
-    expect(screen.getByRole('button', { name: '1 new agent update' })).toBeInTheDocument();
-    const filter = within(screen.getByRole('dialog', { name: 'Conversation' })).getByRole(
-      'combobox',
-    );
-    fireEvent.change(filter, { target: { value: 'open' } });
-    expect(filter).toHaveValue('open');
-    expect(screen.queryByText('Agent answer about the hidden file')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Close conversation' }));
-    fireEvent.click(screen.getByRole('button', { name: '1 new agent update' }));
+    await expectUnread(2);
+    expect(filter).toBeChecked();
+    expect(screen.getByText('Agent answer about the hidden file')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Reopen' })).toBeVisible();
     fireEvent.click(
-      within(screen.getByRole('dialog', { name: 'Unseen agent updates' })).getByRole('button', {
-        name: /Review conversation.*Agent answer about the whole review/,
+      within(panel).getByRole('button', {
+        name: 'Jump to 1 unread agent message in review conversation',
       }),
     );
     await waitFor(() =>
       expect(document.activeElement).toHaveAttribute('data-comment-message-id', 'general-answer'),
     );
+    await expectUnread(2);
+    // Read threads remain in this reading session instead of disappearing mid-conversation.
+    expect(screen.getByText('Agent answer about the hidden file')).toBeVisible();
+    expect(screen.getByText('Agent answer about the whole review')).toBeVisible();
+    const hiddenReply = screen
+      .getByText('Agent answer about the hidden file')
+      .closest<HTMLElement>('[data-comment-message-id]')!;
+    fireEvent.click(within(hiddenReply).getByRole('button', { name: 'Mark reply as read' }));
+    await expectUnread(1);
+    const generalReply = screen
+      .getByText('Agent answer about the whole review')
+      .closest<HTMLElement>('[data-comment-message-id]')!;
+    fireEvent.click(within(generalReply).getByRole('button', { name: 'Mark reply as read' }));
+    await expectUnread(0);
     fireEvent.click(screen.getByRole('button', { name: 'Close conversation' }));
-    expect(screen.getByRole('button', { name: 'Agent updates' })).toBeEnabled();
+    await expectUnread(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Conversation' }));
+    expect(screen.getByText('No unread threads')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Close conversation' }));
     first.unmount();
 
     mount();
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Agent updates' })).toBeEnabled(),
-    );
-    expect(screen.queryByRole('button', { name: /new agent update/ })).not.toBeInTheDocument();
+    await expectUnread(0);
     threads = structuredClone(threads);
     threads[1]!.messages[1]!.body = 'A corrected answer about the hidden file';
     await act(async () => {
       await callbacks.comments?.();
     });
-    expect(await screen.findByRole('button', { name: '1 new agent update' })).toBeInTheDocument();
+    await expectUnread(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Conversation' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Unread' }));
+    expect(screen.queryByText('Agent answer about the whole review')).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Jump to 1 unread agent message in not-in-diff.ts:999',
+      }),
+    );
+    await expectUnread(1);
+    expect(screen.getByText('A corrected answer about the hidden file')).toBeVisible();
+
+    // An edited reply in the same focused thread can be opened again after collapsing it.
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse thread' }));
+    threads = structuredClone(threads);
+    threads[1]!.messages[1]!.body = 'Another corrected answer';
+    await act(async () => {
+      await callbacks.comments?.();
+    });
+    await expectUnread(1);
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Jump to 1 unread agent message in not-in-diff.ts:999',
+      }),
+    );
+    await expectUnread(1);
+    expect(screen.getByText('Another corrected answer')).toBeVisible();
+
+    // Jumping to an edited reply again also works while its thread stays expanded.
+    threads = structuredClone(threads);
+    threads[1]!.messages[1]!.body = 'The final corrected answer';
+    await act(async () => {
+      await callbacks.comments?.();
+    });
+    await expectUnread(1);
+    const unreadButton = screen.getByRole('button', {
+      name: 'Jump to 1 unread agent message in not-in-diff.ts:999',
+    });
+    unreadButton.focus();
+    fireEvent.click(unreadButton);
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAttribute('data-comment-message-id', 'hidden-answer'),
+    );
+    await expectUnread(1);
+    expect(screen.getByText('The final corrected answer')).toBeVisible();
+    const finalReply = screen
+      .getByText('The final corrected answer')
+      .closest<HTMLElement>('[data-comment-message-id]')!;
+    fireEvent.click(within(finalReply).getByRole('button', { name: 'Mark reply as read' }));
+    await expectUnread(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Close conversation' }));
+    await expectUnread(0);
     expect(
       vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/api/conversation/status')),
     ).toBe(false);

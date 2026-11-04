@@ -303,8 +303,8 @@ difit includes a review comment system that makes it easy to provide feedback to
 
 ### Compact review controls
 
-The header keeps the current review, **View**, **Conversation**, **Updates**, and
-approval together. The review picker switches comparisons and shows capture details.
+The header keeps the current review, **View**, **Conversation**, and approval
+together. The review picker switches comparisons and shows capture details.
 **About** opens agent, session, repository, and server information in a right-side panel.
 **View** contains Split/Unified, whitespace, theme, and settings. Copy-all and agent
 resume actions live in **Conversation**; file-view progress sits above the file list.
@@ -318,12 +318,17 @@ agent commands, capture guards, and the meaning of the output fields.
 
 Open **Conversation** in the header to see the review's discussions in a side panel.
 
-The **Updates** button shows how many agent messages you have not seen.
-Open it for previews, then select an update to jump to the exact message, including
-replies in resolved or outdated threads. Previews stay unseen. Messages become seen
-when at least 10% of the message card appears in a visible tab, or when selected
-from the updates list. Very long replies may need to be selected. Seen revisions are saved in this browser for each
-review; edited replies become unseen again. This is separate from agent delivery
+The **Conversation** button shows a badge counting unread agent messages.
+Inside the panel, use the **All**, **Open**, **Resolved**, and **Unread** filter pills.
+Blue dots identify threads with unread agent replies, including resolved and
+outdated threads; select a dot to jump to the first unread message.
+Click an agent reply to mark only that reply read, or use its **Mark read** and
+**Mark unread** controls. **Mark all read** marks every agent message in the review,
+including threads hidden by the current filter. Opening, scrolling, jumping to a
+reply, and closing the panel never mark replies read. The same explicit controls
+appear on inline agent replies.
+Read state is saved in this browser for each review and message revision;
+edited replies become unread again. This is separate from agent delivery
 receipts and thread resolution.
 
 Start a general discussion in **Conversation** when feedback applies to the whole review rather

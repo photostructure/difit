@@ -27,7 +27,7 @@ export function ReviewPresenceIndicator({ presence }: { presence: ReviewPresence
       {!listening && (
         <button
           type="button"
-          className="rounded border border-github-border px-2 py-1 hover:bg-github-bg-tertiary"
+          className="inline-flex h-8 items-center justify-center rounded border border-github-border px-2 hover:bg-github-bg-tertiary"
           onClick={() => {
             const url = new URL(
               resolveEventSourceUrl('/api/conversation/snapshot'),

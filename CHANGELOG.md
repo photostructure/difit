@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added in the PhotoStructure fork
 
-- Navigate unseen agent replies and edited messages from a persistent updates button, with previews and direct message jumps.
+- Find unread agent replies in Conversation with visible filter pills, per-reply read/unread controls, Mark all read, and jumps into resolved or outdated threads. Visibility and panel close never mark replies read.
 - Answer an agent reply with one click: **👍 Agreed**, **❓ Still unclear**, and **👎 Disagree** post ordinary replies beside **Write a reply...**.
 - Report browser visibility and agent-listener presence; offer a resume prompt for agents that cannot receive idle notifications.
 - Stop `difit wait` with exit 4 when every selected review is unattended, after recovering existing human work.

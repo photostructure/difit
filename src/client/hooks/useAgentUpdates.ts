@@ -35,8 +35,8 @@ export function useAgentUpdates(threads: CommentThread[], scope: string | null, 
     scope: null,
     seen: {},
   });
-  const activeScope = useRef({ scope, loadedScope: state.scope });
-  activeScope.current = { scope, loadedScope: state.scope };
+  const activeScope = useRef({ scope, loadedScope: state.scope, ready });
+  activeScope.current = { scope, loadedScope: state.scope, ready };
   useEffect(() => {
     const load = () => setState({ scope, seen: readSeenMessages(storagePrefix) });
     load();
@@ -70,11 +70,12 @@ export function useAgentUpdates(threads: CommentThread[], scope: string | null, 
   );
   const currentRevisions = useRef(new Map<string, string>());
   currentRevisions.current = new Map(allUpdates.map((update) => [update.key, update.revision]));
-  const markSeen = useCallback(
-    (threadId: string, messageId: string, revision: string) => {
+  const setRead = useCallback(
+    (threadId: string, messageId: string, revision: string, read: boolean) => {
       const key = JSON.stringify([threadId, messageId]);
       if (
         !ready ||
+        !activeScope.current.ready ||
         !storagePrefix ||
         activeScope.current.scope !== scope ||
         activeScope.current.loadedScope !== scope ||
@@ -83,18 +84,19 @@ export function useAgentUpdates(threads: CommentThread[], scope: string | null, 
         return;
       // A separate key per message prevents tabs from replacing each other's read map.
       try {
-        localStorage.setItem(`${storagePrefix}${key}`, revision);
+        if (read) localStorage.setItem(`${storagePrefix}${key}`, revision);
+        else localStorage.removeItem(`${storagePrefix}${key}`);
       } catch {
         /* Read state still works in memory if persistent storage is unavailable. */
       }
-      setState((current) =>
-        current.scope !== scope || current.seen[key] === revision
-          ? current
-          : {
-              scope,
-              seen: { ...current.seen, [key]: revision },
-            },
-      );
+      setState((current) => {
+        if (current.scope !== scope) return current;
+        if (read ? current.seen[key] === revision : current.seen[key] === undefined) return current;
+        const seen = { ...current.seen };
+        if (read) seen[key] = revision;
+        else delete seen[key];
+        return { scope, seen };
+      });
     },
     [ready, scope, storagePrefix],
   );
@@ -102,5 +104,5 @@ export function useAgentUpdates(threads: CommentThread[], scope: string | null, 
     ready && scope !== null && state.scope === scope
       ? allUpdates.filter((update) => state.seen[update.key] !== update.revision)
       : [];
-  return { updates, markSeen };
+  return { updates, setRead };
 }

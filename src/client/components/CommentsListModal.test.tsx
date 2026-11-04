@@ -132,10 +132,7 @@ describe('CommentsListModal', () => {
       isQuestion: true,
       intent: 'question',
     });
-    await user.selectOptions(
-      screen.getByRole('combobox', { name: 'Conversation filter' }),
-      'resolved',
-    );
+    await user.click(screen.getByRole('radio', { name: 'Resolved' }));
     expect(screen.queryByText('First root comment')).not.toBeInTheDocument();
     await user.click(screen.getByText('Review conversation'));
     expect(onNavigate).not.toHaveBeenCalled();
@@ -143,7 +140,7 @@ describe('CommentsListModal', () => {
     await user.click(screen.getByRole('button', { name: 'Reopen' }));
     expect(mockRemoveThread).toHaveBeenCalledWith('general');
     expect(onClose).not.toHaveBeenCalled();
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Conversation filter' }), 'open');
+    await user.click(screen.getByRole('radio', { name: 'Open' }));
     expect(screen.getByText('First root comment')).toBeInTheDocument();
     expect(screen.queryByText('Review conversation')).not.toBeInTheDocument();
   });

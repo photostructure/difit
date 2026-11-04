@@ -1,10 +1,10 @@
 import { X } from 'lucide-react';
-import { useEffect, useState, useRef, useCallback, useMemo, type ReactNode } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo, useId, type ReactNode } from 'react';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 
 import type { CommentIntent, CommentThread } from '../../types/diff';
 import { hasActiveTextSelection } from '../utils/domUtils';
-import { AgentUpdatesContext } from '../contexts/AgentUpdatesContext';
+import type { AgentUpdate } from '../hooks/useAgentUpdates';
 
 import { CommentForm, type CommentSubmitOptions } from './CommentForm';
 import { CommentThreadCard } from './CommentThreadCard';
@@ -12,8 +12,9 @@ import type { AppearanceSettings } from './SettingsModal';
 
 interface CommentsListModalProps {
   headerActions?: ReactNode;
-  focusedMessage?: { threadId: string; messageId: string } | null;
-  onAgentMessageSeen?: (threadId: string, messageId: string, revision: string) => void;
+  unreadUpdates?: AgentUpdate[];
+  readScope?: string | null;
+  onMarkAllRead?: () => void;
   isOpen: boolean;
   onClose: () => void;
   onAddGeneralComment?: (body: string, options: CommentSubmitOptions) => Promise<void>;
@@ -36,10 +37,13 @@ interface CommentsListModalProps {
   syntaxTheme?: AppearanceSettings['syntaxTheme'];
 }
 
+const EMPTY_UPDATES: AgentUpdate[] = [];
+
 export function CommentsListModal({
   headerActions,
-  focusedMessage,
-  onAgentMessageSeen,
+  unreadUpdates = EMPTY_UPDATES,
+  readScope = null,
+  onMarkAllRead,
   isOpen,
   onClose,
   onAddGeneralComment,
@@ -57,7 +61,24 @@ export function CommentsListModal({
   syntaxTheme,
 }: CommentsListModalProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [filter, setFilter] = useState<'all' | 'open' | 'resolved'>('all');
+  const [filter, setFilter] = useState<'all' | 'open' | 'resolved' | 'unread'>('all');
+  const filterName = useId();
+  const [focus, setFocus] = useState<{
+    scope: string | null;
+    threadId: string;
+    messageId: string;
+    request: number;
+  } | null>(null);
+  const focusedMessage = focus?.scope === readScope ? focus : null;
+  const unreadByThread = useMemo(() => {
+    const grouped = new Map<string, AgentUpdate[]>();
+    for (const update of unreadUpdates) {
+      const list = grouped.get(update.thread.id) ?? [];
+      list.push(update);
+      grouped.set(update.thread.id, list);
+    }
+    return grouped;
+  }, [unreadUpdates]);
   const [generalDraft, setGeneralDraft] = useState<{
     body: string;
     intent: CommentIntent;
@@ -65,21 +86,26 @@ export function CommentsListModal({
   const commentRefs = useRef<(HTMLDivElement | null)[]>([]);
   const dialogRef = useRef<HTMLDivElement>(null);
   const { enableScope, disableScope } = useHotkeysContext();
-  const agentUpdateReadState = useMemo(
-    () => (onAgentMessageSeen ? { enabled: true, markSeen: onAgentMessageSeen } : null),
-    [onAgentMessageSeen],
-  );
+  useEffect(() => {
+    if (!isOpen) return;
+    const previous = document.activeElement;
+    dialogRef.current?.focus();
+    return () => {
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+    };
+  }, [isOpen]);
 
   useEffect(() => {
-    if (isOpen && !focusedMessage) dialogRef.current?.focus();
-  }, [isOpen, focusedMessage]);
+    setFocus((previous) => (!isOpen || previous?.scope !== readScope ? null : previous));
+  }, [isOpen, readScope]);
 
   const sortedThreads = comments
-    .filter(
-      (thread) =>
-        thread.deleted ||
-        filter === 'all' ||
-        Boolean(thread.resolution?.resolved) === (filter === 'resolved'),
+    .filter((thread) =>
+      filter === 'unread'
+        ? !thread.deleted && unreadByThread.has(thread.id)
+        : thread.deleted ||
+          filter === 'all' ||
+          Boolean(thread.resolution?.resolved) === (filter === 'resolved'),
     )
     .sort((a, b) => {
       const fileCompare = (a.file ?? '').localeCompare(b.file ?? '');
@@ -101,21 +127,25 @@ export function CommentsListModal({
       handledFocus.current = null;
       return;
     }
-    const key = JSON.stringify([focusedMessage.threadId, focusedMessage.messageId]);
+    const key = JSON.stringify([
+      focusedMessage.threadId,
+      focusedMessage.messageId,
+      focusedMessage.request,
+    ]);
     if (handledFocus.current === key) return;
-    if (filter !== 'all') {
-      setFilter('all');
-      return;
-    }
     if (focusedThreadIndex >= 0) {
       setSelectedIndex(focusedThreadIndex);
       handledFocus.current = key;
     }
-  }, [isOpen, focusedMessage, filter, focusedThreadIndex]);
+  }, [isOpen, focusedMessage, focusedThreadIndex]);
 
   useEffect(() => {
     setSelectedIndex((index) => Math.max(0, Math.min(index, sortedThreads.length - 1)));
   }, [sortedThreads.length]);
+
+  useEffect(() => {
+    if (isOpen && document.activeElement === document.body) dialogRef.current?.focus();
+  }, [isOpen, sortedThreads.length]);
 
   const handleThreadClick = useCallback(
     (thread: CommentThread) => {
@@ -181,6 +211,7 @@ export function CommentsListModal({
     },
     {
       ...hotkeyOptions,
+      preventDefault: true,
       ignoreEventWhen: (event: KeyboardEvent) =>
         event.target instanceof Element &&
         event.target.closest('button, a, [role="button"]') !== null,
@@ -210,145 +241,239 @@ export function CommentsListModal({
   if (!isOpen) return null;
 
   return (
-    <AgentUpdatesContext.Provider value={agentUpdateReadState}>
-      <div className="fixed inset-0 z-50 flex items-stretch justify-end">
-        <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-        <div
-          ref={dialogRef}
-          tabIndex={-1}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="conversation-title"
-          className="relative flex h-full w-full max-w-2xl flex-col overflow-hidden border border-github-border bg-github-bg-primary shadow-lg"
-        >
-          <div className="sticky top-0 border-b border-github-border bg-github-bg-primary px-6 py-4">
-            {headerActions && (
-              <div className="mb-3 flex flex-wrap items-center gap-3">{headerActions}</div>
-            )}
-            <div className="mb-2 flex items-center justify-between">
-              <h2 id="conversation-title" className="text-lg font-semibold ui-label">
-                Conversation
-              </h2>
-              <button
-                onClick={onClose}
-                className="text-github-text-secondary transition-colors hover:text-github-text-primary"
-                aria-label="Close conversation"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <div className="text-xs text-github-text-secondary">
-              <span className="font-mono">j/k</span> or <span className="font-mono">↑/↓</span> to
-              navigate • <span className="font-mono">Enter</span> to jump •{' '}
-              <span className="font-mono">d</span> to resolve/reopen •{' '}
-              <span className="font-mono">Esc</span> to close
-            </div>
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <div className="p-6">
-              <label className="mb-4 flex items-center gap-2 text-xs text-github-text-secondary">
-                Show
-                <select
-                  aria-label="Conversation filter"
-                  value={filter}
-                  onChange={(event) => {
-                    setFilter(event.target.value as typeof filter);
-                    setSelectedIndex(0);
-                  }}
-                  className="rounded border border-github-border bg-github-bg-secondary p-1"
+    <div className="fixed inset-0 z-50 flex items-stretch justify-end">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div
+        id="conversation-panel"
+        ref={dialogRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="conversation-title"
+        onKeyDown={(event) => {
+          if (event.key !== 'Tab') return;
+          const controls = [
+            ...event.currentTarget.querySelectorAll<HTMLElement>(
+              'button, a[href], input, select, textarea, [tabindex]',
+            ),
+          ].filter(
+            (element) =>
+              element.tabIndex >= 0 &&
+              !element.hasAttribute('disabled') &&
+              !element.closest('[hidden]') &&
+              !(
+                element instanceof HTMLInputElement &&
+                element.type === 'radio' &&
+                !element.checked
+              ),
+          );
+          const first = controls[0],
+            last = controls.at(-1);
+          if (
+            event.shiftKey &&
+            (document.activeElement === first || document.activeElement === dialogRef.current)
+          ) {
+            event.preventDefault();
+            last?.focus();
+          } else if (
+            !event.shiftKey &&
+            (document.activeElement === last || document.activeElement === dialogRef.current)
+          ) {
+            event.preventDefault();
+            first?.focus();
+          }
+        }}
+        className="relative flex h-full w-full max-w-2xl flex-col overflow-hidden border border-github-border bg-github-bg-primary shadow-lg"
+      >
+        <div className="sticky top-0 border-b border-github-border bg-github-bg-primary px-6 py-4">
+          {(headerActions || onMarkAllRead) && (
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              {headerActions}
+              {onMarkAllRead && (
+                <button
+                  type="button"
+                  onClick={onMarkAllRead}
+                  disabled={unreadUpdates.length === 0}
+                  title="Mark every agent reply in this review as read, including hidden threads"
+                  className="inline-flex h-8 items-center justify-center rounded border border-github-border px-2 text-xs text-github-text-primary hover:bg-github-bg-tertiary disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <option value="all">All conversations</option>
-                  <option value="open">Open</option>
-                  <option value="resolved">Resolved</option>
-                </select>
-              </label>
-              {onAddGeneralComment && (
-                <div className="mb-6">
-                  <CommentForm
-                    embedded
-                    submitLabel="Send"
-                    value={generalDraft.body}
-                    onChange={(nextBody) =>
-                      setGeneralDraft((current) => {
-                        const body =
-                          typeof nextBody === 'function' ? nextBody(current.body) : nextBody;
-                        return body === current.body ? current : { ...current, body };
-                      })
-                    }
-                    intentValue={generalDraft.intent}
-                    onIntentChange={(intent) =>
-                      setGeneralDraft((current) => ({ ...current, intent }))
-                    }
-                    dismissOnOutsideClick={false}
-                    autoFocus={false}
-                    title="General comment or question"
-                    placeholder="Comment or ask about this review…"
-                    onSubmit={async (body, options) => {
-                      const submittedDraft = generalDraft;
-                      await onAddGeneralComment(body, options);
-                      setGeneralDraft((current) =>
-                        current === submittedDraft ? { body: '', intent: 'comment' } : current,
-                      );
-                    }}
-                    onCancel={() => {
-                      setGeneralDraft({ body: '', intent: 'comment' });
-                      onClose();
-                    }}
-                  />
-                </div>
-              )}
-
-              {sortedThreads.length === 0 ? (
-                <p className="text-center text-github-text-secondary">No comments yet</p>
-              ) : (
-                <>
-                  <div className="space-y-2">
-                    {sortedThreads.map((thread, index) => (
-                      <div
-                        key={thread.id}
-                        ref={(el) => {
-                          commentRefs.current[index] = el;
-                        }}
-                        className={selectedIndex === index ? 'rounded ring-2 ring-blue-500' : ''}
-                      >
-                        <CommentThreadCard
-                          focusedMessageId={
-                            focusedMessage?.threadId === thread.id
-                              ? focusedMessage.messageId
-                              : undefined
-                          }
-                          thread={thread}
-                          showAuthorBadges={showAuthorBadges}
-                          onGeneratePrompt={onGenerateThreadPrompt}
-                          onRemoveThread={onRemoveThread ? handleRemoveThread : undefined}
-                          onRestoreComment={onRestoreComment}
-                          onToggleThreadResolved={onToggleThreadResolved}
-                          onReplyToThread={onReplyToThread}
-                          onRemoveMessage={onRemoveMessage}
-                          onUpdateMessage={onUpdateMessage}
-                          syntaxTheme={syntaxTheme}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            // Selecting text inside a card fires a click as well; do not
-                            // treat it as a request to navigate and close the modal.
-                            if (hasActiveTextSelection()) return;
-                            setSelectedIndex(index);
-                            handleThreadClick(thread);
-                          }}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                  <div className="mt-4 border-t border-github-border pt-4 text-center text-xs text-github-text-secondary">
-                    {selectedIndex + 1} of {sortedThreads.length} threads
-                  </div>
-                </>
+                  Mark all read
+                </button>
               )}
             </div>
+          )}
+          <div className="mb-2 flex items-center justify-between">
+            <h2 id="conversation-title" className="text-lg font-semibold ui-label">
+              Conversation
+            </h2>
+            <button
+              onClick={onClose}
+              className="text-github-text-secondary transition-colors hover:text-github-text-primary"
+              aria-label="Close conversation"
+            >
+              <X size={20} />
+            </button>
+          </div>
+          <div className="text-xs text-github-text-secondary">
+            <span className="font-mono">j/k</span> or <span className="font-mono">↑/↓</span> to
+            navigate • <span className="font-mono">Enter</span> to jump •{' '}
+            <span className="font-mono">d</span> to resolve/reopen •{' '}
+            <span className="font-mono">Esc</span> to close
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="p-6">
+            <div className="mb-5 border-b border-github-border pb-5">
+              <fieldset role="radiogroup" aria-label="Conversation filter">
+                <legend className="mb-2 text-xs text-github-text-secondary">
+                  Show conversations
+                </legend>
+                <div className="flex flex-wrap gap-2">
+                  {(
+                    [
+                      ['all', 'All'],
+                      ['open', 'Open'],
+                      ['resolved', 'Resolved'],
+                      ['unread', 'Unread'],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <label key={value} className="cursor-pointer">
+                      <input
+                        type="radio"
+                        name={filterName}
+                        value={value}
+                        checked={filter === value}
+                        onChange={() => {
+                          setFilter(value);
+                          setSelectedIndex(0);
+                        }}
+                        className="peer sr-only"
+                      />
+                      <span
+                        className={`inline-flex rounded-full border px-3 py-1.5 text-sm transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-github-accent ${
+                          filter === value
+                            ? 'bg-github-accent text-white border-github-accent'
+                            : 'bg-github-bg-tertiary text-github-text-secondary border-github-border hover:text-github-text-primary'
+                        }`}
+                      >
+                        {label}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              <p className="mt-3 text-xs text-github-text-secondary">
+                Blue dots mark unread replies. Click a reply or use Mark read; Mark unread reverses
+                it. Scrolling and closing this panel never mark replies read.
+              </p>
+            </div>
+            {onAddGeneralComment && (
+              <div className="mb-6 border-b border-github-border pb-5">
+                <CommentForm
+                  embedded
+                  submitLabel="Send"
+                  value={generalDraft.body}
+                  onChange={(nextBody) =>
+                    setGeneralDraft((current) => {
+                      const body =
+                        typeof nextBody === 'function' ? nextBody(current.body) : nextBody;
+                      return body === current.body ? current : { ...current, body };
+                    })
+                  }
+                  intentValue={generalDraft.intent}
+                  onIntentChange={(intent) =>
+                    setGeneralDraft((current) => ({ ...current, intent }))
+                  }
+                  dismissOnOutsideClick={false}
+                  autoFocus={false}
+                  title="General comment or question"
+                  placeholder="Comment or ask about this review…"
+                  onSubmit={async (body, options) => {
+                    const submittedDraft = generalDraft;
+                    await onAddGeneralComment(body, options);
+                    setGeneralDraft((current) =>
+                      current === submittedDraft ? { body: '', intent: 'comment' } : current,
+                    );
+                  }}
+                  onCancel={() => {
+                    setGeneralDraft({ body: '', intent: 'comment' });
+                    onClose();
+                  }}
+                />
+              </div>
+            )}
+
+            {sortedThreads.length === 0 ? (
+              <p className="text-center text-github-text-secondary">
+                {filter === 'unread' ? 'No unread threads' : 'No comments yet'}
+              </p>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  {sortedThreads.map((thread, index) => (
+                    <div
+                      key={thread.id}
+                      ref={(el) => {
+                        commentRefs.current[index] = el;
+                      }}
+                      className={selectedIndex === index ? 'rounded ring-2 ring-blue-500' : ''}
+                    >
+                      <CommentThreadCard
+                        unreadCount={unreadByThread.get(thread.id)?.length ?? 0}
+                        onReadUnread={() => {
+                          const unreadIds = new Set(
+                            unreadByThread.get(thread.id)?.map((update) => update.message.id),
+                          );
+                          const message = thread.messages.find((item) => unreadIds.has(item.id));
+                          if (!message) return;
+                          setFocus((previous) => ({
+                            scope: readScope,
+                            threadId: thread.id,
+                            messageId: message.id,
+                            request: (previous?.request ?? 0) + 1,
+                          }));
+                        }}
+                        focusedMessageId={
+                          focusedMessage?.threadId === thread.id
+                            ? focusedMessage.messageId
+                            : undefined
+                        }
+                        focusRequest={
+                          focusedMessage?.threadId === thread.id
+                            ? focusedMessage.request
+                            : undefined
+                        }
+                        thread={thread}
+                        showAuthorBadges={showAuthorBadges}
+                        onGeneratePrompt={onGenerateThreadPrompt}
+                        onRemoveThread={onRemoveThread ? handleRemoveThread : undefined}
+                        onRestoreComment={onRestoreComment}
+                        onToggleThreadResolved={onToggleThreadResolved}
+                        onReplyToThread={onReplyToThread}
+                        onRemoveMessage={onRemoveMessage}
+                        onUpdateMessage={onUpdateMessage}
+                        syntaxTheme={syntaxTheme}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          // Selecting text inside a card fires a click as well; do not
+                          // treat it as a request to navigate and close the modal.
+                          if (hasActiveTextSelection()) return;
+                          setSelectedIndex(index);
+                          handleThreadClick(thread);
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 border-t border-github-border pt-4 text-center text-xs text-github-text-secondary">
+                  {selectedIndex + 1} of {sortedThreads.length} threads
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
-    </AgentUpdatesContext.Provider>
+    </div>
   );
 }

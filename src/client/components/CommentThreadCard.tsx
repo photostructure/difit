@@ -8,11 +8,14 @@ import {
   MessageSquare,
   Trash2,
 } from 'lucide-react';
-import React, { useEffect, useId, useRef, useState } from 'react';
+import React, { useContext, useEffect, useId, useRef, useState } from 'react';
 
 import { type CommentIntent, type CommentThread, type DiffCommentMessage } from '../../types/diff';
 import { copyTextToClipboard } from '../utils/clipboard';
-import { useSeenAgentMessage } from '../hooks/useSeenAgentMessage';
+import { useFocusedAgentMessage } from '../hooks/useFocusedAgentMessage';
+import { agentMessageRevision } from '../hooks/useAgentUpdates';
+import { AgentUpdatesContext } from '../contexts/AgentUpdatesContext';
+import { hasActiveTextSelection } from '../utils/domUtils';
 
 import { CommentBodyRenderer } from './CommentBodyRenderer';
 import { CommentForm, type CommentSubmitOptions } from './CommentForm';
@@ -37,6 +40,7 @@ const QUICK_REPLIES: readonly { label: string; body: string; intent: CommentInte
 interface ThreadMessageItemProps {
   threadId: string;
   highlighted?: boolean;
+  focusRequest?: number;
   message: DiffCommentMessage;
   isRootMessage?: boolean;
   showAuthorBadge: boolean;
@@ -53,6 +57,7 @@ interface ThreadMessageItemProps {
 function ThreadMessageItem({
   threadId,
   highlighted = false,
+  focusRequest,
   message,
   isRootMessage = false,
   showAuthorBadge,
@@ -65,7 +70,9 @@ function ThreadMessageItem({
   onDelete,
   onClick,
 }: ThreadMessageItemProps) {
-  const messageElement = useSeenAgentMessage(threadId, message, highlighted);
+  const messageElement = useFocusedAgentMessage(message.id, highlighted, focusRequest);
+  const readState = useContext(AgentUpdatesContext);
+  const unread = readState?.unreadKeys.has(JSON.stringify([threadId, message.id])) ?? false;
   const [isEditing, setIsEditing] = useState(false);
   const showAuthorHeader = showAuthorBadge && Boolean(message.author);
   const progress = message.origin !== 'agent' ? message.progress : undefined;
@@ -111,7 +118,20 @@ function ThreadMessageItem({
       tabIndex={-1}
       data-comment-message-id={message.id}
       className={`${isEditing ? '' : 'flex min-w-0 items-start gap-3'} ${highlighted ? 'rounded ring-2 ring-blue-500 ring-offset-2 ring-offset-github-bg-tertiary' : ''}`}
-      onClick={onClick}
+      onClick={(event) => {
+        const target = event.target;
+        if (
+          message.origin === 'agent' &&
+          readState?.enabled &&
+          !isEditing &&
+          !hasActiveTextSelection() &&
+          target instanceof Element &&
+          !target.closest('button, a, input, textarea, select, [contenteditable="true"]')
+        ) {
+          readState.setRead(threadId, message.id, agentMessageRevision(message), true);
+        }
+        onClick?.(event);
+      }}
     >
       {!isEditing ? (
         <>
@@ -158,6 +178,20 @@ function ThreadMessageItem({
               filename={filename}
               syntaxTheme={syntaxTheme}
             />
+            {message.origin === 'agent' && readState && (
+              <button
+                type="button"
+                disabled={!readState.enabled}
+                aria-label={unread ? 'Mark reply as read' : 'Mark reply as unread'}
+                className="mt-2 rounded border border-github-border bg-github-bg-primary px-2 py-1 text-xs text-github-text-primary hover:bg-github-bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  readState.setRead(threadId, message.id, agentMessageRevision(message), unread);
+                }}
+              >
+                {unread ? 'Mark read' : 'Mark unread'}
+              </button>
+            )}
           </div>
           <div className="flex shrink-0 items-start gap-2 pt-0.5">
             {!isRootMessage && (
@@ -234,6 +268,9 @@ function ThreadMessageItem({
 
 interface CommentThreadCardProps {
   focusedMessageId?: string;
+  focusRequest?: number;
+  unreadCount?: number;
+  onReadUnread?: () => void;
   thread: CommentThread;
   showAuthorBadges?: boolean;
   onGeneratePrompt: (thread: CommentThread) => string;
@@ -255,6 +292,9 @@ interface CommentThreadCardProps {
 
 export function CommentThreadCard({
   focusedMessageId,
+  focusRequest,
+  unreadCount = 0,
+  onReadUnread,
   thread,
   showAuthorBadges = false,
   onGeneratePrompt,
@@ -276,8 +316,11 @@ export function CommentThreadCard({
     Boolean(thread.deleted || (thread.resolution?.resolved && !focusedMessageId)),
   );
   useEffect(() => {
-    setIsCollapsed(Boolean(thread.deleted || (thread.resolution?.resolved && !focusedMessageId)));
-  }, [focusedMessageId, thread.deleted, thread.resolution?.resolved]);
+    setIsCollapsed(Boolean(thread.deleted || thread.resolution?.resolved));
+  }, [thread.deleted, thread.resolution?.resolved]);
+  useEffect(() => {
+    if (focusedMessageId && !thread.deleted) setIsCollapsed(false);
+  }, [focusedMessageId, focusRequest, thread.deleted]);
   const [isReplying, setIsReplying] = useState(false);
   const replyArea = useRef<HTMLDivElement>(null);
   const replyTrigger = useRef<HTMLButtonElement>(null);
@@ -381,8 +424,22 @@ export function CommentThreadCard({
             </span>
           )}
         </button>
-        {(thread.deleted || thread.resolution?.resolved || !isCollapsed) && (
+        {(thread.deleted || thread.resolution?.resolved || !isCollapsed || unreadCount > 0) && (
           <div className="flex shrink-0 items-center gap-2">
+            {unreadCount > 0 && onReadUnread && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onReadUnread();
+                }}
+                className="inline-flex items-center justify-center rounded p-1.5 hover:bg-github-bg-primary"
+                aria-label={`Jump to ${unreadCount} unread agent message${unreadCount === 1 ? '' : 's'} in ${thread.scope === 'review' ? 'review conversation' : `${thread.file}:${lineLabel}`}`}
+                title="Jump to the first unread reply"
+              >
+                <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-blue-500" />
+              </button>
+            )}
             {thread.deleted ? (
               <button
                 type="button"
@@ -436,6 +493,7 @@ export function CommentThreadCard({
             <ThreadMessageItem
               threadId={thread.id}
               highlighted={focusedMessageId === rootMessage.id}
+              focusRequest={focusedMessageId === rootMessage.id ? focusRequest : undefined}
               message={{
                 ...rootMessage,
                 intent: rootMessage.intent ?? (thread.isQuestion ? 'question' : undefined),
@@ -473,6 +531,7 @@ export function CommentThreadCard({
                   <ThreadMessageItem
                     threadId={thread.id}
                     highlighted={focusedMessageId === message.id}
+                    focusRequest={focusedMessageId === message.id ? focusRequest : undefined}
                     message={message}
                     showAuthorBadge={showAuthorBadges}
                     syntaxTheme={syntaxTheme}
