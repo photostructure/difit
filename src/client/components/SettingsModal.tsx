@@ -48,8 +48,7 @@ type SettingsSection = 'appearance' | 'system';
 
 export const DEFAULT_SETTINGS: AppearanceSettings = {
   fontSize: 14,
-  fontFamily:
-    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+  fontFamily: '"JetBrains Mono", monospace',
   theme: 'dark',
   syntaxTheme: 'vsDark',
   colorVision: 'normal',
@@ -64,16 +63,13 @@ export const DEFAULT_SETTINGS: AppearanceSettings = {
   },
 };
 
+// The named fonts are bundled (see styles/fonts.ts), so they render the same on every
+// machine. Browser default is the font set as monospace in the browser's settings.
 export const FONT_FAMILIES = [
-  {
-    name: 'System Font',
-    value:
-      'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-  },
-  { name: 'Menlo', value: 'Menlo, Monaco, "Courier New", monospace' },
-  { name: 'SF Mono', value: 'SF Mono, Consolas, "Liberation Mono", monospace' },
-  { name: 'Fira Code', value: '"Fira Code", "Courier New", monospace' },
-  { name: 'JetBrains Mono', value: '"JetBrains Mono", "Courier New", monospace' },
+  { name: 'JetBrains Mono', value: '"JetBrains Mono", monospace' },
+  { name: 'IBM Plex Mono', value: '"IBM Plex Mono", monospace' },
+  { name: 'Ubuntu Mono', value: '"Ubuntu Mono", monospace' },
+  { name: 'Browser default', value: 'monospace' },
 ];
 
 const COLOR_VISION_MODES = [

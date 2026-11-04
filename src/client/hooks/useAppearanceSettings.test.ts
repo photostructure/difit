@@ -100,16 +100,25 @@ describe('useAppearanceSettings', () => {
       setMatchMedia(false);
 
       const { result } = renderHook(() => useAppearanceSettings());
-      const menlo = 'Menlo, Monaco, "Courier New", monospace';
+      const plex = '"IBM Plex Mono", monospace';
 
       act(() => {
         result.current.updateSettings({
           ...result.current.settings,
-          fontFamily: menlo,
+          fontFamily: plex,
         });
       });
 
-      expect(document.documentElement.style.getPropertyValue('--mono-font-family')).toBe(menlo);
+      expect(document.documentElement.style.getPropertyValue('--mono-font-family')).toBe(plex);
+    });
+
+    it('restores the browser default font', () => {
+      setMatchMedia(false);
+      saveClientSettings({ appearance: { fontFamily: 'monospace' } });
+
+      const { result } = renderHook(() => useAppearanceSettings());
+
+      expect(result.current.settings.fontFamily).toBe('monospace');
     });
   });
 
@@ -153,7 +162,7 @@ describe('useAppearanceSettings', () => {
 
       const { result } = renderHook(() => useAppearanceSettings());
 
-      expect(result.current.settings.fontFamily).toMatch(/^ui-monospace/);
+      expect(result.current.settings.fontFamily).toBe('"JetBrains Mono", monospace');
     });
 
     it('turns on approval animations that saved settings predate', () => {

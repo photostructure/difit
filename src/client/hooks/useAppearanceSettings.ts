@@ -34,10 +34,12 @@ const normalizeStoredSettings = (raw: unknown): AppearanceSettings | null => {
   // storage saved them inside the appearance settings, so cookies may hold them.
   delete sanitized.autoViewedPatterns;
 
-  const fontFamilyPrefix =
-    typeof parsed.fontFamily === 'string' ? (parsed.fontFamily.split(',').at(0) ?? '') + ',' : '';
+  // Match on the first family, so a saved font survives changes to its fallbacks.
+  const firstFamily = (stack: string) => stack.split(',')[0]?.trim();
+  const savedFamily =
+    typeof parsed.fontFamily === 'string' ? firstFamily(parsed.fontFamily) : undefined;
   const fontFamily =
-    FONT_FAMILIES.find((font) => font.value.startsWith(fontFamilyPrefix))?.value ??
+    FONT_FAMILIES.find((font) => firstFamily(font.value) === savedFamily)?.value ??
     DEFAULT_SETTINGS.fontFamily;
 
   return {

@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { HotkeysProvider } from 'react-hotkeys-hook';
 
 import App from './App';
+import './styles/fonts';
 import './styles/global.css';
 
 const rootElement = document.getElementById('root');

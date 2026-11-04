@@ -19,6 +19,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed in the PhotoStructure fork
 
+- Bundle JetBrains Mono, IBM Plex Mono, and Ubuntu Mono for **Settings** → **Font Family**, so each choice renders the same whether or not the font is installed, and add **Browser default** for the monospace font set in the browser. JetBrains Mono replaces **System Font** as the default. **System Font**, **Menlo**, **SF Mono**, and **Fira Code** are removed; a saved choice of one of them falls back to JetBrains Mono.
 - Bind an OS-assigned port with `--port 0` and report it in `server.ready`; reject non-numeric ports instead of falling back to 4966.
 - Open thread reply forms from **Write a reply...** again. Escape or a click elsewhere closes an empty form; a draft stays open.
 - Emit JSON Lines from the foreground launch process by default, with `--jsonl` and a `--no-jsonl` human-output opt-out.

@@ -19,8 +19,7 @@ const wrapper = ({ children }: { children: React.ReactNode }) => (
 
 const baseSettings = {
   fontSize: 14,
-  fontFamily:
-    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+  fontFamily: '"JetBrains Mono", monospace',
   theme: 'dark' as const,
   syntaxTheme: 'vsDark',
   colorVision: 'normal' as const,
@@ -72,6 +71,27 @@ describe('SettingsModal', () => {
     ).toBeTruthy();
     expect(screen.queryByText('Font Size')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^System/ })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('offers the bundled fonts and the browser default font', () => {
+    render(
+      <SettingsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        settings={baseSettings}
+        onSettingsChange={vi.fn()}
+        autoViewedPatterns={[]}
+        onAutoViewedPatternsChange={vi.fn()}
+      />,
+      { wrapper },
+    );
+
+    for (const name of ['JetBrains Mono', 'IBM Plex Mono', 'Ubuntu Mono', 'Browser default']) {
+      expect(screen.getByRole('option', { name })).toBeInTheDocument();
+    }
+    for (const name of ['System Font', 'Menlo', 'SF Mono', 'Fira Code']) {
+      expect(screen.queryByRole('option', { name })).not.toBeInTheDocument();
+    }
   });
 
   it('shows the deuteranopia explanation only while the button is hovered', async () => {

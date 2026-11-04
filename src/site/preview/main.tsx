@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { HotkeysProvider } from 'react-hotkeys-hook';
 
+import '../../client/styles/fonts';
 import '../../client/styles/global.css';
 import StaticDiffApp from '../StaticDiffApp';
 

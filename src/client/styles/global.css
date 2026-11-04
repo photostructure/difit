@@ -72,9 +72,7 @@
 /* CSS Custom Properties for dynamic theming */
 :root {
   --app-font-size: 14px;
-  --mono-font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-    monospace;
+  --mono-font-family: "JetBrains Mono", monospace;
 }
 
 /* Global styles */
