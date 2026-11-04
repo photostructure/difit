@@ -350,31 +350,6 @@ describe('App Component - Clear Comments Functionality', () => {
   });
 
   describe('Copy All Prompt Button', () => {
-    it('toggles between dark and light themes', async () => {
-      renderApp();
-      await openViewMenu();
-
-      fireEvent.click(
-        await screen.findByRole('button', {
-          name: 'Switch to light theme',
-        }),
-      );
-
-      await waitFor(() => {
-        expect(document.documentElement).toHaveAttribute('data-theme', 'light');
-      });
-
-      fireEvent.click(
-        screen.getByRole('button', {
-          name: 'Switch to dark theme',
-        }),
-      );
-
-      await waitFor(() => {
-        expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
-      });
-    });
-
     it('should generate Copy All Prompt with requested and resolved diff context', async () => {
       mockComments = [
         createMockThread({ id: 'test-1', filePath: 'test.ts', line: 10, body: 'Test comment' }),
@@ -684,6 +659,34 @@ describe('App Component - Heartbeat Connection', () => {
       expect(MockEventSource.instances[0]?.url).toMatch(
         /^http:\/\/localhost:4969\/api\/heartbeat\?tab=/,
       );
+    });
+  });
+});
+
+describe('App Component - Header display controls', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockComments = [];
+    mockConfirm.mockReturnValue(false);
+    mockFetch(mockDiffResponse);
+  });
+
+  it('switches between dark and light themes from the Settings button', async () => {
+    renderApp();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Light' }));
+
+    await waitFor(() => {
+      expect(document.documentElement).toHaveAttribute('data-theme', 'light');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dark' }));
+
+    await waitFor(() => {
+      expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
     });
   });
 });

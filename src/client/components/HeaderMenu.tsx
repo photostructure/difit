@@ -16,12 +16,14 @@ import { useState, type ReactNode } from 'react';
 
 export function HeaderMenu({
   label,
+  title,
   children,
   className = '',
   open: controlledOpen,
   onOpenChange,
 }: {
   label: ReactNode;
+  title?: string;
   children: ReactNode;
   className?: string;
   open?: boolean;
@@ -56,6 +58,7 @@ export function HeaderMenu({
     <div className="relative flex self-stretch">
       <button
         ref={refs.setReference}
+        title={title}
         type="button"
         className={
           className ||

@@ -1,12 +1,4 @@
-import {
-  AlignLeft,
-  ChevronDown,
-  Columns,
-  Moon,
-  Settings,
-  SlidersHorizontal,
-  Sun,
-} from 'lucide-react';
+import { AlignLeft, ChevronDown, Columns, SlidersHorizontal } from 'lucide-react';
 
 import type { DiffViewMode } from '../../types/diff';
 
@@ -19,25 +11,20 @@ export function ViewMenu({
   onModeChange,
   ignoreWhitespace,
   onWhitespaceChange,
-  nextTheme,
-  onThemeToggle,
-  onSettings,
 }: {
   mode: DiffViewMode;
   mobile?: boolean;
   onModeChange: (mode: DiffViewMode) => void;
   ignoreWhitespace: boolean;
   onWhitespaceChange: (checked: boolean) => void;
-  nextTheme: 'light' | 'dark';
-  onThemeToggle: () => void;
-  onSettings: () => void;
 }) {
   return (
     <HeaderMenu
+      title="View"
       label={
         <>
           <SlidersHorizontal size={14} aria-hidden="true" />
-          View
+          <span className="sr-only lg:not-sr-only">View</span>
           <ChevronDown size={12} aria-hidden="true" />
         </>
       }
@@ -71,22 +58,6 @@ export function ViewMenu({
         onChange={onWhitespaceChange}
         label="Ignore Whitespace"
       />
-      <button
-        type="button"
-        onClick={onThemeToggle}
-        className="mt-3 flex w-full items-center gap-2 rounded p-2 text-left hover:bg-github-bg-tertiary"
-      >
-        {nextTheme === 'light' ? <Sun size={14} /> : <Moon size={14} />}Switch to {nextTheme} theme
-      </button>
-      <button
-        type="button"
-        data-close-menu
-        onClick={onSettings}
-        className="flex w-full items-center gap-2 rounded p-2 text-left hover:bg-github-bg-tertiary"
-      >
-        <Settings size={14} />
-        Settings
-      </button>
     </HeaderMenu>
   );
 }

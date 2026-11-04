@@ -1,4 +1,12 @@
-import { Info, GitBranch, MessageSquare, PanelLeftClose, PanelLeft, Keyboard } from 'lucide-react';
+import {
+  Info,
+  GitBranch,
+  MessageSquare,
+  PanelLeftClose,
+  PanelLeft,
+  Keyboard,
+  Settings,
+} from 'lucide-react';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
 import type { ApprovalMode, ConversationSnapshot } from '../types/conversation';
@@ -59,7 +67,6 @@ import { useReviewPresence } from './hooks/useReviewPresence';
 import { useViewedFiles } from './hooks/useViewedFiles';
 import { useViewport } from './hooks/useViewport';
 import { fetchClientSettings, saveClientSettings } from './services/userSettings';
-import { resolveThemePreference } from './utils/appearanceTheme';
 import { celebrateApproval } from './utils/approvalCelebration';
 import { hasMultipleCommentAuthors } from './utils/commentAuthors';
 import { copyTextToClipboard } from './utils/clipboard';
@@ -77,7 +84,6 @@ import {
   getMergedChunksForVersion,
 } from './utils/mergedChunks';
 import { buildFileLineIndex, isThreadOutdated } from './utils/outdatedComments';
-import { getFallbackSyntaxTheme } from './utils/themeLoader';
 import { hideWhitespaceChanges, remapWhitespaceCursor } from './utils/ignoreWhitespace';
 
 const EMPTY_COMMENT_THREADS: CommentThread[] = [];
@@ -250,17 +256,6 @@ function App() {
 
   const { settings, updateSettings } = useAppearanceSettings();
   const { isMobile } = useViewport();
-  const resolvedTheme = resolveThemePreference(settings.theme);
-  const nextTheme = resolvedTheme === 'dark' ? 'light' : 'dark';
-
-  const handleThemeToggle = useCallback(() => {
-    const fallbackSyntaxTheme = getFallbackSyntaxTheme(nextTheme);
-    updateSettings({
-      ...settings,
-      theme: nextTheme,
-      syntaxTheme: fallbackSyntaxTheme?.id ?? settings.syntaxTheme,
-    });
-  }, [nextTheme, settings, updateSettings]);
 
   // New diff-aware comment system
   const {
@@ -1736,16 +1731,25 @@ function App() {
             onModeChange={handleDiffModeChange}
             ignoreWhitespace={ignoreWhitespace}
             onWhitespaceChange={setIgnoreWhitespace}
-            nextTheme={nextTheme}
-            onThemeToggle={handleThemeToggle}
-            onSettings={() => setIsSettingsOpen(true)}
           />
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            aria-label="Settings"
+            title="Settings"
+            className="inline-flex items-center gap-1.5 rounded-md border border-github-border px-3 py-1.5 font-medium hover:bg-github-bg-tertiary"
+            onClick={() => setIsSettingsOpen(true)}
+          >
+            <Settings size={14} aria-hidden="true" />
+            <span className="sr-only lg:not-sr-only">Settings</span>
+          </button>
           <button
             type="button"
             aria-expanded={isAboutOpen}
             aria-controls="about-panel"
             aria-haspopup="dialog"
             aria-label="About"
+            title="About"
             className="inline-flex items-center gap-1.5 rounded-md border border-github-border px-3 py-1.5 font-medium hover:bg-github-bg-tertiary"
             onClick={() => {
               setIsCommentsListOpen(false);
@@ -1753,7 +1757,7 @@ function App() {
             }}
           >
             <Info size={14} aria-hidden="true" />
-            About
+            <span className="sr-only lg:not-sr-only">About</span>
           </button>
           <ReloadButton
             shouldReload={shouldReload}
@@ -1781,7 +1785,7 @@ function App() {
             className="inline-flex items-center gap-1.5 rounded-md border border-github-border px-3 py-1.5 font-medium hover:bg-github-bg-tertiary"
           >
             <MessageSquare size={14} aria-hidden="true" />
-            Conversation
+            <span className="sr-only lg:not-sr-only">Conversation</span>
             <span
               id="conversation-unread-status"
               aria-live="polite"

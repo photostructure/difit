@@ -28,6 +28,7 @@ All notable changes to this project will be documented in this file.
 - Route startup and disconnect diagnostics to stderr in both output modes; `--no-jsonl` uses human-readable comment and approval output on stdout.
 - Rename the header's **Repository** button to **About**.
 - Stop two ✨ emoji from rising beside the files-viewed status when the last file is marked **Viewed**; **All files viewed** and the full progress bar still mark completion.
+- Open **Settings** from its own gear button instead of from **View**, and drop **View**'s light/dark switch, which duplicated **Settings** → **Theme**. Below 1024px wide, **View**, **Settings**, **About**, and **Conversation** show only their icons, so the header fits one row on an iPad in portrait.
 
 ## [5.1.0] - 2026-10-29
 
