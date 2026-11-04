@@ -100,6 +100,9 @@ Installed skills include:
 
 - `difit`: ask the user to review code changes, or review a named diff or PR and show findings in the difit viewer, when the user explicitly asks for difit
 
+For Codex, follow the [Codex skill setup](docs/codex-review-integration.md#install-the-codex-entry-point)
+to use the workflow that ends the turn during human review.
+
 ## 🚀 Usage
 
 ### Basic Usage
@@ -342,6 +345,11 @@ This section is unnecessary
 ## 🤖 Calling from Agents
 
 You can install the following Skills to work with difit from AI agents.
+
+For Codex, use the [Codex entry point](.codex/skills/difit/SKILL.md) and
+[installation and handoff guide](docs/codex-review-integration.md). It ends the
+turn during human review and resumes on feedback. Keep its installed skill
+target separate from Claude's skill target.
 
 ```sh
 npx skills add photostructure/difit

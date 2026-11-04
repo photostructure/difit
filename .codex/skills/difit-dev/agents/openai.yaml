@@ -1,4 +1,4 @@
 interface:
   display_name: 'Difit(Dev)'
-  short_description: 'Request user review or open difit from agents.'
-  default_prompt: 'Use $difit-dev after implementation to request code review with pnpm run dev.'
+  short_description: 'Request user review without idle model turns.'
+  default_prompt: 'Use $difit-dev to show this session’s changes for review, then hand back without polling.'

@@ -4,14 +4,28 @@ Reviewer presence and event subscriptions work independently of the agent host.
 The host determines how a real human event reaches its model. Do not put a Codex
 model in a loop that checks difit, shell-job status or browser state.
 
-## Codex desktop: end the turn, resume on feedback
+## Install the Codex entry point
+
+The Codex skill is [`.codex/skills/difit/SKILL.md`](../.codex/skills/difit/SKILL.md).
+It keeps the Codex handoff rules separate from the Claude entry point at
+`skills/difit/SKILL.md`. The repository's `difit-dev` skill uses the same Codex
+workflow.
+
+Point the user-level Codex skill, `~/.agents/skills/difit`, at this checkout's
+`.codex/skills/difit` directory. Keep Claude's `~/.claude/skills/difit` pointing
+directly at `skills/difit`. A Claude link through `~/.agents/skills/difit` would
+make changing the Codex target change Claude's skill too. Preserve the existing
+Claude content when separating those links.
+
+## Codex: end the turn, resume on feedback
 
 This workflow needs no external controller and starts no model turns while the
-human is away:
+human is away. Use it for desktop, CLI, IDE, and subagent reviews unless an
+external event controller is already configured:
 
 1. From the reviewed repository's Git root, launch the source build using
    the difit launcher prescribed by the checkout's instructions with `--background`.
-   Save its API port, review ID,
+   Save its API host/port, review ID,
    browser URL, capture/summary versions, and pending message revisions. Use a
    named review when the patch must remain frozen.
 2. Send any explicit receipts only after recording the corresponding work. Hand
@@ -20,23 +34,38 @@ human is away:
    pastes it into the owning Codex chat. The button also works when the browser
    cannot determine listener presence. It copies a snapshot command and the
    review URL, with the editor-session fragment removed.
-4. Codex reads one `comment snapshot --port <actual-port>`, reconciles queued
+4. Codex reads one `comment snapshot --host <host> --port <actual-port>`, reconciles queued
    messages and its saved pending work, and handles the feedback within the
    existing authorization. Preserve exact message revision cursors for receipts
    and replies. Check approval against the current capture and summary.
-5. When caught up, Codex ends the turn again. It does not start a new waiter just
-   to keep the chat busy. Delivered or Read messages still need reconciliation
-   against saved work; only Queued messages are automatically recovered by wait.
+5. When caught up, Codex ends the turn again. Delivered, Read, Thinking, and
+   Replying messages still need reconciliation against saved work; only Queued
+   messages are automatically recovered by wait. Do not call a waiter, schedule,
+   heartbeat, sleep, or repeated snapshot to keep this model turn active.
+
+Fetch another snapshot for a conflict, newly delivered human feedback, or the
+final approval check before committing. Do not turn an empty snapshot, tool
+yield, timeout, or cache expiry into another check. Save large snapshots to a
+private temporary file and show the model only the selected reviews' metadata,
+outstanding human messages, and context needed to answer them. Keep handoffs to
+IDs, versions, URLs, pending revisions, and next actions.
+
+Subagents finish after handing those details to the owning main chat. A review
+server's process lifetime is not a reason to keep a subagent running. The CLI's
+`--background` implementation detaches and unreferences its child process. If
+the host imposes a stronger process-lifetime restriction, report it; do not
+substitute a model polling loop to preserve the server.
 
 The cost is one human paste per feedback batch. Closing the browser, leaving a
 hidden tab, or leaving the server running does not itself start a Codex turn.
 The listener indicator describes a subscription, not whether the model is active.
-A host with an explicitly tested completion-to-turn path may instead use one
-background waiter; do not infer that capability from process launch.
+The Codex model does not infer an automatic delivery path from process launch,
+the existence of a background terminal, or an active browser tab. An external
+controller owns waiting when automatic delivery is configured.
 
 ## Automatic integration: a controller owns event delivery
 
-OpenAI's [app-server protocol](https://developers.openai.com/codex/app-server)
+OpenAI's [app-server protocol](https://learn.chatgpt.com/docs/app-server#lifecycle-overview)
 documents `initialize`, `thread/resume`, and `turn/start`. A controller that owns
 the real app-server connection can keep the model idle and call `turn/start`
 when difit returns a nonempty human-event batch. This is an integration contract,
@@ -60,24 +89,15 @@ An implementation must:
 - Keep host approvals and capture guards in effect. Do not infer permission to
   edit, commit or approve from presence or message intent.
 
-The [CLI reference](https://learn.chatgpt.com/docs/developer-commands#codex-queue)
-also describes `codex queue`, including version-dependent resume support. On this
-host, `codex-cli 0.164.0` exposes `queue` but its help has no `--resume` option
-(verified 2026-11-03). That is not evidence that queueing will wake this desktop
-chat. Verify the installed command, owning server and actual delivery behavior
-before using it as an automatic bridge. Do not start `codex exec resume` against
-an already-managed desktop chat as a substitute for a verified connection.
+Queue/resume commands do not establish that they can deliver into the owning
+desktop chat. Verify the owning connection and real event delivery when building
+an integration. Do not start `codex exec resume` against an already-managed
+desktop chat as a substitute for a configured controller. Ordinary review work
+does not include building or probing an automatic bridge.
 
 ## Claude integration
 
-Claude can use one main-session background `difit wait` when that host has a
-completion notification path and permits the needed task lifetime. Exit 4 means
-end the turn; it must not trigger a new polling cycle. Host deadlines can still
-wake the model regardless of CLI silence. The
-[Claude handoff](claude-review-wait-handoff.md) requires checking the actual host
-and separately addresses enforcement against custom polling scripts.
-
-If the host cannot provide this lifetime and completion delivery, hand back the
-review URL and end the turn. The reviewer can use **Copy resume prompt** to resume
-the owning chat with a feedback batch. Do not substitute a Monitor or a polling
-script that wakes the model on a timer.
+Claude's host-specific waiting instructions live in
+[its skill](../skills/difit/SKILL.md). Changes to that workflow do not change the
+Codex handoff rule. Both workflows preserve explicit comment receipts, approval
+guards, and existing review servers.
