@@ -348,9 +348,7 @@ export function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: S
 
                 <div>
                   <div className="flex items-baseline justify-between gap-4 mb-2">
-                    <span className="text-sm font-medium text-github-text-primary">
-                      Approval Celebration
-                    </span>
+                    <span className="text-sm font-medium ui-label">Approval Celebration</span>
                     <span className="flex items-baseline gap-2 text-xs text-github-text-muted">
                       <button
                         type="button"
