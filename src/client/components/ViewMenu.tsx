@@ -1,6 +1,5 @@
 import {
   AlignLeft,
-  Check,
   ChevronDown,
   Columns,
   Moon,
@@ -44,14 +43,18 @@ export function ViewMenu({
       }
     >
       {!mobile && (
-        <div className="mb-3 flex" role="group" aria-label="Diff display">
+        <div className="mb-3 flex gap-2" role="group" aria-label="Diff display">
           {(['split', 'unified'] as const).map((value) => (
             <button
               key={value}
               type="button"
               aria-pressed={mode === value}
               onClick={() => onModeChange(value)}
-              className={`inline-flex flex-1 items-center justify-center gap-1.5 border border-github-border px-3 py-2 ${mode === value ? 'bg-github-bg-tertiary font-medium' : ''}`}
+              className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded border px-3 py-2 text-sm transition-colors ${
+                mode === value
+                  ? 'bg-github-accent text-white border-github-accent'
+                  : 'bg-github-bg-tertiary text-github-text-secondary border-github-border hover:text-github-text-primary'
+              }`}
             >
               {value === 'split' ? (
                 <Columns size={14} aria-hidden="true" />
@@ -59,9 +62,6 @@ export function ViewMenu({
                 <AlignLeft size={14} aria-hidden="true" />
               )}
               {value === 'split' ? 'Split' : 'Unified'}
-              <span className="inline-flex w-3.5 shrink-0 justify-center">
-                {mode === value && <Check size={14} aria-hidden="true" />}
-              </span>
             </button>
           ))}
         </div>
