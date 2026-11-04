@@ -17,7 +17,7 @@ const APPROVAL_ANIMATIONS = [
   { id: 'streamers', label: 'Streamers' },
   { id: 'sparkles', label: 'Sparkles' },
   { id: 'fireworks', label: 'Fireworks' },
-  { id: 'spirals', label: 'Spirals' },
+  { id: 'stamp', label: 'Approved Stamp' },
   { id: 'lasers', label: 'Lasers' },
   { id: 'disco', label: 'Disco Ball' },
 ] as const;
@@ -56,7 +56,7 @@ export const DEFAULT_SETTINGS: AppearanceSettings = {
     streamers: true,
     sparkles: true,
     fireworks: true,
-    spirals: true,
+    stamp: true,
     lasers: true,
     disco: true,
   },
@@ -175,6 +175,15 @@ export function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: S
       autoViewedPatterns: DEFAULT_SETTINGS.autoViewedPatterns,
     });
     setAutoViewedPatternsInput(formatAutoViewedPatterns(DEFAULT_SETTINGS.autoViewedPatterns));
+  };
+
+  const setAllApprovalAnimations = (enabled: boolean) => {
+    onSettingsChange({
+      ...settings,
+      approvalAnimations: Object.fromEntries(
+        APPROVAL_ANIMATIONS.map((animation) => [animation.id, enabled]),
+      ) as Record<ApprovalAnimation, boolean>,
+    });
   };
 
   if (!isOpen) return null;
@@ -338,9 +347,28 @@ export function SettingsModal({ isOpen, onClose, settings, onSettingsChange }: S
                 </div>
 
                 <div>
-                  <span className="block text-sm font-medium text-github-text-primary mb-2">
-                    Approval Celebration
-                  </span>
+                  <div className="flex items-baseline justify-between gap-4 mb-2">
+                    <span className="text-sm font-medium text-github-text-primary">
+                      Approval Celebration
+                    </span>
+                    <span className="flex items-baseline gap-2 text-xs text-github-text-muted">
+                      <button
+                        type="button"
+                        onClick={() => setAllApprovalAnimations(true)}
+                        className="text-github-accent hover:underline"
+                      >
+                        Enable all
+                      </button>
+                      ·
+                      <button
+                        type="button"
+                        onClick={() => setAllApprovalAnimations(false)}
+                        className="text-github-accent hover:underline"
+                      >
+                        Disable all
+                      </button>
+                    </span>
+                  </div>
                   <p className="text-sm text-github-text-secondary mb-2">
                     Approving a review plays one of the enabled animations at random, unless your
                     system is set to reduce motion. Turn them all off for none.

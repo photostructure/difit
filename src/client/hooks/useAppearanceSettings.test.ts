@@ -163,7 +163,7 @@ describe('useAppearanceSettings', () => {
         streamers: true,
         sparkles: true,
         fireworks: true,
-        spirals: true,
+        stamp: true,
         lasers: true,
         disco: true,
       });

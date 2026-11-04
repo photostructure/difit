@@ -19,16 +19,26 @@ const PALETTE = [
 ];
 const LASER_COLORS = ['#39ff14', '#ff3131', '#00e5ff', '#ff2bd6', '#3d5afe'];
 
-type PieceKind = 'paper' | 'ribbon' | 'sparkle' | 'rocket' | 'ember' | 'spiral' | 'laser' | 'disco';
+type PieceKind =
+  | 'paper'
+  | 'ribbon'
+  | 'sparkle'
+  | 'rocket'
+  | 'ember'
+  | 'stamp'
+  | 'ink'
+  | 'laser'
+  | 'disco';
 
-/** Ribbons and spirals drift down slower than paper; lasers and the disco ball ignore gravity. */
+/** Ribbons fall slower than paper; the stamp, its ink, lasers, and the disco ball ignore gravity. */
 const GRAVITY_SCALE: Record<PieceKind, number> = {
   paper: 1,
   ribbon: 0.7,
   sparkle: 0.15,
   rocket: 1,
   ember: 0.35,
-  spiral: 0.3,
+  stamp: 0,
+  ink: 0,
   laser: 0,
   disco: 0,
 };
@@ -42,7 +52,7 @@ interface Piece {
   /** Linear air drag per second; paper scales it by how face-on it is to the fall. */
   drag: number;
   color: string;
-  /** Paper and ribbon width, sparkle and ember size, or spiral and disco ball radius. */
+  /** Paper, ribbon, and stamp width, sparkle and ember size, or disco ball radius. */
   width: number;
   /** Paper height, or the angle between a laser's beams. */
   height: number;
@@ -51,7 +61,7 @@ interface Piece {
   spinRate: number;
   /**
    * Out-of-plane rotation: paper's visible face width, a ribbon's twist along
-   * its length, or a laser's brightness pulse.
+   * its length, a laser's brightness pulse, or the seed for a stamp's worn ink.
    */
   flip: number;
   flipRate: number;
@@ -63,7 +73,7 @@ interface Piece {
   coilRadius: number;
   coilPitch: number;
   coilTurns: number;
-  /** Laser beams, spiral arms, or disco ball light specks. */
+  /** Laser beams, worn spots in a stamp's ink, or disco ball light specks. */
   parts: number;
   /** Where a laser points first (the Approve button), or where the disco ball comes to rest. */
   targetX: number;
@@ -217,30 +227,21 @@ const BURSTS: Record<
       };
     },
   },
-  spirals: {
-    count: 14,
-    duration: 4.5,
-    make: ({ origin, cy, aim }) => {
-      const angle = aim + random(-1.1, 1.1);
-      const speed = random(300, 900);
-      return {
-        ...still,
-        kind: 'spiral',
-        x: random(origin.left, origin.right),
-        y: cy,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed - random(100, 300),
-        drag: random(2.2, 3),
-        color: pick(PALETTE),
-        width: random(14, 24),
-        spin: random(0, Math.PI * 2),
-        spinRate: random(4, 8) * (Math.random() < 0.5 ? -1 : 1),
-        sway: random(0, Math.PI * 2),
-        swayRate: random(1.5, 3),
-        swayForce: random(40, 100),
-        parts: pick([3, 4, 5]),
-      };
-    },
+  // A rubber stamp slams down on the middle of the page and leaves a dated APPROVED mark.
+  stamp: {
+    count: 1,
+    duration: 3.4,
+    make: ({ viewport }) => ({
+      ...still,
+      kind: 'stamp',
+      x: viewport.width / 2,
+      y: viewport.height * 0.42,
+      color: '#16a34a',
+      width: Math.min(viewport.width * 0.7, 440),
+      spin: random(0.1, 0.22) * (Math.random() < 0.5 ? -1 : 1),
+      flip: random(0, 1000),
+      parts: 260,
+    }),
   },
   // Emitters along the bottom edge aim their beams at the Approve button, then sweep.
   lasers: {
@@ -348,6 +349,43 @@ function step(piece: Piece, dt: number, spawn: (piece: Piece) => void) {
       burstRocket(piece, spawn);
     }
   }
+  if (piece.kind === 'stamp' && piece.age >= STAMP_DROP && piece.age - dt < STAMP_DROP) {
+    splatterStamp(piece, spawn);
+  }
+}
+
+/** The stamp falls this long before it hits the page. */
+const STAMP_DROP = 0.32;
+/** The stamp's height as a fraction of its width. */
+const STAMP_ASPECT = 0.42;
+
+/** A stable pseudo-random number in [0, 1), so a stamp's worn spots stay put between frames. */
+const hash = (n: number) => {
+  const s = Math.sin(n) * 43758.5453;
+  return s - Math.floor(s);
+};
+
+function splatterStamp(stamp: Piece, spawn: (piece: Piece) => void) {
+  const halfWidth = stamp.width / 2;
+  const halfHeight = (stamp.width * STAMP_ASPECT) / 2;
+  for (let i = 0; i < 48; i++) {
+    // Ink squeezes out from under the stamp's edge and flies away from it.
+    const angle = random(0, Math.PI * 2);
+    const edgeX = Math.cos(angle) * halfWidth;
+    const edgeY = Math.sin(angle) * halfHeight;
+    const speed = random(120, 520);
+    spawn({
+      ...still,
+      kind: 'ink',
+      x: stamp.x + edgeX * Math.cos(stamp.spin) - edgeY * Math.sin(stamp.spin),
+      y: stamp.y + edgeX * Math.sin(stamp.spin) + edgeY * Math.cos(stamp.spin),
+      vx: Math.cos(angle + stamp.spin) * speed,
+      vy: Math.sin(angle + stamp.spin) * speed,
+      drag: random(9, 14),
+      color: stamp.color,
+      width: random(1.5, 4.5),
+    });
+  }
 }
 
 function drawPaper(ctx: CanvasRenderingContext2D, piece: Piece) {
@@ -429,7 +467,7 @@ function drawSparkle(ctx: CanvasRenderingContext2D, piece: Piece) {
   ctx.restore();
 }
 
-/** Rockets and embers draw as short streaks behind their direction of travel. */
+/** Rockets, embers, and ink drops draw as short streaks behind their direction of travel. */
 function drawStreak(ctx: CanvasRenderingContext2D, piece: Piece, length: number) {
   ctx.save();
   if (piece.kind === 'ember') ctx.globalAlpha *= clamp01(piece.life / 0.5);
@@ -443,32 +481,67 @@ function drawStreak(ctx: CanvasRenderingContext2D, piece: Piece, length: number)
   ctx.restore();
 }
 
-function drawSpiral(ctx: CanvasRenderingContext2D, piece: Piece) {
-  // The arms unwind from the center as the spiral blooms.
-  const bloom = 1 - Math.exp(-piece.age * 2.5);
-  const sweep = Math.PI * 2.4;
-  const colorIndex = PALETTE.indexOf(piece.color);
+function drawStamp(ctx: CanvasRenderingContext2D, piece: Piece) {
+  const w = piece.width;
+  const h = w * STAMP_ASPECT;
+  const landed = piece.age >= STAMP_DROP;
+  const fall = clamp01(piece.age / STAMP_DROP);
+  const since = piece.age - STAMP_DROP;
+  // It falls toward the page, shrinking to its true size and straightening, then shudders on impact.
+  const scale = landed
+    ? 1 - 0.06 * Math.exp(-since * 14) * Math.sin(since * 40)
+    : 1 + 1.6 * (1 - fall * fall);
+  const shake = landed ? 5 * Math.exp(-since * 16) * Math.sin(since * 90) : 0;
   ctx.save();
-  ctx.translate(piece.x, piece.y);
-  ctx.rotate(piece.spin);
-  ctx.lineWidth = 2.5;
-  ctx.lineCap = 'round';
-  for (let arm = 0; arm < piece.parts; arm++) {
-    const turn = (arm * Math.PI * 2) / piece.parts;
-    ctx.beginPath();
-    for (let i = 0; i <= 24; i++) {
-      const theta = (sweep * bloom * i) / 24;
-      const r = (piece.width * theta) / sweep;
-      if (i === 0) ctx.moveTo(0, 0);
-      else ctx.lineTo(Math.cos(theta + turn) * r, Math.sin(theta + turn) * r);
-    }
-    ctx.strokeStyle = PALETTE[(colorIndex + arm) % PALETTE.length] ?? piece.color;
-    ctx.stroke();
-  }
-  ctx.fillStyle = '#ffffff';
+  ctx.translate(piece.x + shake, piece.y);
+  ctx.rotate(piece.spin * (landed ? 1 : 3 - 2 * fall));
+  ctx.scale(scale, scale);
+  // Until it lands, the stamp is a faint shape above the page.
+  ctx.globalAlpha *= landed ? 0.92 : 0.3 * fall;
+  ctx.strokeStyle = piece.color;
+  ctx.fillStyle = piece.color;
+  ctx.lineWidth = h * 0.07;
   ctx.beginPath();
-  ctx.arc(0, 0, 2, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.roundRect(-w / 2, -h / 2, w, h, h * 0.12);
+  ctx.stroke();
+  const inset = h * 0.11;
+  ctx.lineWidth = h * 0.025;
+  ctx.beginPath();
+  ctx.roundRect(-w / 2 + inset, -h / 2 + inset, w - inset * 2, h - inset * 2, h * 0.06);
+  ctx.stroke();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `900 ${h * 0.42}px ui-sans-serif, system-ui, sans-serif`;
+  ctx.fillText('APPROVED', 0, -h * 0.06, w - h * 0.5);
+  ctx.font = `700 ${h * 0.12}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+  const date = new Date().toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+  ctx.fillText(date.toUpperCase(), 0, h * 0.25, w - h * 0.5);
+
+  // Uneven pressure and specks of missing ink make it read as rubber on paper.
+  ctx.globalCompositeOperation = 'destination-out';
+  const pressure = ctx.createLinearGradient(-w / 2, -h / 2, w / 2, h / 2);
+  pressure.addColorStop(0, 'rgba(0, 0, 0, 0.45)');
+  pressure.addColorStop(0.55, 'rgba(0, 0, 0, 0)');
+  pressure.addColorStop(1, 'rgba(0, 0, 0, 0.2)');
+  ctx.fillStyle = pressure;
+  ctx.fillRect(-w / 2 - h, -h, w + h * 2, h * 2);
+  ctx.fillStyle = '#000000';
+  for (let i = 0; i < piece.parts; i++) {
+    const size = hash(piece.flip + i * 1.31);
+    ctx.beginPath();
+    ctx.arc(
+      (hash(piece.flip + i * 3.17) - 0.5) * w * 1.05,
+      (hash(piece.flip + i * 7.73) - 0.5) * h * 1.05,
+      ((0.5 + (size > 0.92 ? 4 : 1.6) * size) * w) / 440,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+  }
   ctx.restore();
 }
 
@@ -589,8 +662,10 @@ function draw(ctx: CanvasRenderingContext2D, piece: Piece) {
       return drawStreak(ctx, piece, 0.025);
     case 'ember':
       return drawStreak(ctx, piece, 0.03);
-    case 'spiral':
-      return drawSpiral(ctx, piece);
+    case 'stamp':
+      return drawStamp(ctx, piece);
+    case 'ink':
+      return drawStreak(ctx, piece, 0.03);
     case 'laser':
       return drawLaser(ctx, piece);
     case 'disco':

@@ -29,7 +29,7 @@ const baseSettings = {
     streamers: true,
     sparkles: true,
     fireworks: true,
-    spirals: true,
+    stamp: true,
     lasers: true,
     disco: true,
   },
@@ -168,6 +168,44 @@ describe('SettingsModal', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Reset Appearance Defaults' }));
     expect(onSettingsChange).toHaveBeenLastCalledWith(baseSettings);
+  });
+
+  it('turns every approval animation on or off at once', () => {
+    const onSettingsChange = vi.fn();
+    const settings = {
+      ...baseSettings,
+      approvalAnimations: { ...baseSettings.approvalAnimations, confetti: false, disco: false },
+    };
+
+    render(
+      <SettingsModal
+        isOpen={true}
+        onClose={vi.fn()}
+        settings={settings}
+        onSettingsChange={onSettingsChange}
+      />,
+      { wrapper },
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Disable all' }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({
+      ...settings,
+      approvalAnimations: {
+        confetti: false,
+        streamers: false,
+        sparkles: false,
+        fireworks: false,
+        stamp: false,
+        lasers: false,
+        disco: false,
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enable all' }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({
+      ...settings,
+      approvalAnimations: baseSettings.approvalAnimations,
+    });
   });
 
   it('edits auto-viewed patterns from the system section as newline-delimited values', () => {
