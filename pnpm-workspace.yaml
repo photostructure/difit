@@ -6,14 +6,12 @@ allowBuilds:
   '@vscode/vsce-sign': true
   esbuild: true
   keytar: true
-  lefthook: true
 
 onlyBuiltDependencies:
   - '@parcel/watcher'
   - '@vscode/vsce-sign'
   - esbuild
   - keytar
-  - lefthook
 
 minimumReleaseAge: 20160
 # Approved security patch exceptions; keep all other releases behind the 14-day gate.

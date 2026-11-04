@@ -22,7 +22,7 @@ Vitest with the `happy-dom` environment drives unit and integration coverage, an
 
 ## Commit & Pull Request Guidelines
 
-Git history mixes lightweight descriptions with Conventional Commit prefixes—follow the pattern where it clarifies intent: `fix: guard empty diff (#123)` or `feat(cli): add --port flag`. Keep commits focused, include context in the body, and reference issues with `#id` when relevant. Before opening a PR, ensure `pnpm check`, `pnpm test`, and `pnpm build` succeed locally; lefthook re-runs them on commit and push. PRs should outline motivation, implementation notes, manual verification steps, and UI changes (attach refreshed `docs/images` assets or screenshots for web updates).
+Git history mixes lightweight descriptions with Conventional Commit prefixes—follow the pattern where it clarifies intent: `fix: guard empty diff (#123)` or `feat(cli): add --port flag`. Keep commits focused, include context in the body, and reference issues with `#id` when relevant. Before opening a PR, ensure `pnpm check`, `pnpm test`, and `pnpm build` succeed locally. PRs should outline motivation, implementation notes, manual verification steps, and UI changes (attach refreshed `docs/images` assets or screenshots for web updates).
 
 ## Tooling & Environment
 
