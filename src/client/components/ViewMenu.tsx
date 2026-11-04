@@ -1,5 +1,6 @@
 import {
   AlignLeft,
+  Check,
   ChevronDown,
   Columns,
   Moon,
@@ -58,6 +59,9 @@ export function ViewMenu({
                 <AlignLeft size={14} aria-hidden="true" />
               )}
               {value === 'split' ? 'Split' : 'Unified'}
+              <span className="inline-flex w-3.5 shrink-0 justify-center">
+                {mode === value && <Check size={14} aria-hidden="true" />}
+              </span>
             </button>
           ))}
         </div>
