@@ -46,7 +46,6 @@ interface DiffQuickMenuProps {
   onOpenAdvanced: () => void;
   onOpen?: () => void;
   recentReviews?: RecentReview[];
-  compact?: boolean;
 }
 
 const SPECIAL_LABEL_OVERRIDES: Record<string, string> = {
@@ -134,7 +133,6 @@ export function DiffQuickMenu({
   onOpenAdvanced,
   onOpen,
   recentReviews = EMPTY_RECENT_REVIEWS,
-  compact = false,
 }: DiffQuickMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isCommitMenuOpen, setIsCommitMenuOpen] = useState(false);
@@ -142,7 +140,6 @@ export function DiffQuickMenu({
   useEffect(() => {
     if (isOpen) onOpen?.();
   }, [isOpen, onOpen]);
-  const isCompact = compact;
 
   const { refs, floatingStyles, context } = useFloating({
     open: isOpen || isCommitMenuOpen,
@@ -430,26 +427,17 @@ export function DiffQuickMenu({
         title={currentTitle}
         {...getReferenceProps()}
       >
-        {isCompact ? (
-          <div className="flex items-center gap-1.5 px-2 py-1 bg-github-bg-tertiary border border-github-border rounded hover:border-github-text-secondary transition-colors">
-            <GitBranch size={14} className="text-github-text-secondary" />
-            <ChevronDown
-              size={12}
-              className="text-github-text-secondary group-hover:text-github-text-primary transition-colors"
-            />
-          </div>
-        ) : (
-          <div className="flex min-w-0 max-w-full items-center gap-1 px-2 py-1 bg-github-bg-tertiary border border-github-border rounded hover:border-github-text-secondary transition-colors">
-            <GitBranch size={14} aria-hidden="true" className="shrink-0" />
-            <code className="min-w-0 max-w-[24ch] truncate text-xs text-github-text-primary">
-              {currentLabel}
-            </code>
-            <ChevronDown
-              size={12}
-              className="text-github-text-secondary group-hover:text-github-text-primary transition-colors"
-            />
-          </div>
-        )}
+        <div className="flex min-w-0 max-w-full items-center gap-1 px-2 py-1 bg-github-bg-tertiary border border-github-border rounded hover:border-github-text-secondary transition-colors">
+          <GitBranch size={14} aria-hidden="true" className="shrink-0" />
+          {/* Below 1024px only the icon shows; the menu names the selection. */}
+          <code className="hidden min-w-0 max-w-[24ch] truncate text-xs text-github-text-primary lg:block">
+            {currentLabel}
+          </code>
+          <ChevronDown
+            size={12}
+            className="text-github-text-secondary group-hover:text-github-text-primary transition-colors"
+          />
+        </div>
       </button>
 
       {isOpen && (
@@ -460,7 +448,19 @@ export function DiffQuickMenu({
             className="bg-github-bg-secondary border border-github-border rounded shadow-lg z-50 w-[320px] max-h-[400px] overflow-y-auto"
             {...getFloatingProps()}
           >
-            {capture && <CaptureDetails capture={capture} />}
+            {capture ? (
+              <CaptureDetails capture={capture} />
+            ) : (
+              <div className="border-b border-github-border px-3 py-2 text-xs">
+                <div className="ui-label">Comparing</div>
+                <code className="block break-all ui-value">{currentLabel}</code>
+                {fullSelectionLabel !== currentLabel && (
+                  <code className="block break-all text-github-text-secondary">
+                    {fullSelectionLabel}
+                  </code>
+                )}
+              </div>
+            )}
             {/* Search box */}
             <div className="sticky top-0 z-10 border-b border-github-border bg-github-bg-secondary p-2">
               <div className="flex items-center gap-2 rounded border border-github-border bg-github-bg-primary px-2 py-1.5 focus-within:border-blue-600">

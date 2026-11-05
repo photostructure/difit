@@ -351,6 +351,46 @@ describe('DiffQuickMenu', () => {
     expect(screen.getByText('No matching branches or commits')).toBeInTheDocument();
   });
 
+  it('names the selection inside the menu, for screens where the button shows only its icon', () => {
+    const base = 'a'.repeat(40);
+    const target = 'b'.repeat(40);
+    render(
+      createElement(DiffQuickMenu, {
+        options: { ...options, commits: [] },
+        selection: { baseCommitish: base, targetCommitish: target },
+        onSelectDiff: vi.fn(),
+        onOpenAdvanced: vi.fn(),
+      }),
+    );
+
+    expect(screen.queryByText(`${base}...${target}`)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Revision menu: aaaaaaaa...bbbbbbbb' }));
+
+    expect(screen.getByText(`${base}...${target}`)).toBeInTheDocument();
+  });
+
+  it('names uncommitted changes in the menu the way the button does', () => {
+    render(
+      createElement(DiffQuickMenu, {
+        options,
+        selection: { baseCommitish: 'origin/main', targetCommitish: '.', baseMode: 'merge-base' },
+        onSelectDiff: vi.fn(),
+        onOpenAdvanced: vi.fn(),
+      }),
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Revision menu: origin/main...Uncommitted Changes (merge-base)',
+      }),
+    );
+
+    const comparing = within(screen.getByText('Comparing').parentElement!);
+    expect(
+      comparing.getByText('origin/main...Uncommitted Changes (merge-base)'),
+    ).toBeInTheDocument();
+  });
+
   it('shows merge-base in the current label', () => {
     render(
       createElement(DiffQuickMenu, {

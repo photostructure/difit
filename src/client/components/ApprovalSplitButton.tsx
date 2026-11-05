@@ -6,7 +6,7 @@ import type { ApprovalMode } from '../../types/conversation';
 import { HeaderMenu } from './HeaderMenu';
 
 export function ApprovalSplitButton({
-  buttonRef,
+  containerRef,
   requested,
   approved,
   mode,
@@ -17,7 +17,8 @@ export function ApprovalSplitButton({
   onApprove,
   onRevoke,
 }: {
-  buttonRef: Ref<HTMLButtonElement>;
+  // The approval celebration bursts from this element.
+  containerRef: Ref<HTMLDivElement>;
   requested: boolean;
   approved: boolean;
   mode?: ApprovalMode;
@@ -42,15 +43,15 @@ export function ApprovalSplitButton({
       ? 'border-yellow-600 bg-github-bg-secondary ui-warning'
       : 'border-github-accent bg-github-accent text-white';
   return (
-    <div className={`flex items-stretch rounded-md border ${colors}`}>
+    <div ref={containerRef} className={`flex items-stretch rounded-md border ${colors}`}>
+      {/* Below 1024px only the checkmark and chevron show, and they always open the menu. */}
       <button
-        ref={buttonRef}
         type="button"
         disabled={busy || disabled}
         aria-busy={busy}
         title="Approve the reviewed patch as-is"
         onClick={() => onApprove('as-is')}
-        className="inline-flex min-w-0 items-center justify-center gap-1.5 rounded-l-md px-3 py-1.5 text-sm font-medium disabled:opacity-60"
+        className="hidden min-w-0 items-center justify-center gap-1.5 rounded-l-md px-3 py-1.5 text-sm font-medium disabled:opacity-60 lg:inline-flex"
       >
         <Check size={14} aria-hidden="true" />
         {label}
@@ -58,9 +59,11 @@ export function ApprovalSplitButton({
       <HeaderMenu
         open={open}
         onOpenChange={setOpen}
-        className="inline-flex items-center justify-center rounded-r-md border-l border-current/30 px-2 disabled:opacity-60"
+        title={requested ? label : 'Choose an approval mode'}
+        className="inline-flex items-center justify-center gap-1 rounded-md px-2 disabled:opacity-60 lg:rounded-l-none lg:border-l lg:border-current/30"
         label={
           <>
+            <Check size={14} aria-hidden="true" className="lg:hidden" />
             <ChevronDown size={14} aria-hidden="true" />
             <span className="sr-only">Approval options</span>
           </>

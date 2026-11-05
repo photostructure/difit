@@ -1,11 +1,12 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { createRef } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ApprovalSplitButton } from './ApprovalSplitButton';
 
 describe('approval split button', () => {
   const props = {
-    buttonRef: null,
+    containerRef: null,
     requested: false,
     approved: false,
     pendingCount: 0,
@@ -15,6 +16,32 @@ describe('approval split button', () => {
     onApprove: vi.fn(),
     onRevoke: vi.fn(),
   };
+
+  it('anchors the celebration on the whole control, which stays visible at every width', () => {
+    const containerRef = createRef<HTMLDivElement>();
+    render(<ApprovalSplitButton {...props} containerRef={containerRef} />);
+
+    expect(containerRef.current).toContainElement(
+      screen.getByRole('button', { name: 'Approval options' }),
+    );
+    expect(containerRef.current).toContainElement(
+      screen.getByRole('button', { name: 'Approve as-is' }),
+    );
+  });
+
+  it('titles the options button with what its menu offers, not the as-is action', () => {
+    const { rerender } = render(<ApprovalSplitButton {...props} />);
+    expect(screen.getByRole('button', { name: 'Approval options' })).toHaveAttribute(
+      'title',
+      'Choose an approval mode',
+    );
+
+    rerender(<ApprovalSplitButton {...props} requested approved mode="as-is" />);
+    expect(screen.getByRole('button', { name: 'Approval options' })).toHaveAttribute(
+      'title',
+      'Approved as-is',
+    );
+  });
 
   it('returns both halves to grey after revocation', () => {
     const { rerender } = render(<ApprovalSplitButton {...props} />);

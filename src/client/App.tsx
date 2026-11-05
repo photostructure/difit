@@ -162,7 +162,7 @@ function App() {
   useEffect(() => onSettingsSaveError(setSettingsSaveError), []);
   const [isCopiedAll, setIsCopiedAll] = useState(false);
   const [isShipping, setIsShipping] = useState(false);
-  const approveButtonRef = useRef<HTMLButtonElement>(null);
+  const approvalControlRef = useRef<HTMLDivElement>(null);
   const [shipItError, setShipItError] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(getInitialSidebarWidth);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -429,9 +429,9 @@ function App() {
         mode === 'as-is' &&
         (!approval.requested || approval.mode === 'after-comments') &&
         activeCommentsContextRef.current.generation === commentsGeneration &&
-        approveButtonRef.current
+        approvalControlRef.current
       ) {
-        celebrateApproval(approveButtonRef.current, settings.approvalAnimations);
+        celebrateApproval(approvalControlRef.current, settings.approvalAnimations);
       }
     } catch (approvalError) {
       console.error('Failed to approve review:', approvalError);
@@ -1595,7 +1595,7 @@ function App() {
     <ReviewProviders agentUpdates={agentReadContext}>
       <div className="h-screen flex flex-col" onClickCapture={handleGlobalClick}>
         <header
-          className="review-toolbar flex shrink-0 flex-wrap items-stretch justify-end gap-2 border-b border-github-border bg-github-bg-secondary px-3 py-2 text-sm text-github-text-primary"
+          className="review-toolbar flex shrink-0 flex-wrap items-stretch justify-end gap-1 border-b border-github-border bg-github-bg-secondary px-3 py-2 text-sm text-github-text-primary md:gap-2"
           data-testid="compact-review-header"
         >
           {diffData.capture && (
@@ -1605,7 +1605,7 @@ function App() {
               <span>{diffData.capture.patchDigest.slice(0, 12)}</span>
             </div>
           )}
-          <div className="mr-auto flex min-w-0 max-w-full flex-wrap items-center gap-2">
+          <div className="mr-auto flex min-w-0 max-w-full flex-wrap items-center gap-1 md:gap-2">
             <button
               type="button"
               onClick={() => setIsFileTreeOpen(!isFileTreeOpen)}
@@ -1617,10 +1617,11 @@ function App() {
             >
               {isFileTreeOpen ? <PanelLeftClose size={18} /> : <PanelLeft size={18} />}
             </button>
-            <h1 className="shrink-0">
+            <h1 className="sr-only shrink-0 md:not-sr-only">
               <Logo style={{ height: '18px', color: 'var(--color-github-text-secondary)' }} />
             </h1>
-            {(!isFileTreeOpen || isMobile) && (
+            {/* On mobile the count lives in the file tree drawer. */}
+            {!isFileTreeOpen && !isMobile && (
               <span className="shrink-0 text-xs ui-value">
                 <span role="status" title="Files viewed">
                   {allFilesViewed ? (
@@ -1659,10 +1660,11 @@ function App() {
             />
           ) : (
             <HeaderMenu
+              title={diffData.capture?.name ?? diffData.commit}
               label={
                 <>
                   <GitBranch size={14} aria-hidden="true" />
-                  <span className="max-w-[24ch] truncate">
+                  <span className="max-w-[24ch] truncate max-lg:sr-only">
                     {diffData.capture?.name ?? diffData.commit}
                   </span>
                 </>
@@ -1732,15 +1734,16 @@ function App() {
               setIsAboutOpen(false);
               setIsCommentsListOpen(true);
             }}
-            className="inline-flex items-center gap-1.5 rounded-md border border-github-border px-3 py-1.5 font-medium hover:bg-github-bg-tertiary"
+            className="relative inline-flex items-center gap-1.5 rounded-md border border-github-border px-3 py-1.5 font-medium hover:bg-github-bg-tertiary"
           >
             <MessageSquare size={14} aria-hidden="true" />
             <span className="sr-only lg:not-sr-only">Conversation</span>
+            {/* On mobile the badge sits on the button's corner, so it doesn't widen the header. */}
             <span
               id="conversation-unread-status"
               aria-live="polite"
               aria-atomic="true"
-              className="inline-flex tabular-nums"
+              className="inline-flex tabular-nums max-md:absolute max-md:-top-1.5 max-md:-right-1"
             >
               <UnreadBadge count={agentUpdates.length} />
               <span className="sr-only">
@@ -1753,7 +1756,7 @@ function App() {
           {diffData.shipIt && (
             <ApprovalSplitButton
               key={commentsContextKey}
-              buttonRef={approveButtonRef}
+              containerRef={approvalControlRef}
               requested={approval.requested}
               approved={approval.approved}
               mode={approval.mode}

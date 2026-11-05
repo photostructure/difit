@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { HotkeysProvider } from 'react-hotkeys-hook';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -676,6 +676,19 @@ describe('App Component - Header display controls', () => {
     mockComments = [];
     mockConfirm.mockReturnValue(false);
     mockFetch(mockDiffResponse);
+  });
+
+  it('leaves the files-viewed count out of the header on mobile', async () => {
+    vi.mocked(useViewport).mockReturnValue({ isMobile: true, isDesktop: false });
+    try {
+      renderApp();
+      const header = await screen.findByTestId('compact-review-header');
+      await screen.findByRole('button', { name: 'Settings' });
+
+      expect(within(header).queryByRole('status', { name: 'Files viewed' })).toBeNull();
+    } finally {
+      vi.mocked(useViewport).mockReturnValue({ isMobile: false, isDesktop: true });
+    }
   });
 
   it('switches between dark and light themes from the Settings button', async () => {
