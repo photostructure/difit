@@ -2035,6 +2035,21 @@ describe('Server Integration Tests', () => {
       expect(data.originDefaultBranch).toBe('origin/main');
       expect(data.resolvedBase).toBe('abc1234');
       expect(data.resolvedTarget).toBe('def5678');
+      expect(data.launch).toBeUndefined();
+    });
+
+    it('names the launched diff when the launch named a target', async () => {
+      const result = await startServer({
+        selection: { targetCommitish: 'HEAD', baseCommitish: 'HEAD^' },
+        explicitTarget: true,
+      });
+      servers.push(result.server);
+
+      const response = await fetch(`http://localhost:${result.port}/api/revisions`);
+      const data = (await response.json()) as any;
+
+      // The mocked parser resolves HEAD^...HEAD to def4567...abc1234.
+      expect(data.launch).toEqual({ baseCommitish: 'def4567', targetCommitish: 'abc1234' });
     });
   });
 

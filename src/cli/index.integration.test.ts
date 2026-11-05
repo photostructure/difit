@@ -19,7 +19,7 @@ import { fetch } from 'undici';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { ServerEvent } from '../types/events.js';
-import type { DiffResponse } from '../types/diff.js';
+import type { DiffResponse, RevisionsResponse } from '../types/diff.js';
 import type { BackgroundServerInfo } from './background.js';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -258,6 +258,29 @@ describe('actual CLI launch protocol', () => {
     },
     15000,
   );
+
+  it('reports an explicit commit-ish as the launched diff', async () => {
+    const fixture = launch(['HEAD~1', '--background', '--host', '127.0.0.1', '--port', '0']);
+    let background: BackgroundServerInfo | undefined;
+    try {
+      const exitCode = await fixture.closed;
+      const output = fixture.output().stdout.trim();
+      if (output) background = JSON.parse(output) as BackgroundServerInfo;
+      expect(exitCode, fixture.output().stderr).toBe(0);
+      const response = await fetch(new URL('/api/revisions', background!.url));
+      const revisionOptions = (await response.json()) as RevisionsResponse;
+      // The launch names the commits HEAD~1^ and HEAD~1 resolved to, so a later HEAD
+      // does not move it.
+      const { baseCommitish, targetCommitish } = revisionOptions.launch!;
+      expect(targetCommitish).toMatch(/^[0-9a-f]{7,40}$/);
+      expect(baseCommitish).toMatch(/^[0-9a-f]{7,40}$/);
+      expect(revisions[0]!.startsWith(targetCommitish)).toBe(true);
+      expect(revisions[1]!.startsWith(baseCommitish)).toBe(true);
+    } finally {
+      if (background) process.kill(background.pid, 'SIGKILL');
+      await stop(fixture.child);
+    }
+  }, 15000);
 
   it('rejects an explicitly empty named review instead of opening an ordinary comparison', async () => {
     // Ground truth: the documented 1–80 character name contract requires rejection of

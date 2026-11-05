@@ -34,6 +34,7 @@ All notable changes to this project will be documented in this file.
 - Stop loading the diff when `~/.difit/config.json` is not valid JSON or does not hold an object, and name the file on the page; difit used to ignore such a file. Diff load errors now show the server's message instead of "Failed to fetch diff data" when it sends one.
 - Below 1024px wide, show only icons on the review picker and the approval control; the picker's menu names the comparison, and the approval control always opens its menu, which shows the current approval. Below 768px, drop the difit logo and the files-viewed count from the header and move the unread-reply count onto the corner of **Conversation**, so the header fits one row on a 375px-wide phone; it wraps when **Refresh**, an error, or the capture-update notice joins it.
 - Turn off font ligatures in code text, so JetBrains Mono shows `=>`, `!==`, and `>=` as the characters in the file.
+- When difit is launched for a named review (`--review`) or an explicit commit-ish (`difit HEAD~1`, `difit .`), the review picker offers only that diff and **Recent reviews**: **Quick Diffs**, **Previous commit**, **Pick Commit...**, **Detailed...**, and commit and branch search are gone, so a review opened for approval can't switch to a diff nobody proposed. **Launched diff** returns to the launch's resolved commits. A bare `difit` keeps the full picker. `GET /api/revisions` reports the launch as `launch`.
 
 ## [5.1.0] - 2026-10-29
 

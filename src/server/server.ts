@@ -75,6 +75,8 @@ import {
 export interface ServerOptions {
   namedReview?: NamedReviewStart;
   selection?: DiffSelection;
+  // The command line named the commit-ish rather than defaulting to HEAD.
+  explicitTarget?: boolean;
   stdinDiff?: string;
   preferredPort?: number;
   host?: string;
@@ -378,6 +380,8 @@ export async function startServer(options: ServerOptions): Promise<{
     initialSelection,
     Boolean(options.stdinDiff),
   );
+  // Resolved commits, so the launched diff stays put when HEAD moves and matches its review.
+  const launch = initialNamedReview || options.explicitTarget ? currentCommentSelection : undefined;
   // Ensure agents can discover the initial review even before a comment is posted.
   conversation?.getSummary(currentCommentSelection);
   if (initialNamedReview)
@@ -743,7 +747,12 @@ export async function startServer(options: ServerOptions): Promise<{
   // Get available revisions for revision selector
   app.get('/api/revisions', async (_req, res) => {
     if (currentSelection.reviewName && currentSelection.baseCommitish === 'unborn') {
-      res.json({ specialOptions: [], branches: [], commits: [] } satisfies RevisionsResponse);
+      res.json({
+        specialOptions: [],
+        branches: [],
+        commits: [],
+        ...(launch ? { launch } : {}),
+      } satisfies RevisionsResponse);
       return;
     }
     if (options.stdinDiff) {
@@ -769,6 +778,7 @@ export async function startServer(options: ServerOptions): Promise<{
         originDefaultBranch,
         resolvedBase,
         resolvedTarget,
+        ...(launch ? { launch } : {}),
       };
 
       res.json(response);

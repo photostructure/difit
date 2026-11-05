@@ -245,6 +245,7 @@ Editor configuration (set before starting difit):
         process.exit(1);
       }
 
+      const hasPositionalArgs = program.args.length > 0;
       // Check if we should read from stdin
       const readFromStdin =
         !options.pr &&
@@ -252,7 +253,7 @@ Editor configuration (set before starting difit):
           ? commitish === '-'
           : shouldReadStdin({
               commitish,
-              hasPositionalArgs: program.args.length > 0,
+              hasPositionalArgs,
               hasPrOption: Boolean(options.pr),
             }));
 
@@ -472,6 +473,7 @@ Editor configuration (set before starting difit):
 
       const { launchUrl, port, isEmpty } = await startServer({
         selection,
+        explicitTarget: hasPositionalArgs,
         preferredPort: options.port,
         host: options.host,
         openBrowser: options.open,

@@ -281,6 +281,9 @@ export interface RevisionsResponse {
   originDefaultBranch?: string;
   resolvedBase?: string;
   resolvedTarget?: string;
+  // Set when difit was launched for a named review or an explicit target; the
+  // revision menu then offers only this diff and recent reviews.
+  launch?: DiffSelection;
 }
 
 // Expanded lines types for showing more context in diffs

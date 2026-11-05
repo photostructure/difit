@@ -462,3 +462,113 @@ describe('retained review navigation', () => {
     expect(onSelectDiff).not.toHaveBeenCalled();
   });
 });
+
+describe('launched for a specific diff', () => {
+  const launch = { baseCommitish: 'HEAD~1^', targetCommitish: 'HEAD~1' };
+  const otherReview = {
+    selection: { baseCommitish: 'old-base', targetCommitish: 'old-tip' },
+    title: 'Other review',
+    threadCount: 0,
+  };
+
+  it('offers recent reviews but no other diffs', () => {
+    render(
+      createElement(DiffQuickMenu, {
+        options: { ...options, launch },
+        selection: launch,
+        recentReviews: [otherReview],
+        onSelectDiff: vi.fn(),
+        onOpenAdvanced: vi.fn(),
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Revision menu:/ }));
+
+    expect(screen.getByRole('button', { name: /Return to Other review/ })).toBeInTheDocument();
+    expect(screen.queryByText('Quick Diffs')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Previous commit' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Pick Commit/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Detailed...' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Return to launched diff/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('returns to the launched diff from another review', () => {
+    const onSelectReview = vi.fn();
+    render(
+      createElement(DiffQuickMenu, {
+        options: { ...options, launch },
+        selection: otherReview.selection,
+        recentReviews: [{ selection: launch, title: 'Launch title', threadCount: 0 }],
+        onSelectDiff: vi.fn(),
+        onSelectReview,
+        onOpenAdvanced: vi.fn(),
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Revision menu:/ }));
+
+    expect(
+      screen.queryByRole('button', { name: /Return to Launch title/ }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Return to launched diff: HEAD~1^...HEAD~1' }),
+    );
+    expect(onSelectReview).toHaveBeenCalledExactlyOnceWith(launch);
+  });
+
+  it('treats a symbolic selection that resolved to the launched commits as the launched diff', () => {
+    render(
+      createElement(DiffQuickMenu, {
+        options: { ...options, launch: { baseCommitish: 'aaa1111', targetCommitish: 'bbb2222' } },
+        selection: launch,
+        resolvedSelection: { baseCommitish: 'aaa1111', targetCommitish: 'bbb2222' },
+        recentReviews: [otherReview],
+        onSelectDiff: vi.fn(),
+        onOpenAdvanced: vi.fn(),
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Revision menu:/ }));
+
+    expect(
+      screen.queryByRole('button', { name: /Return to launched diff/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('leaves out the search box when there is no other review to filter', () => {
+    render(
+      createElement(DiffQuickMenu, {
+        options: { ...options, launch },
+        selection: launch,
+        recentReviews: [{ selection: launch, title: 'Launch title', threadCount: 0 }],
+        onSelectDiff: vi.fn(),
+        onOpenAdvanced: vi.fn(),
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Revision menu:/ }));
+
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  });
+
+  it('ignores commits and branches when search is submitted with Enter', () => {
+    const onSelectDiff = vi.fn();
+    const onSelectReview = vi.fn();
+    render(
+      createElement(DiffQuickMenu, {
+        options: { ...options, launch },
+        selection: launch,
+        recentReviews: [otherReview],
+        onSelectDiff,
+        onSelectReview,
+        onOpenAdvanced: vi.fn(),
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Revision menu:/ }));
+    const search = screen.getByRole('textbox', { name: 'Filter reviews' });
+    fireEvent.change(search, { target: { value: 'main' } });
+    fireEvent.keyDown(search, { key: 'Enter' });
+
+    expect(onSelectDiff).not.toHaveBeenCalled();
+    expect(onSelectReview).not.toHaveBeenCalled();
+    expect(screen.getByText('No matching reviews')).toBeInTheDocument();
+  });
+});

@@ -7,7 +7,7 @@ import { fetch } from 'undici';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ConversationSnapshot, ReviewApproval, ReviewSummary } from '../types/conversation.js';
-import type { DiffCommentThread, DiffResponse } from '../types/diff.js';
+import type { DiffCommentThread, DiffResponse, RevisionsResponse } from '../types/diff.js';
 import type { ServerEvent } from '../types/events.js';
 import type { CapturedFile, NamedReviewMetadata, ReviewCapture } from '../types/review.js';
 
@@ -177,6 +177,11 @@ describe('named review HTTP integration', () => {
     expect(readFileSync(join(root, 'first.txt'), 'utf8')).toBe('later shared edit\n');
     expect(readFileSync(join(root, 'second.txt'), 'utf8')).toBe('another task\n');
     expect(readFileSync(join(root, 'untracked.txt'), 'utf8')).toBe('untracked after capture\n');
+  });
+
+  it('names the launched review as the diff the revision menu offers', async () => {
+    const revisions = await get<RevisionsResponse>('/api/revisions');
+    expect(revisions.launch).toMatchObject({ reviewName: name });
   });
 
   it('accepts a task capture on a stdin server launched from a repository subdirectory', async () => {

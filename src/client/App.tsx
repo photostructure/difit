@@ -1647,6 +1647,7 @@ function App() {
               selection={selectedRevision}
               resolvedBaseRevision={resolvedBaseRevision}
               resolvedTargetRevision={resolvedTargetRevision}
+              resolvedSelection={resolvedSelection}
               capture={diffData.capture}
               onSelectDiff={(selection) => void handleRevisionChange(selection)}
               onSelectReview={(selection) =>

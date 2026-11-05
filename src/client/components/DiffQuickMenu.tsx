@@ -41,6 +41,8 @@ interface DiffQuickMenuProps {
   selection: DiffSelection;
   resolvedBaseRevision?: string;
   resolvedTargetRevision?: string;
+  // The selection with the commits the server resolved it to.
+  resolvedSelection?: DiffSelection | null;
   onSelectDiff: (selection: DiffSelection) => void;
   onSelectReview?: (selection: DiffSelection) => void;
   onOpenAdvanced: () => void;
@@ -55,6 +57,10 @@ const SPECIAL_LABEL_OVERRIDES: Record<string, string> = {
 };
 
 const UNCOMMITTED_TARGETS = new Set(['.', 'staged', 'working']);
+
+const formatReviewSelection = (selection: DiffSelection) =>
+  selection.reviewName ??
+  `${selection.baseCommitish}...${SPECIAL_LABEL_OVERRIDES[selection.targetCommitish] ?? selection.targetCommitish}${selection.baseMode === 'merge-base' ? ' (merge-base)' : ''}`;
 
 export const getPreviousCommitPreset = (targetRevision: string): DiffSelection => {
   const target =
@@ -128,6 +134,7 @@ export function DiffQuickMenu({
   selection,
   resolvedBaseRevision,
   resolvedTargetRevision,
+  resolvedSelection,
   onSelectDiff,
   onSelectReview = onSelectDiff,
   onOpenAdvanced,
@@ -336,28 +343,35 @@ export function DiffQuickMenu({
   const matchesQuery = (...texts: string[]) =>
     texts.some((text) => text.toLowerCase().includes(normalizedQuery));
 
-  const filteredPresets = isFiltering
-    ? presetItems.filter((item) => matchesQuery(item.label))
-    : presetItems;
+  // A launch for a specific diff offers only that diff and recent reviews.
+  const { launch } = options;
+  const filteredPresets = launch
+    ? []
+    : isFiltering
+      ? presetItems.filter((item) => matchesQuery(item.label))
+      : presetItems;
   const filteredReviews = recentReviews.filter(
     (review) =>
-      !isFiltering ||
-      matchesQuery(
-        review.title,
-        review.selection.reviewName ?? '',
-        review.capture?.patchDigest ?? '',
-        review.selection.baseCommitish,
-        review.selection.targetCommitish,
-      ),
+      (!launch || !diffSelectionsEqual(review.selection, launch)) &&
+      (!isFiltering ||
+        matchesQuery(
+          review.title,
+          review.selection.reviewName ?? '',
+          review.capture?.patchDigest ?? '',
+          review.selection.baseCommitish,
+          review.selection.targetCommitish,
+        )),
   );
-  const filteredCommits = isFiltering
-    ? options.commits.filter((commit) =>
-        matchesQuery(commit.shortHash, commit.hash, commit.message),
-      )
-    : [];
-  const filteredBranches = isFiltering
-    ? options.branches.filter((branch) => matchesQuery(branch.name))
-    : [];
+  const hasSearchableItems =
+    !launch || recentReviews.some((review) => !diffSelectionsEqual(review.selection, launch));
+  const filteredCommits =
+    isFiltering && !launch
+      ? options.commits.filter((commit) =>
+          matchesQuery(commit.shortHash, commit.hash, commit.message),
+        )
+      : [];
+  const filteredBranches =
+    isFiltering && !launch ? options.branches.filter((branch) => matchesQuery(branch.name)) : [];
 
   const hasNoMatches =
     isFiltering &&
@@ -462,20 +476,37 @@ export function DiffQuickMenu({
               </div>
             )}
             {/* Search box */}
-            <div className="sticky top-0 z-10 border-b border-github-border bg-github-bg-secondary p-2">
-              <div className="flex items-center gap-2 rounded border border-github-border bg-github-bg-primary px-2 py-1.5 focus-within:border-blue-600">
-                <Search size={12} className="shrink-0 text-github-text-secondary" />
-                <input
-                  type="text"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyDown={handleSearchKeyDown}
-                  placeholder="Filter branches and commits..."
-                  aria-label="Filter branches and commits"
-                  className="w-full bg-transparent text-xs text-github-text-primary placeholder:text-github-text-muted focus:outline-none"
-                />
+            {hasSearchableItems && (
+              <div className="sticky top-0 z-10 border-b border-github-border bg-github-bg-secondary p-2">
+                <div className="flex items-center gap-2 rounded border border-github-border bg-github-bg-primary px-2 py-1.5 focus-within:border-blue-600">
+                  <Search size={12} className="shrink-0 text-github-text-secondary" />
+                  <input
+                    type="text"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    onKeyDown={handleSearchKeyDown}
+                    placeholder={launch ? 'Filter reviews...' : 'Filter branches and commits...'}
+                    aria-label={launch ? 'Filter reviews' : 'Filter branches and commits'}
+                    className="w-full bg-transparent text-xs text-github-text-primary placeholder:text-github-text-muted focus:outline-none"
+                  />
+                </div>
               </div>
-            </div>
+            )}
+            {launch && !diffSelectionsEqual(resolvedSelection ?? selection, launch) && (
+              <div className="border-b border-github-border">
+                <button
+                  type="button"
+                  aria-label={`Return to launched diff: ${formatReviewSelection(launch)}`}
+                  onClick={() => handleSelect(launch, true)}
+                  className={getItemClasses(false, false)}
+                >
+                  <div className="font-medium">Launched diff</div>
+                  <code className="block break-all text-github-text-secondary">
+                    {formatReviewSelection(launch)}
+                  </code>
+                </button>
+              </div>
+            )}
 
             {filteredReviews.length > 0 && (
               <div className="border-b border-github-border">
@@ -485,7 +516,7 @@ export function DiffQuickMenu({
                 {filteredReviews.map((review) => {
                   const label = review.selection.reviewName
                     ? `${review.selection.reviewName}${review.capture ? ` · capture v${review.capture.version} · ${review.capture.patchDigest.slice(0, 12)}` : ''}`
-                    : `${review.selection.baseCommitish}...${SPECIAL_LABEL_OVERRIDES[review.selection.targetCommitish] ?? review.selection.targetCommitish}${review.selection.baseMode === 'merge-base' ? ' (merge-base)' : ''}`;
+                    : formatReviewSelection(review.selection);
                   return (
                     <button
                       key={getDiffSelectionKey(review.selection)}
@@ -508,7 +539,13 @@ export function DiffQuickMenu({
               </div>
             )}
 
-            {isFiltering ? (
+            {launch ? (
+              hasNoMatches && (
+                <div className="px-3 py-4 text-center text-xs text-github-text-muted">
+                  No matching reviews
+                </div>
+              )
+            ) : isFiltering ? (
               <>
                 {filteredPresets.length > 0 && (
                   <div className="border-b border-github-border">
