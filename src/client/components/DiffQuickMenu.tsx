@@ -466,7 +466,7 @@ export function DiffQuickMenu({
               <CaptureDetails capture={capture} />
             ) : (
               <div className="border-b border-github-border px-3 py-2 text-xs">
-                <div className="ui-label">Comparing</div>
+                <div className="ui-heading">Comparing</div>
                 <code className="block break-all ui-value">{currentLabel}</code>
                 {fullSelectionLabel !== currentLabel && (
                   <code className="block break-all text-github-text-secondary">

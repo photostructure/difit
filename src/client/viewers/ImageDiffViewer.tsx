@@ -92,10 +92,10 @@ export function ImageDiffViewer({
       <div className="bg-github-bg-primary p-4">
         <div className="text-center">
           <div className="mb-2">
-            <span className="text-github-danger font-medium">Deleted Image</span>
+            <span className="text-github-danger font-semibold">Deleted Image</span>
           </div>
           <div className="inline-block border border-github-border rounded-md p-4 bg-github-bg-secondary">
-            <div className="text-github-text-muted mb-2" style={{ fontSize: '14px' }}>
+            <div className="ui-heading mb-2" style={{ fontSize: '14px' }}>
               Previous version:
             </div>
             <img
@@ -132,10 +132,10 @@ export function ImageDiffViewer({
       <div className="bg-github-bg-primary p-4">
         <div className="text-center">
           <div className="mb-2">
-            <span className="text-github-accent font-medium">Added Image</span>
+            <span className="text-github-accent font-semibold">Added Image</span>
           </div>
           <div className="inline-block border border-github-border rounded-md p-4 bg-github-bg-secondary">
-            <div className="text-github-text-muted mb-2" style={{ fontSize: '14px' }}>
+            <div className="ui-heading mb-2" style={{ fontSize: '14px' }}>
               New file:
             </div>
             <img
@@ -172,13 +172,13 @@ export function ImageDiffViewer({
       return (
         <div className="bg-github-bg-primary p-4">
           <div className="text-center mb-4">
-            <span className="text-github-text-primary font-medium">Modified Image</span>
+            <span className="ui-heading">Modified Image</span>
           </div>
           <div className="grid grid-cols-2 gap-4">
             {/* Old version */}
             <div className="text-center">
               <div className="border border-github-border rounded-md p-4 bg-github-bg-secondary">
-                <div className="text-github-text-muted mb-2" style={{ fontSize: '14px' }}>
+                <div className="ui-heading mb-2" style={{ fontSize: '14px' }}>
                   Previous version:
                 </div>
                 <img
@@ -209,7 +209,7 @@ export function ImageDiffViewer({
             {/* New version */}
             <div className="text-center">
               <div className="border border-github-border rounded-md p-4 bg-github-bg-secondary">
-                <div className="text-github-text-muted mb-2" style={{ fontSize: '14px' }}>
+                <div className="ui-heading mb-2" style={{ fontSize: '14px' }}>
                   Current version:
                 </div>
                 <img
@@ -244,13 +244,13 @@ export function ImageDiffViewer({
       return (
         <div className="bg-github-bg-primary p-4">
           <div className="text-center mb-4">
-            <span className="text-github-text-primary font-medium">Modified Image</span>
+            <span className="ui-heading">Modified Image</span>
           </div>
           <div className="space-y-6">
             {/* Old version */}
             <div className="text-center">
               <div className="border border-github-border rounded-md p-4 bg-github-bg-secondary inline-block">
-                <div className="text-github-text-muted mb-2" style={{ fontSize: '14px' }}>
+                <div className="ui-heading mb-2" style={{ fontSize: '14px' }}>
                   Previous version:
                 </div>
                 <img
@@ -281,7 +281,7 @@ export function ImageDiffViewer({
             {/* New version */}
             <div className="text-center">
               <div className="border border-github-border rounded-md p-4 bg-github-bg-secondary inline-block">
-                <div className="text-github-text-muted mb-2" style={{ fontSize: '14px' }}>
+                <div className="ui-heading mb-2" style={{ fontSize: '14px' }}>
                   Current version:
                 </div>
                 <img

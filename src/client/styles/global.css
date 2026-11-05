@@ -1,9 +1,9 @@
 @import "tailwindcss";
 
-/* Headings (modal and panel titles, section headings, dropdown group headers,
-   and the labels above form controls) use primary text at semibold so they
-   read as headings. Labels in label/value pairs are muted; their values use
-   primary text. */
+/* Headings, and any label on its own line above its content (a control, a
+   value, or a list), use primary text at semibold so they read as headings.
+   A label inline with its value, and a menu's status line above its options,
+   are muted; values use primary text. */
 .ui-heading {
   color: var(--color-github-text-primary);
   font-weight: 600;

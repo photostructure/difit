@@ -103,7 +103,7 @@ function SnapshotView({ data, label }: { data: Record<string, unknown> | null; l
 
   return (
     <div className="overflow-x-auto mb-4">
-      {label && <div className="text-sm text-github-text-muted mb-1">{label}</div>}
+      {label && <div className="text-sm ui-heading mb-1">{label}</div>}
       <table className="w-full border-collapse text-sm border border-github-border">
         <thead className="bg-github-bg-secondary">
           <tr className="border-b border-github-border">
@@ -130,7 +130,7 @@ function DiffView({ entries, label }: { entries: FrontmatterDiffEntry[]; label?:
 
   return (
     <div className="overflow-x-auto mb-4">
-      {label && <div className="text-sm text-github-text-muted mb-1">{label}</div>}
+      {label && <div className="text-sm ui-heading mb-1">{label}</div>}
       <table className="w-full border-collapse text-sm border border-github-border">
         <thead className="bg-github-bg-secondary">
           <tr className="border-b border-github-border">
