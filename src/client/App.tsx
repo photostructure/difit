@@ -1974,9 +1974,7 @@ function App() {
                     <div className="bg-github-bg-secondary border border-github-border rounded-md px-4 py-3">
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="text-xs uppercase tracking-wide text-github-text-muted">
-                            Deferred Rendering
-                          </div>
+                          <div className="text-xs ui-label">Deferred Rendering</div>
                           <div className="text-sm font-mono text-github-text-primary truncate">
                             {file.path}
                           </div>

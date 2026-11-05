@@ -36,7 +36,7 @@ export function HelpModal({ isOpen, onClose }: HelpModalProps) {
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
       <div className="relative bg-github-bg-primary border border-github-border rounded-lg shadow-lg max-w-4xl w-full mx-4 max-h-[80vh] overflow-y-auto">
         <div className="sticky top-0 bg-github-bg-primary border-b border-github-border px-6 py-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold ui-label">Keyboard Shortcuts</h2>
+          <h2 className="text-lg ui-heading">Keyboard Shortcuts</h2>
           <button
             onClick={onClose}
             className="text-github-text-secondary hover:text-github-text-primary transition-colors"
@@ -48,7 +48,7 @@ export function HelpModal({ isOpen, onClose }: HelpModalProps) {
 
         <div className="px-6 py-4 grid grid-cols-1 lg:grid-cols-2 gap-6">
           <section>
-            <h3 className="text-sm font-semibold ui-label mb-2">Line Navigation</h3>
+            <h3 className="text-sm ui-heading mb-2">Line Navigation</h3>
             <div className="space-y-1">
               <div className="flex justify-between text-sm">
                 <div className="flex gap-2">
@@ -76,7 +76,7 @@ export function HelpModal({ isOpen, onClose }: HelpModalProps) {
           </section>
 
           <section>
-            <h3 className="text-sm font-semibold ui-label mb-2">File Navigation</h3>
+            <h3 className="text-sm ui-heading mb-2">File Navigation</h3>
             <div className="space-y-1">
               <div className="flex justify-between text-sm">
                 <kbd className="px-2 py-1 bg-github-bg-tertiary border border-github-border rounded text-github-text-primary font-mono">
@@ -118,7 +118,7 @@ export function HelpModal({ isOpen, onClose }: HelpModalProps) {
           </section>
 
           <section>
-            <h3 className="text-sm font-semibold ui-label mb-2">Chunk Navigation</h3>
+            <h3 className="text-sm ui-heading mb-2">Chunk Navigation</h3>
             <div className="space-y-1">
               <div className="flex justify-between text-sm">
                 <kbd className="px-2 py-1 bg-github-bg-tertiary border border-github-border rounded text-github-text-primary font-mono">
@@ -136,7 +136,7 @@ export function HelpModal({ isOpen, onClose }: HelpModalProps) {
           </section>
 
           <section>
-            <h3 className="text-sm font-semibold ui-label mb-2">Comment Navigation</h3>
+            <h3 className="text-sm ui-heading mb-2">Comment Navigation</h3>
             <div className="space-y-1">
               <div className="flex justify-between text-sm">
                 <kbd className="px-2 py-1 bg-github-bg-tertiary border border-github-border rounded text-github-text-primary font-mono">
@@ -154,9 +154,7 @@ export function HelpModal({ isOpen, onClose }: HelpModalProps) {
           </section>
 
           <section>
-            <h3 className="text-sm font-semibold ui-label mb-2">
-              Side Navigation (Side-by-side mode)
-            </h3>
+            <h3 className="text-sm ui-heading mb-2">Side Navigation (Side-by-side mode)</h3>
             <div className="space-y-1">
               <div className="flex justify-between text-sm">
                 <div className="flex gap-2">
@@ -184,7 +182,7 @@ export function HelpModal({ isOpen, onClose }: HelpModalProps) {
           </section>
 
           <section>
-            <h3 className="text-sm font-semibold ui-label mb-2">Comment Management</h3>
+            <h3 className="text-sm ui-heading mb-2">Comment Management</h3>
             <div className="space-y-1">
               <div className="flex justify-between text-sm">
                 <div className="flex items-center gap-1">
@@ -226,7 +224,7 @@ export function HelpModal({ isOpen, onClose }: HelpModalProps) {
           </section>
 
           <section>
-            <h3 className="text-sm font-semibold ui-label mb-2">Actions</h3>
+            <h3 className="text-sm ui-heading mb-2">Actions</h3>
             <div className="space-y-1">
               <div className="flex justify-between text-sm">
                 <kbd className="px-2 py-1 bg-github-bg-tertiary border border-github-border rounded text-github-text-primary font-mono">

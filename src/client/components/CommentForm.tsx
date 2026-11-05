@@ -151,9 +151,7 @@ export function CommentForm({
         ))}
       </div>
       <div className="flex items-center justify-between mb-2">
-        <span className="text-sm font-medium" style={{ color: 'var(--color-yellow-path-text)' }}>
-          {title}
-        </span>
+        <span className="text-sm ui-heading">{title}</span>
         {hasSuggestion ? (
           <div className="flex items-center border border-github-border rounded-md overflow-hidden">
             <button

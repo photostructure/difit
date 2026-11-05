@@ -40,8 +40,8 @@ export function ReviewSummaryPanel({ summary, committed = false }: Props) {
           }}
         >
           <div className="grid min-w-0 gap-3 md:grid-cols-2">
-            <label className="flex min-w-0 flex-col gap-1 text-xs ui-label">
-              Why this change
+            <label className="flex min-w-0 flex-col gap-1 text-xs">
+              <span className="ui-heading">Why this change</span>
               <textarea
                 value={summary.draft.rationale}
                 onChange={(event) => summary.updateDraft({ rationale: event.target.value })}
@@ -52,8 +52,10 @@ export function ReviewSummaryPanel({ summary, committed = false }: Props) {
                 className="w-full min-w-0 grow resize-y rounded border border-github-border bg-github-bg-primary px-2 py-1.5 text-sm text-github-text-primary focus:border-github-accent focus:outline-none disabled:opacity-50"
               />
             </label>
-            <label className="flex min-w-0 flex-col gap-1 text-xs ui-label">
-              {committed ? 'Commit message' : 'Proposed commit message'}
+            <label className="flex min-w-0 flex-col gap-1 text-xs">
+              <span className="ui-heading">
+                {committed ? 'Commit message' : 'Proposed commit message'}
+              </span>
               <textarea
                 value={summary.draft.commitMessage}
                 onChange={(event) => summary.updateDraft({ commitMessage: event.target.value })}

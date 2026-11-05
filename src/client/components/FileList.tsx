@@ -482,7 +482,7 @@ export const FileList = memo(function FileList({
     <div className="h-full flex flex-col">
       <div className="px-4 py-3 border-b border-github-border bg-github-bg-tertiary">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold ui-label m-0">Files changed ({files.length})</h3>
+          <h3 className="text-sm ui-heading m-0">Files changed ({files.length})</h3>
           <div className="ml-auto flex items-center gap-2">
             <span
               className="inline-flex gap-1 text-right text-xs font-medium whitespace-nowrap"

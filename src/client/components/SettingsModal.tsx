@@ -193,7 +193,7 @@ export function SettingsModal({
     <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
       <div className="flex flex-col max-h-[calc(100vh-2rem)] bg-github-bg-secondary border border-github-border rounded-lg w-full max-w-3xl mx-4 pointer-events-auto overflow-hidden">
         <div className="shrink-0 flex items-center justify-between p-4 border-b border-github-border">
-          <h2 className="text-lg font-semibold ui-label flex items-center gap-2">
+          <h2 className="text-lg ui-heading flex items-center gap-2">
             <Settings size={20} />
             Settings
           </h2>
@@ -237,7 +237,7 @@ export function SettingsModal({
             {activeSection === 'appearance' && (
               <div className="space-y-6">
                 <div>
-                  <label className="block text-sm font-medium ui-label mb-2">Font Size</label>
+                  <label className="block text-sm ui-heading mb-2">Font Size</label>
                   <div className="flex items-center gap-3">
                     <input
                       type="range"
@@ -258,7 +258,7 @@ export function SettingsModal({
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium ui-label mb-2">Font Family</label>
+                  <label className="block text-sm ui-heading mb-2">Font Family</label>
                   <select
                     value={settings.fontFamily}
                     onChange={(e) => onSettingsChange({ ...settings, fontFamily: e.target.value })}
@@ -273,7 +273,7 @@ export function SettingsModal({
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium ui-label mb-2">Theme</label>
+                  <label className="block text-sm ui-heading mb-2">Theme</label>
                   <div className="flex gap-2">
                     {(['light', 'dark', 'auto'] as const).map((theme) => (
                       <button
@@ -293,7 +293,7 @@ export function SettingsModal({
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium ui-label mb-2">Color Vision</label>
+                  <label className="block text-sm ui-heading mb-2">Color Vision</label>
                   <div className="flex gap-2">
                     {COLOR_VISION_MODES.map((mode) => {
                       const isSelected = (settings.colorVision ?? 'normal') === mode.id;
@@ -326,9 +326,7 @@ export function SettingsModal({
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium ui-label mb-2">
-                    Syntax Highlighting Theme
-                  </label>
+                  <label className="block text-sm ui-heading mb-2">Syntax Highlighting Theme</label>
                   <select
                     value={settings.syntaxTheme}
                     onChange={(e) =>
@@ -349,7 +347,7 @@ export function SettingsModal({
 
                 <div>
                   <div className="flex items-baseline justify-between gap-4 mb-2">
-                    <span className="text-sm font-medium ui-label">Approval Celebration</span>
+                    <span className="text-sm ui-heading">Approval Celebration</span>
                     <span className="flex items-baseline gap-2 text-xs text-github-text-muted">
                       <button
                         type="button"
@@ -397,10 +395,7 @@ export function SettingsModal({
             {activeSection === 'system' && (
               <div className="space-y-6">
                 <div>
-                  <label
-                    htmlFor="auto-viewed-patterns"
-                    className="block text-sm font-medium ui-label mb-2"
-                  >
+                  <label htmlFor="auto-viewed-patterns" className="block text-sm ui-heading mb-2">
                     Auto-Mark Viewed Patterns
                   </label>
                   <p className="text-sm text-github-text-secondary mb-2">
@@ -422,7 +417,7 @@ export function SettingsModal({
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium ui-label mb-2">Open In Editor</label>
+                  <label className="block text-sm ui-heading mb-2">Open In Editor</label>
                   <p className="text-sm text-github-text-secondary">
                     Set DIFIT_EDITOR before starting difit to choose an editor. If unset, difit uses
                     EDITOR when it names a preset; otherwise it uses VS Code. For a custom editor,

@@ -861,9 +861,7 @@ const NotebookDiffPreview = ({
         >
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wide text-github-text-muted">
-                {cellTypeLabels[cell.cellType]}
-              </span>
+              <span className="text-xs ui-label">{cellTypeLabels[cell.cellType]}</span>
               {executionLabel && (
                 <span className="text-xs font-mono text-github-text-secondary">
                   {executionLabel}
@@ -925,9 +923,7 @@ const NotebookFullPreview = ({
           className="rounded border border-github-border bg-github-bg-secondary/40 p-4"
         >
           <div className="flex flex-wrap items-center gap-2 mb-3">
-            <span className="text-xs font-semibold uppercase tracking-wide text-github-text-muted">
-              {cellTypeLabels[cell.cellType]}
-            </span>
+            <span className="text-xs ui-label">{cellTypeLabels[cell.cellType]}</span>
             {executionLabel && (
               <span className="text-xs font-mono text-github-text-secondary">{executionLabel}</span>
             )}

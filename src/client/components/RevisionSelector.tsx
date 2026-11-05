@@ -228,9 +228,7 @@ export function RevisionSelector({
               {/* Special Options */}
               {filteredSpecialOptions.length > 0 && (
                 <div className="border-b border-github-border">
-                  <div className="px-3 py-2 text-xs font-semibold text-github-text-secondary bg-github-bg-tertiary">
-                    Special
-                  </div>
+                  <div className="px-3 py-2 text-xs ui-heading bg-github-bg-tertiary">Special</div>
                   {filteredSpecialOptions.map((opt) => (
                     <button
                       key={opt.value}
@@ -247,7 +245,7 @@ export function RevisionSelector({
               {/* Recent Commits - hide in working/staged mode */}
               {filteredCommits.length > 0 && (
                 <div className="border-b border-github-border">
-                  <div className="px-3 py-2 text-xs font-semibold text-github-text-secondary bg-github-bg-tertiary">
+                  <div className="px-3 py-2 text-xs ui-heading bg-github-bg-tertiary">
                     Recent Commits
                   </div>
                   {filteredCommits.map((commit) => (
@@ -276,9 +274,7 @@ export function RevisionSelector({
               {/* Branches - hide in working/staged mode */}
               {filteredBranches.length > 0 && (
                 <div>
-                  <div className="px-3 py-2 text-xs font-semibold text-github-text-secondary bg-github-bg-tertiary">
-                    Branches
-                  </div>
+                  <div className="px-3 py-2 text-xs ui-heading bg-github-bg-tertiary">Branches</div>
                   {filteredBranches.map((branch) => (
                     <button
                       key={branch.name}

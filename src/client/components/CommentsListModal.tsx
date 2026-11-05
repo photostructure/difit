@@ -287,7 +287,7 @@ export function CommentsListModal({
       >
         <div className="sticky top-0 border-b border-github-border bg-github-bg-primary px-6 py-4">
           <div className="mb-3 flex items-center justify-between">
-            <h2 id="conversation-title" className="text-lg font-semibold ui-label">
+            <h2 id="conversation-title" className="text-lg ui-heading">
               Conversation
             </h2>
             <button
@@ -315,7 +315,7 @@ export function CommentsListModal({
             </div>
           )}
           <fieldset role="radiogroup" aria-label="Conversation filter">
-            <legend className="mb-2 text-xs text-github-text-secondary">Show conversations</legend>
+            <legend className="mb-2 text-xs ui-heading">Show conversations</legend>
             <div className="flex flex-wrap gap-2">
               {(
                 [

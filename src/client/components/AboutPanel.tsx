@@ -62,7 +62,7 @@ export function AboutPanel({
         className="review-panel relative h-full w-full max-w-lg overflow-y-auto border-l border-github-border bg-github-bg-primary p-5 text-github-text-primary shadow-lg"
       >
         <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold ui-label">About</h2>
+          <h2 className="text-lg ui-heading">About</h2>
           <button
             type="button"
             onClick={onClose}
