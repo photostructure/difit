@@ -12,7 +12,9 @@ const require = createRequire(import.meta.url);
 const compilerCli = join(dirname(require.resolve('typescript/package.json')), 'bin', 'tsc');
 const viteCli = join(dirname(require.resolve('vite/package.json')), 'bin', 'vite.js');
 const rawArgs = process.argv.slice(2);
-const cliArgs = [...rawArgs, '--no-open'];
+// The CLI never opens its own page here; Vite opens the dev UI unless the caller passed --no-open.
+const openBrowser = !rawArgs.includes('--no-open');
+const cliArgs = openBrowser ? [...rawArgs, '--no-open'] : rawArgs;
 const writeStdout = createOutputWriter(process.stdout);
 const writeStderr = createOutputWriter(process.stderr);
 
@@ -32,7 +34,7 @@ function startVite(cliServerUrl) {
     env: {
       ...process.env,
       VITE_DIFIT_API_URL: serverUrl.origin,
-      DIFIT_VITE_OPEN_PATH: `/${serverUrl.search}${serverUrl.hash}`,
+      ...(openBrowser ? { DIFIT_VITE_OPEN_PATH: `/${serverUrl.search}${serverUrl.hash}` } : {}),
     },
   });
   viteProcess.stdout.on('data', writeStderr);

@@ -40,6 +40,7 @@ async function startFixture(
   mode: 'burst' | 'persistent' | 'exit' | 'compile' | 'compile-fail' | 'compile-disconnect' | 'git',
   jsonl = true,
   environment: NodeJS.ProcessEnv = process.env,
+  launcherArgs: string[] = [],
 ): Promise<Fixture> {
   const directory = await mkdtemp(join(tmpdir(), 'difit-dev-launcher-'));
   const fixtureEnv = withoutGitEnvironment(environment);
@@ -211,12 +212,16 @@ if (${JSON.stringify(mode)} === 'burst') {
         { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } },
       ).outputText,
     );
-    const child = spawn(process.execPath, ['scripts/dev.js', ...(jsonl ? [] : ['--no-jsonl'])], {
-      cwd: directory,
-      detached: true,
-      env: { ...fixtureEnv, PATH: `${join(directory, 'bin')}:${fixtureEnv.PATH ?? ''}` },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const child = spawn(
+      process.execPath,
+      ['scripts/dev.js', ...(jsonl ? [] : ['--no-jsonl']), ...launcherArgs],
+      {
+        cwd: directory,
+        detached: true,
+        env: { ...fixtureEnv, PATH: `${join(directory, 'bin')}:${fixtureEnv.PATH ?? ''}` },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    );
     const exited = new Promise<void>((resolve, reject) => {
       child.once('error', reject);
       child.once('close', () => resolve());
@@ -270,6 +275,21 @@ describe.skipIf(process.platform === 'win32')('development launcher subprocess o
       }
     },
   );
+
+  it('leaves the browser closed when the caller passes --no-open', async () => {
+    const fixture = await startFixture('exit', true, process.env, ['--no-open']);
+    try {
+      fixture.child.stdout.resume();
+      fixture.child.stderr.resume();
+      await waitForFile(fixture.directory, 'vite-env');
+      const viteEnv: unknown = JSON.parse(
+        await readFile(join(fixture.directory, 'vite-env'), 'utf8'),
+      );
+      expect(viteEnv).toEqual({ apiUrl: 'http://localhost:4966' });
+    } finally {
+      await fixture.cleanup();
+    }
+  });
 
   it('drains all JSONL records and shutdown when the consumer temporarily stops reading', async () => {
     const fixture = await startFixture('burst');
