@@ -914,10 +914,13 @@ describe('read-only working tree captures', () => {
       vi.stubEnv('GIT_DIR', join(root, '.git'));
       vi.stubEnv('GIT_WORK_TREE', root);
       vi.stubEnv('GIT_INDEX_FILE', join(root, '.git/index'));
+      // Git 2.56 reports a broken gitfile as "gitfile does not point to a valid
+      // repository"; earlier versions say "not a git repository".
+      const brokenRepository = /not a git repository|does not point to a valid repository/;
       await expect(captureWorkingTree({ cwd: root, pathspecs: ['broken'] })).rejects.toThrow(
-        'not a git repository',
+        brokenRepository,
       );
-      expect(() => git('diff', 'HEAD', '--', 'broken')).toThrow('not a git repository');
+      expect(() => git('diff', 'HEAD', '--', 'broken')).toThrow(brokenRepository);
     },
   );
 
