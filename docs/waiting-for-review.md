@@ -161,6 +161,5 @@ server without the event endpoint or presence reporting causes exit code 1.
 Preserve its review state before
 arranging a replacement; do not stop existing reviews merely to try this command.
 
-This guide supersedes the older no-replay statements in
-[the conversation protocol](agent-conversations.md). Explicit delivery receipts,
-capture/version checks and conditional LGTM authorization remain applicable.
+Explicit delivery receipts, capture/version checks and conditional LGTM
+authorization from [the conversation protocol](agent-conversations.md) still apply.

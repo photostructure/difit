@@ -459,8 +459,7 @@ being acknowledged. Replay retains 256 events per server process; expired cursor
 require explicit snapshot reconciliation. Use `difit schema wait` for the result
 contract. See [waiting for review](docs/waiting-for-review.md) and the
 [conversation protocol](docs/agent-conversations.md), including conditional LGTM
-approval. The waiting guide supersedes the older protocol's statements that event
-replay is unavailable.
+approval.
 
 The browser shows whether an agent listener is attached and offers **Copy resume
 prompt** when one is absent. `difit wait` requires presence reporting and exits 4

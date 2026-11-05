@@ -172,24 +172,27 @@ After output loss or server restart, run `comment snapshot --port <port>` to
 obtain `{reviews,cursor}`. Each review includes its `id` (use as `reviewId`),
 selection, threads, and message IDs. A snapshot recovers current state, including
 message deletions and edits, rather than missed events. Reconcile outstanding work
-and existing replies, then continue consuming new launch output. There is no
-cursor-based resumption or event replay. The snapshot and its state checkpoint
+and existing replies, then continue consuming new launch output. `difit wait
+--after <cursor>` resumes from a stream cursor; see
+[waiting for human review](waiting-for-review.md). The snapshot and its state checkpoint
 cursor are captured together. Compare that cursor for equality with concurrently
 buffered live event cursors: a matching event's state change is already reflected
-in the snapshot. Treat the tokens as opaque; do not decode or sort them, or use
-them to request replay. Consumers reconciling the full state may ignore the
-checkpoint cursor. Use message `progress.cursor` for status/reply
+in the snapshot. Treat the tokens as opaque; do not decode or sort them. A
+consumer that waits next with `difit wait` passes the checkpoint cursor to
+`--after`, so an approval or summary edit made after the snapshot is not
+missed; only a consumer that keeps reading live launch output may ignore it.
+Use message `progress.cursor` for status/reply
 revision guards, not the snapshot's checkpoint cursor. An existing detached server can be recovered
 through snapshots, but it has no launch stream available to the agent.
 
-JSONL output does not itself wake an idle agent. Keep the foreground process
-attached to the harness's output monitor, or capture stdout in a file and monitor
-that file. In the tested Claude harness, Monitor notifications woke the agent
-while idle. That monitor expires after its configured timeout; rearm it on expiry and reconcile
-records written during the gap. Notifications can truncate long lines, so use
-them as a signal to read complete JSONL records from the file. Persist the last
-consumed file position and handled message revisions to avoid replaying work
-when a monitor is rearmed. Harness shutdown can also terminate the foreground
+JSONL output does not itself wake an idle agent. On a host that starts a turn
+when a background command exits and puts no time limit on it, wait while idle by
+running `difit wait` as one background command; the harness wakes the agent
+once, when it exits. On other hosts, end the turn. See
+[waiting for human review](waiting-for-review.md). Do not wait with a monitor on the launch output: in the
+tested Claude harness a Monitor expires after its configured timeout (at most 30
+minutes), and each expiry wakes the agent even when no record arrived. A subagent
+does not wait for the user. Harness shutdown can also terminate the foreground
 review process; `--keep-alive` only covers browser disconnects.
 
 Consume records in emission order using their cursors. Startup can emit a seeded

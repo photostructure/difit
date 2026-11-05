@@ -8,6 +8,13 @@ description: Open a diff in difit, the local diff viewer, with reading-guide com
 Use only for an explicit difit/viewer request, skill invocation, or standing
 instruction to request difit reviews. Ordinary review requests belong in chat.
 
+Token use is a hard limit, not a preference. A review can stay open for hours,
+and every model turn you take re-sends your whole context; agents that woke
+themselves on a timer to check an open review have burned days of quota on
+empty wakes. Take a model turn only for something the user did: a comment, a
+reply, an LGTM, or a summary edit. Never wake yourself to see whether anything
+happened. Waiting is covered below and admits no substitute.
+
 Decide what to show from the request:
 
 - "Show me your difit", or no target: the changes this session made. For
@@ -88,10 +95,14 @@ them with `--no-jsonl --no-conversation`; `--no-jsonl` alone keeps the APIs.
 Read `server.ready` for the actual API port, PID, and repository/review identity.
 Companion commands use its `port`, never the Vite UI port. Give the reviewing user
 `launchUrl`, which includes the editor-session fragment, rather than the tokenless
-API `url`. Diagnostics go to stderr.
+API `url`; a `--background` launch prints `server.background`, whose `url` is
+that launch URL. Diagnostics go to stderr.
 Conversation and LGTM are enabled by default. Use `--keep-alive` for review rounds
 and `--no-lgtm` for read-only review. `--background` detaches without live stdout;
-use it only with snapshot recovery, not for active event consumption.
+recover its state with the filtered snapshot and wait on it with
+`<difit-command> wait`, never by reading launch output. A `--background` launch
+opens no browser tab, and `wait` exits 4 at once while no review tab is
+connected, so wait on it only after the user has opened the review URL.
 A viewer request grants no edit/commit permission; make requested, authorized
 fixes only in the owning checkout.
 
@@ -151,11 +162,103 @@ Reply JSON needs `reviewId`, `threadId`, `inReplyTo` (event `messageId`), `curso
 and `body`. Write JSON with a file-writing tool. Replies mark Replied; neither
 replies nor Noted resolve threads. Resolve/delete only on request. Intent guides
 responses, not authorization. After missed output, restart, or HTTP 409, use
-`comment snapshot --port <port>` to reconcile IDs, current messages, and replies,
-then continue reading new launch output. Snapshots recover current state; there
-is no cursor-based resumption or event replay. Use message `progress.cursor` for status/reply,
+the filtered snapshot (below) to reconcile IDs, current messages, and replies,
+then continue reading new launch output. Snapshots recover current state;
+`<difit-command> wait --after` resumes from a stream cursor. Use message `progress.cursor` for status/reply,
 not a progress event's stream cursor or the snapshot's cursor. Do not promise
 listening after ending the turn without host support that forwards process output.
+
+Wait for the user only with `<difit-command> wait`, as one background command
+(Claude Code's Bash `run_in_background`) in the main session, and only where the
+host starts a new turn for you when that command exits and puts no time limit
+on it. It spends no tokens while it waits. Read your Bash tool's description:
+if it gives a limit for background commands (`claude -p`, Agent SDK apps, CI,
+and cloud sessions have one), or if the host cannot start a turn when a command
+exits, do not arm a waiter: launch the server with `--background` so it
+outlives the turn (a named `--background` review cannot read stdin, so for a
+stdin patch launch it unnamed on a target such as `HEAD`, add the patch with
+`review create <name> - --host <host> --port <api-port> < <patch>`, put its
+reading-guide comments and summary on `<name>` with `comment add --review
+<name>` and `comment summary` rather than on the launch command, and set the
+`review` query parameter of the `server.background` url to `<name>`), end the turn,
+give the user that review URL, and tell them that pasting the text from the page's
+**Copy resume prompt** button into this chat, or any other chat message, resumes
+you; the button only copies the prompt. Never wait any other way: no `sleep` or polling loop in
+your own turns, no foreground command that ends in a timeout, no Monitor (each
+expiry wakes you even when nothing happened), and no hand-written waiter. If
+the host stops a waiter at its time limit, never re-arm it, with or without a
+longer timeout. A subagent never waits for the user, because nothing can start
+a turn for it after it ends. It either hands back the exact launch command it
+would run, with any capture artifact it made, or launches with `--background`
+and hands back the review IDs, URL, and API port; the main session hosts the
+review from then on.
+
+While a review is open, read its state with this filtered snapshot, not the
+raw one, which carries every thread and code snapshot into context; the raw
+read is for the single approval check right before a commit. Pass `--host` and
+`--port` from the launch record's `url` to it and to `wait`. When the page's
+resume prompt resumes you, run this in place of the raw snapshot it names:
+
+```sh
+set -o pipefail; <difit-command> comment snapshot --host <host> --port <api-port> | jq -c '{cursor, connected: .presence.reviewers.connected, reviews: [.reviews[] as $r | {id: $r.id, selection: $r.selection, capture: ($r.capture | if . then {version, patchDigest} else null end), approval: ($r.approval | {approved, mode, requested, cursor, open: [.conditions[]? | select(.addressed | not) | {threadId, messageId, cursor, intent}]}), commitMessage: $r.summary.commitMessage, summaryVersion: $r.summary.version, pending: [$r.threads[] as $t | $t.messages[] | select(.progress and (.progress.status | IN("replied","noted") | not)) | {threadId: $t.id, messageId: .id, cursor: .progress.cursor, confirmed: (($t.resolution.resolved // false) and $t.resolution.updatedAt >= .updatedAt), filePath: $t.filePath, position: $t.position, code: $t.codeSnapshot.content, intent, body}]}]}'
+```
+
+An LGTM is `approval.approved: true`. `approval.requested: true` with `open`
+conditions is an Approve after comments: complete each condition with `comment
+address`, as the
+[approval guide](https://github.com/photostructure/difit/blob/main/docs/approval-modes.md)
+describes. A pending message with `confirmed: true` sits in a thread the
+reviewer resolved after its last edit, which confirms its work: mark it `noted`
+with `comment status` rather than redoing it. A message the reviewer added or
+edited after resolving its thread has `confirmed: false`; handle it like any
+other. A pending message's `code` is the line it was left on. For more
+context, read the reviewed version of `filePath`, which depends on the review's
+`selection`: for a `new`-side line, the index (`git show :<filePath>`) when the
+target is `staged`, the working file when it is `.` or `working`, and `git show
+<target>:<filePath>` for a commit; for an `old`-side line, the index when the
+target is `working` (its base is the literal `staged`), otherwise `git show
+<base>:<filePath>`. `filePath` is the new name of a renamed file; for its
+`old` side, use the old name, which `git diff --find-renames --name-status`
+prints given the review's comparison: `<base> <target>` for a commit,
+`--cached <base>` for `staged`, `<base>` for `.`, and no revision for
+`working`. A named review (`capture` present) shows its frozen
+capture, which the working file may have moved past, and a `stdin` selection
+(a piped patch or `--pr`) names no commit, so rely on `code` for both.
+When a pending message continues an earlier
+exchange (such as **Still unclear**), read only its thread:
+
+```sh
+set -o pipefail; <difit-command> comment snapshot --host <host> --port <api-port> | jq -c --arg t <threadId> '.reviews[].threads[] | select(.id == $t) | {filePath, position, resolved: (.resolution.resolved // false), code: .codeSnapshot.content, messages: [.messages[] | {id, origin: (.origin // "user"), body}]}'
+```
+
+Before the first wait on a server, run it: act on an LGTM, an Approve after
+comments, or a changed commit message already there, and keep its top-level `cursor` for
+`--after <port>=<cursor>`. Arm the waiter only when `connected` is above 0;
+otherwise give the user the review URL and end the turn, since their next
+message resumes you. Keep one waiter covering every server you host on a
+host (repeat `--port`), never two. To add a server, stop the waiter (Claude
+Code's `TaskStop`) and start one covering every port with each saved cursor.
+
+Never leave a user comment unanswered. On exit 0, handle each
+`comment.created` and `comment.updated` event whose message is not already
+`replied` or `noted`: answer it with `comment reply`, or mark it `noted` with
+`comment status` when it needs no answer. A message left `queued` returns in
+every later wait and costs a turn each time. `review.approval` and
+`review.summary` events take no receipt. Replace the winning port's saved
+cursor with the batch's `cursor`, or with a later one you read from launch
+output, keep the other ports' cursors, and re-arm. Drop a port only when no
+review on it still awaits the user: an LGTM ends the wait for its review, not
+for other reviews on that server, and an Approve after comments with open
+conditions does not end it. On exit 2, run the filtered snapshot on the
+port stderr names; if it fails, tell the user that server stopped and re-arm once
+for the others, and if it answers, re-arm once with the saved cursors. On exit
+3, run the filtered snapshot, handle what it lists, and wait with its cursor.
+On exit 1 whose stderr names your own arguments (such as `--after` or
+`--port`), correct them and re-arm once. On any other exit 1, or exit 4, do not
+re-arm: tell the user why (exit 1 prints the reason on stderr; exit 4 means no
+review tab is connected) and that their next message resumes you. Before ending
+any turn, run the filtered snapshot on every running server and handle what it
+lists.
 
 Approve as-is, or a fully addressed Approve after comments, on a review you opened
 is commit approval. Commit only the recorded scope/requested fixes after
