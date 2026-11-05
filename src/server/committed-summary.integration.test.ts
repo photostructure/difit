@@ -10,6 +10,7 @@ import type { ReviewSummary, ConversationSnapshot } from '../types/conversation.
 import type { DiffResponse } from '../types/diff.js';
 import { DiffMode } from '../types/watch.js';
 
+import { GitDiffParser } from './git-diff.js';
 import { captureWorkingTree } from './review-capture.js';
 import { startServer } from './server.js';
 
@@ -93,6 +94,7 @@ describe('committed review summary HTTP integration', () => {
   afterEach(async () => {
     await running?.shutdown('closed');
     running = undefined;
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
     if (root) rmSync(root, { recursive: true, force: true });
   });
@@ -179,6 +181,212 @@ describe('committed review summary HTTP integration', () => {
       commitMessage: 'My explicit review draft',
       rationale: 'Keep the supplied rationale.',
       version: 1,
+    });
+  });
+
+  it('keeps the launch summary when HEAD moves twice while the first move is handled', async () => {
+    git('add', 'fixture.txt');
+    await start({
+      diffMode: DiffMode.STAGED,
+      selection: { baseCommitish: 'HEAD', targetCommitish: 'staged' },
+      commitMessage: 'feat: stage the draft',
+      why: 'Keep the staged proposal.',
+    });
+    await request<DiffResponse>('/api/diff');
+
+    // The watcher clears the resolved-commit cache once it sees each commit.
+    const clear = GitDiffParser.prototype.clearResolvedCommitCache;
+    let cleared = () => {};
+    vi.spyOn(GitDiffParser.prototype, 'clearResolvedCommitCache').mockImplementation(
+      function (this: GitDiffParser) {
+        clear.call(this);
+        cleared();
+      },
+    );
+    const moveHead = async (path: string) => {
+      writeFileSync(join(root, path), `${path}\n`);
+      git('add', path);
+      git('commit', '--quiet', '-m', `chore: ${path}`, '--', path);
+      // Git ran synchronously, so any clear from here on follows this commit.
+      await new Promise<void>((resolve) => (cleared = resolve));
+    };
+    // Hold the first move's carry until the second move has been handled.
+    const messages = GitDiffParser.prototype.getCommitMessages;
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let reached = () => {};
+    const holding = new Promise<void>((resolve) => (reached = resolve));
+    let calls = 0;
+    vi.spyOn(GitDiffParser.prototype, 'getCommitMessages').mockImplementation(async function (
+      this: GitDiffParser,
+      ...args
+    ) {
+      calls += 1;
+      if (calls === 1) {
+        reached();
+        await held;
+      }
+      return messages.apply(this, args);
+    });
+
+    const parse = GitDiffParser.prototype.parseDiff;
+    let parsed = () => {};
+    vi.spyOn(GitDiffParser.prototype, 'parseDiff').mockImplementation(async function (
+      this: GitDiffParser,
+      ...args
+    ) {
+      const diff = await parse.apply(this, args);
+      parsed();
+      return diff;
+    });
+
+    await moveHead('one.txt');
+    const first = request<DiffResponse>('/api/diff?base=HEAD&target=staged');
+    await holding;
+    await moveHead('two.txt');
+    const secondParsed = new Promise<void>((resolve) => (parsed = resolve));
+    const second = request<DiffResponse>('/api/diff?base=HEAD&target=staged');
+    // Let the second request handle its move before the first one finishes.
+    await secondParsed;
+    await new Promise((resolve) => setImmediate(resolve));
+    release();
+    const middle = await first;
+    const latest = await second;
+    expect(latest.baseCommitish).not.toBe(middle.baseCommitish);
+    expect(await request<ReviewSummary>(summaryPath(latest))).toMatchObject({
+      commitMessage: 'feat: stage the draft',
+      rationale: 'Keep the staged proposal.',
+    });
+  });
+
+  it('keeps the launch summary when a commit moves HEAD under a staged review', async () => {
+    git('add', 'fixture.txt');
+    await start({
+      diffMode: DiffMode.STAGED,
+      selection: { baseCommitish: 'HEAD', targetCommitish: 'staged' },
+      commitMessage: 'feat: stage the draft',
+      why: 'Keep the staged proposal.',
+    });
+    const before = await request<DiffResponse>('/api/diff');
+    const launchSummary = await request<ReviewSummary>(summaryPath(before));
+    expect(launchSummary).toMatchObject({ commitMessage: 'feat: stage the draft', version: 1 });
+
+    // Commit another path only, so HEAD moves while fixture.txt stays staged.
+    writeFileSync(join(root, 'other.txt'), 'unrelated\n');
+    git('add', 'other.txt');
+    git('commit', '--quiet', '-m', 'chore: unrelated', '--', 'other.txt');
+
+    // The file watcher clears the resolved-commit cache after its debounce.
+    let after = before;
+    await vi.waitFor(
+      async () => {
+        after = await request<DiffResponse>('/api/diff?base=HEAD&target=staged');
+        expect(after.baseCommitish).not.toBe(before.baseCommitish);
+      },
+      { timeout: 5000, interval: 100 },
+    );
+    expect(await request<ReviewSummary>(summaryPath(after))).toMatchObject({
+      commitMessage: 'feat: stage the draft',
+      rationale: 'Keep the staged proposal.',
+    });
+  });
+
+  it('starts the next staged review without the summary of the change that landed', async () => {
+    git('add', 'fixture.txt');
+    await start({
+      diffMode: DiffMode.STAGED,
+      selection: { baseCommitish: 'HEAD', targetCommitish: 'staged' },
+      commitMessage: 'feat: stage the draft',
+      why: 'Keep the staged proposal.',
+    });
+    const before = await request<DiffResponse>('/api/diff');
+
+    // Another message, so only the empty diff keeps the summary from following.
+    git('commit', '--quiet', '-m', 'feat: landed under another message');
+    let landed = before;
+    await vi.waitFor(
+      async () => {
+        landed = await request<DiffResponse>('/api/diff?base=HEAD&target=staged');
+        expect(landed.baseCommitish).not.toBe(before.baseCommitish);
+      },
+      { timeout: 5000, interval: 100 },
+    );
+    expect(landed.isEmpty).toBe(true);
+
+    writeFileSync(join(root, 'fixture.txt'), 'next draft\n');
+    git('add', 'fixture.txt');
+    let next = landed;
+    await vi.waitFor(
+      async () => {
+        next = await request<DiffResponse>('/api/diff?base=HEAD&target=staged');
+        expect(next.isEmpty).toBe(false);
+      },
+      { timeout: 5000, interval: 100 },
+    );
+    expect(await request<ReviewSummary>(summaryPath(next))).toMatchObject({
+      commitMessage: '',
+      rationale: '',
+      version: 0,
+    });
+  });
+
+  it('does not carry the landed commit message to the next staged change', async () => {
+    git('add', 'fixture.txt');
+    await start({
+      diffMode: DiffMode.STAGED,
+      selection: { baseCommitish: 'HEAD', targetCommitish: 'staged' },
+      commitMessage: 'feat: stage the draft\n\n\nWith a body.  \n',
+      why: 'Keep the staged proposal.',
+    });
+    const before = await request<DiffResponse>('/api/diff');
+
+    // The browser fetches only on Reload, so it may never see the empty index.
+    // Git normalizes the message's whitespace, and --signoff appends a trailer.
+    git('commit', '--quiet', '--signoff', '-m', 'feat: stage the draft\n\n\nWith a body.  ');
+    writeFileSync(join(root, 'fixture.txt'), 'next draft\n');
+    git('add', 'fixture.txt');
+    let next = before;
+    await vi.waitFor(
+      async () => {
+        next = await request<DiffResponse>('/api/diff?base=HEAD&target=staged');
+        expect(next.baseCommitish).not.toBe(before.baseCommitish);
+      },
+      { timeout: 5000, interval: 100 },
+    );
+    expect(next.isEmpty).toBe(false);
+    expect(await request<ReviewSummary>(summaryPath(next))).toMatchObject({
+      commitMessage: '',
+      version: 0,
+    });
+  });
+
+  it('carries the summary of a whitespace-only change while whitespace is hidden', async () => {
+    writeFileSync(join(root, 'fixture.txt'), 'revision 2 \n');
+    git('add', 'fixture.txt');
+    await start({
+      diffMode: DiffMode.STAGED,
+      selection: { baseCommitish: 'HEAD', targetCommitish: 'staged' },
+      commitMessage: 'style: trailing space',
+      why: 'Keep the whitespace proposal.',
+    });
+    const before = await request<DiffResponse>('/api/diff?ignoreWhitespace=true');
+    expect(before.isEmpty).toBe(true);
+
+    writeFileSync(join(root, 'other.txt'), 'unrelated\n');
+    git('add', 'other.txt');
+    git('commit', '--quiet', '-m', 'chore: unrelated', '--', 'other.txt');
+    let after = before;
+    await vi.waitFor(
+      async () => {
+        after = await request<DiffResponse>(
+          '/api/diff?base=HEAD&target=staged&ignoreWhitespace=true',
+        );
+        expect(after.baseCommitish).not.toBe(before.baseCommitish);
+      },
+      { timeout: 5000, interval: 100 },
+    );
+    expect(await request<ReviewSummary>(summaryPath(after))).toMatchObject({
+      commitMessage: 'style: trailing space',
     });
   });
 

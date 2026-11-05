@@ -80,6 +80,8 @@ export interface DiffResponse {
   commentImportId?: string;
   title?: string;
   targetCommitMessage?: string;
+  /** SHA-256 of the full-index patch, whitespace included, for index and worktree targets. */
+  diffDigest?: string;
   // Patterns saved in ~/.difit/config.json (in localStorage on the static demo
   // site); /api/diff adds them to each response.
   autoViewedPatterns?: string[];

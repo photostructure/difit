@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { type SimpleGit } from 'simple-git';
 import { basename, dirname, isAbsolute, resolve, sep } from 'path';
 
@@ -9,7 +11,11 @@ import {
   type DiffResponse,
   type DiffSelection,
 } from '../types/diff.js';
-import { getMergeBaseTargetRef, normalizeBaseMode } from '../utils/diffSelection.js';
+import {
+  getMergeBaseTargetRef,
+  isWorkingTreeTarget,
+  normalizeBaseMode,
+} from '../utils/diffSelection.js';
 
 import { isGeneratedFile } from './generated-file-check.js';
 import { createGitClient } from './git-client.js';
@@ -144,13 +150,28 @@ export class GitDiffParser {
       // Ignore external diff-tools to unify output.
       // https://github.com/yoshiko-pg/difit/issues/19
       diffArgs.push('--no-ext-diff', '--color=never');
+      // A binary file appears in the patch only as "differ" and its blob IDs. Full IDs,
+      // not abbreviated ones, tie the digest to that file's exact content.
+      const workingTree = isWorkingTreeTarget(targetCommitish);
+      if (workingTree) diffArgs.push('--full-index');
+      // A hidden whitespace change still changes what an approval covers, so the digest
+      // comes from full reads on both sides of the filtered one. If they differ, the
+      // displayed files belong to neither, and the response gets no digest to approve.
+      const fullArgs = diffArgs.filter((arg) => arg !== '-w');
+      const fullBefore =
+        workingTree && ignoreWhitespace ? await this.git.diff(fullArgs) : undefined;
 
       // Single git invocation for better startup latency on large repositories.
       const diffRaw = await this.git.diff(diffArgs);
+      const full = fullBefore === undefined ? diffRaw : await this.git.diff(fullArgs);
       const files = await this.markGitattributesGeneratedFiles(
         this.parseUnifiedDiff(diffRaw),
         attributesRef,
       );
+      const diffDigest =
+        workingTree && (fullBefore === undefined || fullBefore === full)
+          ? createHash('sha256').update(full).digest('hex')
+          : undefined;
 
       return {
         commit: resolvedCommit,
@@ -162,6 +183,7 @@ export class GitDiffParser {
         requestedTargetCommitish: targetCommitish,
         requestedBaseMode,
         ...(targetCommitMessage !== undefined ? { targetCommitMessage } : {}),
+        ...(diffDigest !== undefined ? { diffDigest } : {}),
       };
     } catch (error) {
       throw new Error(
@@ -794,6 +816,19 @@ export class GitDiffParser {
     } catch {
       return { isGenerated: false, source: 'path' };
     }
+  }
+
+  /** Full messages of the commits reachable from head but not from base. */
+  async getCommitMessages(base: string, head: string): Promise<string[]> {
+    const log = await this.git.raw([
+      'log',
+      '--format=format:%B%x00',
+      '--no-notes',
+      '--encoding=UTF-8',
+      `${base}..${head}`,
+      '--',
+    ]);
+    return log.split('\0').slice(0, -1);
   }
 
   async resolveCommitish(commitish: string): Promise<string> {

@@ -250,6 +250,12 @@ with `--no-jsonl --no-conversation`. Values are process-local and disappear when
 the server restarts. Saving a changed proposal revokes any existing LGTM approval for that
 selection. Editing these fields never executes Git or creates a commit.
 
+A commit that moves HEAD gives a `staged` or `.` diff a new base commit, and so
+a new review. That review starts with the previous review's summary unless its
+diff is empty or a commit between the two bases has the proposed message, as
+happens once the proposed commit lands. Approval and comment threads stay on
+the previous review.
+
 `comment snapshot --port <port>` includes `summary` on each review:
 `{commitMessage,rationale,version,updatedAt?}`. Use that review's `id` and summary
 version to write a proposal without following another tab's current selection:
@@ -287,7 +293,9 @@ with `{error,summary}` containing the latest version. Browser updates broadcast
 
 Approving with `POST /api/approval` includes the displayed `summaryVersion`.
 For a named review, also include the displayed `captureVersion` and `patchDigest`.
-The server rejects stale capture or proposal approval with HTTP 409. Revocation
+For a `staged`, `working`, or `.` review, include the `diffDigest` from the
+displayed `/api/diff` response.
+The server rejects stale capture, diff, or proposal approval with HTTP 409. Revocation
 remains available regardless of these versions.
 
 ## General conversation and comment intent
@@ -394,7 +402,9 @@ fetch a fresh snapshot immediately before committing and verify that the matchin
 review still has `approval.approved: true`. For a named review, require
 `approval.captureVersion === capture.version`,
 `approval.patchDigest === capture.patchDigest`, and
-`approval.summaryVersion === summary.version`. Check that the proposed commit
+`approval.summaryVersion === summary.version`. For a `staged`, `working`, or `.`
+review, the snapshot reports an as-is approval as revoked once the diff differs
+from the one approved, for example after more hunks are staged. Check that the proposed commit
 contains only the approved captured changes and authorized fixes; approval of a
 capture does not establish ownership of later shared-tree edits. An older approval
 event does not override a later revocation. Missing state or an unavailable server is not proof
@@ -411,10 +421,13 @@ The approval button uses `GET /api/approval?base=<base>&target=<target>` and
 revoke with `{"approved":false}`. Include `baseMode=merge-base` where applicable.
 For a named review, use `?review=<name>` and approve with
 `{"approved":true,"captureVersion":1,"patchDigest":"<current-digest>","summaryVersion":0}`
-using the displayed capture and summary values. Both
-require `--ship-it`. GET is read-only and returns the current approval; it also
+using the displayed capture and summary values. For a `staged`, `working`, or `.`
+review, also send `"diffDigest":"<digest from /api/diff>"`. Both
+require `--ship-it`. GET returns the current approval, after revoking an as-is
+approval whose `staged`, `working`, or `.` diff has changed; it also
 works without conversation mode. The legacy `POST /api/ship-it` approve-and-exit
-endpoint remains available to old clients, but the button never calls it. An old
+endpoint remains available to old clients for committed ranges, but the button
+never calls it, and it refuses named, `staged`, `working`, and `.` reviews. An old
 server without `/api/approval` must be rebuilt before using the button.
 
 After LGTM, address every comment (answer questions or implement requested

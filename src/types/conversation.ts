@@ -53,6 +53,8 @@ export interface ReviewApproval {
   baselineCapture?: Pick<NamedReviewMetadata, 'version' | 'patchDigest'>;
   captureVersion?: number;
   patchDigest?: string;
+  /** The approved index or worktree diff; a different current diff revokes an as-is approval. */
+  diffDigest?: string;
   summaryVersion?: number;
   approved: boolean;
   updatedAt?: string;

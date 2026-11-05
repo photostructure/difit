@@ -45,8 +45,13 @@ export function getDiffSelectionKey(selection: DiffSelection): string {
   return `${selection.baseCommitish}:${selection.targetCommitish}:${normalizeBaseMode(selection.baseMode)}`;
 }
 
+/** The index or worktree, whose content can change without any ref moving. */
+export function isWorkingTreeTarget(targetCommitish: string): boolean {
+  return targetCommitish === '.' || targetCommitish === 'staged' || targetCommitish === 'working';
+}
+
 export function getMergeBaseTargetRef(targetCommitish: string): string {
-  if (targetCommitish === '.' || targetCommitish === 'staged' || targetCommitish === 'working') {
+  if (isWorkingTreeTarget(targetCommitish)) {
     return 'HEAD';
   }
 

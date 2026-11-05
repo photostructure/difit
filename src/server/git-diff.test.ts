@@ -1616,6 +1616,48 @@ index abc123..def456 100644
       });
     });
 
+    it.each([
+      { before: 'patch', after: 'patch', digest: true },
+      { before: 'patch', after: 'patch with a newly staged hunk', digest: false },
+    ])(
+      'digests a whitespace-hidden diff only when the full patch is unchanged across the read ($digest)',
+      async ({ before, after, digest }) => {
+        const gitDiff = (parser as any).git.diff;
+        (parser as any).git.revparse.mockResolvedValueOnce(
+          'fedcba9876543210fedcba9876543210fedcba98',
+        );
+        gitDiff
+          .mockResolvedValueOnce(before)
+          .mockResolvedValueOnce('')
+          .mockResolvedValueOnce(after);
+
+        const response = await parser.parseDiff(
+          { baseCommitish: 'HEAD', targetCommitish: 'staged' },
+          true,
+        );
+
+        expect(gitDiff).toHaveBeenNthCalledWith(1, [
+          '--cached',
+          'HEAD',
+          '--no-ext-diff',
+          '--color=never',
+          '--full-index',
+        ]);
+        expect(gitDiff).toHaveBeenNthCalledWith(2, [
+          '--cached',
+          'HEAD',
+          '-w',
+          '--no-ext-diff',
+          '--color=never',
+          '--full-index',
+        ]);
+        // printf patch | sha256sum
+        expect(response.diffDigest).toBe(
+          digest ? 'a4895eb44afc336fecbba6e520cd67e178dace0276655d102fceffa8e5f70570' : undefined,
+        );
+      },
+    );
+
     it('uses merge-base when baseMode is merge-base', async () => {
       const gitDiff = (parser as any).git.diff;
       const gitRevparse = (parser as any).git.revparse;
@@ -1636,6 +1678,7 @@ index abc123..def456 100644
         'fedcba9876543210fedcba9876543210fedcba98',
         '--no-ext-diff',
         '--color=never',
+        '--full-index',
       ]);
       expect(response).toEqual({
         commit: 'fedcba9 vs Working Directory (all uncommitted changes)',
@@ -1646,6 +1689,8 @@ index abc123..def456 100644
         requestedBaseCommitish: 'origin/main',
         requestedTargetCommitish: '.',
         requestedBaseMode: 'merge-base',
+        // printf '' | sha256sum
+        diffDigest: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
       });
     });
   });

@@ -61,7 +61,7 @@ import { useExpandedLines, type MergedChunk } from './hooks/useExpandedLines';
 import { useFileWatch } from './hooks/useFileWatch';
 import { useKeyboardNavigation } from './hooks/useKeyboardNavigation';
 import { useLazyDiffRendering } from './hooks/useLazyDiffRendering';
-import { useReviewApproval } from './hooks/useReviewApproval';
+import { DiffChangedError, useReviewApproval } from './hooks/useReviewApproval';
 import { useReviewSummary } from './hooks/useReviewSummary';
 import { useReviewPresence } from './hooks/useReviewPresence';
 import { useViewedFiles } from './hooks/useViewedFiles';
@@ -304,6 +304,7 @@ function App() {
     diffData?.shipIt && commentSessionQueryString ? getCommentApiUrl('/api/approval') : null,
     diffData?.capture,
     summary.version,
+    diffData?.diffDigest,
   );
   const refreshApproval = approval.refresh;
   const bootstrappingCommentsGenerationRef = useRef<number | null>(null);
@@ -407,6 +408,7 @@ function App() {
     [getCommentApiUrl, replaceThreads, commentsGeneration, diffData?.capture],
   );
 
+  const fetchDiffDataRef = useRef<((selection?: ReviewSelection) => Promise<void>) | null>(null);
   const handleShipIt = async (mode: ApprovalMode = 'as-is', revoke = false) => {
     if (
       !approval.ready ||
@@ -435,6 +437,14 @@ function App() {
       }
     } catch (approvalError) {
       console.error('Failed to approve review:', approvalError);
+      if (approvalError instanceof DiffChangedError) {
+        // Without a file watcher no Reload prompt appears, so reload here the same way,
+        // re-checking viewed files so a collapsed file whose diff changed is flagged.
+        setShipItError('The diff changed since it loaded. Review the update, then approve.');
+        await Promise.all([refreshSummary(), fetchDiffDataRef.current?.()]);
+        setReloadVersion((prev) => prev + 1);
+        return;
+      }
       setShipItError('Could not update approval. Please try again.');
       await Promise.all([refreshSummary(), refreshApproval()]);
     } finally {
@@ -820,7 +830,6 @@ function App() {
     chunkIndex: number;
     lineIndex: number;
   } | null>(null);
-  const fetchDiffDataRef = useRef<((selection?: ReviewSelection) => Promise<void>) | null>(null);
   const handleWatchReload = useCallback(async () => {
     await fetchDiffDataRef.current?.();
     setReloadVersion((prev) => prev + 1);

@@ -81,6 +81,12 @@ capture. Reviewer confirmations persist while their threads remain resolved;
 when all conditions are reviewer-confirmed, approval stays ready across captures
 within the approved scope. With no recorded conditions, capture updates revoke
 approval as usual.
+A `staged`, `working`, or `.` review records the digest of the diff the reviewer
+approved. A different current diff, such as more staged hunks, revokes as-is
+approval and conditional approval with no recorded conditions. `comment snapshot`
+and `GET /api/approval` check the current diff before they report approval.
+Conditional permission with recorded comments covers the agent's follow-up
+changes, so a changed diff does not revoke it.
 Server restart loses approval. Presence and browser closure never grant approval.
 
 Use `difit schema approval` and `difit schema address` for request schemas.

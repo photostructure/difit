@@ -1199,6 +1199,35 @@ describe('App Component - Ship it delivery', () => {
     expect(screen.getByRole('button', { name: /^(Approve as-is|Approved as-is)$/ })).toBeEnabled();
   });
 
+  it('reloads the diff when approval is refused because the diff changed', async () => {
+    mockFetch({ ...mockDiffResponse, shipIt: true });
+    const fallback = vi.mocked(global.fetch).getMockImplementation()!;
+    vi.mocked(global.fetch).mockImplementation((input, init) => {
+      if (String(input).startsWith('/api/approval') && init?.method === 'POST') {
+        return Promise.resolve({
+          ok: false,
+          status: 409,
+          json: async () => ({ error: 'Diff changed', diffDigest: 'f'.repeat(64) }),
+        } as Response);
+      }
+      return fallback(input, init);
+    });
+    const diffRequests = () =>
+      vi.mocked(global.fetch).mock.calls.filter(([input]) => String(input).startsWith('/api/diff'))
+        .length;
+
+    renderApp();
+    const button = await screen.findByRole('button', { name: /^(Approve as-is|Approved as-is)$/ });
+    await waitFor(() => expect(button).toBeEnabled());
+    const before = diffRequests();
+    fireEvent.click(button);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The diff changed');
+    await waitFor(() => expect(diffRequests()).toBeGreaterThan(before));
+    // Like Reload, re-check viewed files so a viewed file whose diff changed is flagged.
+    await waitFor(() => expect(vi.mocked(useViewedFiles).mock.lastCall?.[9]).toBe(1));
+  });
+
   it.each([{ failure: 'http' }, { failure: 'network' }])(
     'allows retry after a $failure approval failure',
     async ({ failure }) => {

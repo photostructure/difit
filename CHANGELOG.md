@@ -19,6 +19,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed in the PhotoStructure fork
 
+- Bind approval of a `staged`, `working`, or `.` review to the diff the reviewer saw: `POST /api/approval` requires the `diffDigest` from `/api/diff` and returns HTTP 409 when the diff has changed, and a later change to the diff revokes an as-is approval when `comment snapshot` or `GET /api/approval` reads it. The legacy `POST /api/ship-it` route now refuses these reviews with HTTP 409.
+- Keep the proposed commit message and rationale when a commit moves HEAD under a `staged` or `.` review, unless that commit has the proposed message. The new review used to start with an empty summary.
 - Bundle JetBrains Mono, IBM Plex Mono, and Ubuntu Mono for **Settings** → **Font Family**, so each choice renders the same whether or not the font is installed, and add **Browser default** for the monospace font set in the browser. JetBrains Mono replaces **System Font** as the default. **System Font**, **Menlo**, **SF Mono**, and **Fira Code** are removed; a saved choice of one of them falls back to JetBrains Mono.
 - Bind an OS-assigned port with `--port 0` and report it in `server.ready`; reject non-numeric ports instead of falling back to 4966.
 - Open thread reply forms from **Write a reply...** again. Escape or a click elsewhere closes an empty form; a draft stays open.

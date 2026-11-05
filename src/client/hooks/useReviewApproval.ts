@@ -5,15 +5,29 @@ import type { NamedReviewMetadata } from '../../types/review';
 
 type CaptureIdentity = Pick<NamedReviewMetadata, 'version' | 'patchDigest'>;
 
+/** The staged or worktree diff changed after it was displayed; reload it before approving. */
+export class DiffChangedError extends Error {
+  constructor() {
+    super('The diff changed after it was displayed');
+  }
+}
+
 /** Server-owned approval, bound to the displayed selection and captured patch. */
 export function useReviewApproval(
   url: string | null,
   capture?: CaptureIdentity,
   displayedSummaryVersion?: number,
+  diffDigest?: string,
 ) {
   const captureVersion = capture?.version;
   const patchDigest = capture?.patchDigest;
-  const key = JSON.stringify([url, captureVersion, patchDigest, displayedSummaryVersion]);
+  const key = JSON.stringify([
+    url,
+    captureVersion,
+    patchDigest,
+    displayedSummaryVersion,
+    diffDigest,
+  ]);
   const [state, setState] = useState<{ key: string; approval: ReviewApproval } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const requestId = useRef(0);
@@ -69,12 +83,17 @@ export function useReviewApproval(
           ...(approved && mode === 'after-comments' ? { mode } : {}),
           ...(approved || captureVersion !== undefined ? { summaryVersion } : {}),
           ...(captureVersion !== undefined ? { captureVersion, patchDigest } : {}),
+          ...(approved && diffDigest !== undefined ? { diffDigest } : {}),
         }),
       });
+      if (response.status === 409) {
+        const body = (await response.json()) as { diffDigest?: unknown };
+        if (typeof body.diffDigest === 'string') throw new DiffChangedError();
+      }
       if (!response.ok) throw new Error('Could not update approval');
       await refresh();
     },
-    [url, key, captureVersion, patchDigest, refresh],
+    [url, key, captureVersion, patchDigest, diffDigest, refresh],
   );
 
   const current = state?.key === key ? state.approval : null;

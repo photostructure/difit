@@ -99,6 +99,14 @@ const definitions: Record<string, Schema> = {
     not: { pattern: '[^A-Za-z0-9._-]' },
     description: 'Stable name for one task in this server process and repository.',
   },
+  DiffDigest: {
+    type: 'string',
+    pattern: '^[a-f0-9]{64}$',
+    minLength: 64,
+    maxLength: 64,
+    description:
+      'SHA-256 of the full-index patch of a staged, working, or . diff, whitespace included, from GET /api/diff.',
+  },
   PatchDigest: {
     type: 'string',
     pattern: '^[a-f0-9]{64}$',
@@ -315,6 +323,7 @@ const definitions: Record<string, Schema> = {
       cursor,
       captureVersion,
       patchDigest: ref('PatchDigest'),
+      diffDigest: ref('DiffDigest'),
       summaryVersion: version,
     },
     ['approved'],
@@ -651,11 +660,12 @@ const definitions: Record<string, Schema> = {
         summaryVersion: version,
         captureVersion,
         patchDigest: ref('PatchDigest'),
+        diffDigest: ref('DiffDigest'),
       },
       ['approved'],
     ),
     description:
-      'POST /api/approval for as-is or revocation; POST /api/approval/conditional for after-comments. mode defaults to as-is. after-comments records conditional permission; approved stays false until every recorded comment revision has evidence via comment address or its thread is resolved by the reviewer. New human feedback or summary edits revoke it. Recapturing clears agent evidence but preserves reviewer confirmations while their threads remain resolved. Named review approval requires captureVersion, patchDigest and summaryVersion matching the displayed capture and proposal. Unnamed approval requires the current summaryVersion (omission means 0). Stale approval returns HTTP 409; revocation requires no matching versions.',
+      'POST /api/approval for as-is or revocation; POST /api/approval/conditional for after-comments. mode defaults to as-is. after-comments records conditional permission; approved stays false until every recorded comment revision has evidence via comment address or its thread is resolved by the reviewer. New human feedback or summary edits revoke it. Recapturing clears agent evidence but preserves reviewer confirmations while their threads remain resolved. Named review approval requires captureVersion, patchDigest and summaryVersion matching the displayed capture and proposal. Unnamed approval requires the current summaryVersion (omission means 0); approval of a staged, working, or . diff also requires the diffDigest of the current diff. A later change to that diff revokes as-is approval, and conditional approval with no recorded conditions, when comment snapshot or GET /api/approval reads it. Stale approval returns HTTP 409; revocation requires no matching versions.',
   },
   ApprovalResponse: ref('ReviewApproval'),
 };

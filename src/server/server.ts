@@ -70,6 +70,7 @@ import {
   createDiffSelection,
   diffSelectionsEqual,
   getDiffSelectionKey,
+  isWorkingTreeTarget,
 } from '../utils/diffSelection.js';
 
 export interface ServerOptions {
@@ -167,6 +168,19 @@ function createResolvedCommentSelection(
 
 function createCommentSessionKey(selection: DiffSelection): string {
   return getDiffSelectionKey(selection);
+}
+
+// The digest of a staged or worktree diff with no changes, whitespace included.
+const EMPTY_DIFF_DIGEST = createHash('sha256').digest('hex');
+
+// What `git commit` stores for a message: no trailing spaces, at most one blank line in a row.
+function normalizeCommitMessage(message: string): string {
+  return message
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 export async function startServer(options: ServerOptions): Promise<{
@@ -380,6 +394,9 @@ export async function startServer(options: ServerOptions): Promise<{
     initialSelection,
     Boolean(options.stdinDiff),
   );
+  // The latest resolved review for each requested index or worktree diff, such as HEAD vs staged.
+  const resolvedWorkingTreeSelections = new Map<string, DiffSelection>();
+  const workingTreeTracking = new Map<string, Promise<void>>();
   // Resolved commits, so the launched diff stays put when HEAD moves and matches its review.
   const launch = initialNamedReview || options.explicitTarget ? currentCommentSelection : undefined;
   // Ensure agents can discover the initial review even before a comment is posted.
@@ -402,6 +419,7 @@ export async function startServer(options: ServerOptions): Promise<{
   }
 
   seedCommittedSummary(currentCommentSelection, initialDiffData);
+  await trackWorkingTreeReview(initialSelection, currentCommentSelection, initialDiffData);
 
   function parseRepositoryRelativePath(filepath: unknown):
     | { ok: true; path: string }
@@ -655,6 +673,7 @@ export async function startServer(options: ServerOptions): Promise<{
       Boolean(options.stdinDiff),
     );
 
+    await trackWorkingTreeReview(requestedSelection, currentCommentSelection, responseDiffData);
     seedCommittedSummary(currentCommentSelection, responseDiffData);
 
     const baseCommitish =
@@ -1136,6 +1155,10 @@ export async function startServer(options: ServerOptions): Promise<{
         }),
       presence,
       () => fileWatcher.broadcast({ type: 'approvalChanged', timestamp: new Date().toISOString() }),
+      async () => {
+        for (const review of conversation.snapshot().reviews)
+          await revokeApprovalIfDiffChanged(review.selection);
+      },
     );
   }
 
@@ -1147,19 +1170,116 @@ export async function startServer(options: ServerOptions): Promise<{
     );
   }
 
-  function seedCommittedSummary(selection: DiffSelection, diff: DiffResponse): void {
-    if (selection.reviewName || diff.targetCommitMessage === undefined) return;
+  function seedSummary(selection: DiffSelection, commitMessage: string, rationale: string): void {
     const previous = getReviewSummary(selection);
-    // Saved edits, including an intentional clear, always take precedence over Git metadata.
+    // Saved edits, including an intentional clear, always take precedence over a seeded summary.
     if (previous.version !== 0 || previous.commitMessage || previous.rationale) return;
     const summary: ReviewSummary = {
-      commitMessage: diff.targetCommitMessage,
-      rationale: '',
+      commitMessage,
+      rationale,
       version: 1,
       updatedAt: new Date().toISOString(),
     };
     summaries.set(getDiffSelectionKey(selection), summary);
     conversation?.setSummary(selection, summary, 'agent');
+  }
+
+  function seedCommittedSummary(selection: DiffSelection, diff: DiffResponse): void {
+    if (selection.reviewName || diff.targetCommitMessage === undefined) return;
+    seedSummary(selection, diff.targetCommitMessage, '');
+  }
+
+  function isLiveWorkingTreeSelection(selection: DiffSelection): boolean {
+    return (
+      !options.stdinDiff && !selection.reviewName && isWorkingTreeTarget(selection.targetCommitish)
+    );
+  }
+
+  async function trackWorkingTreeReview(
+    requested: DiffSelection,
+    resolved: DiffSelection,
+    diff: DiffResponse,
+  ): Promise<void> {
+    // A response without a digest saw the diff change mid-read, so it settles nothing.
+    const { diffDigest } = diff;
+    if (!isLiveWorkingTreeSelection(requested) || diffDigest === undefined) return;
+    const key = getDiffSelectionKey(requested);
+    // One move at a time, so a later move reads the summary an earlier one carried.
+    const tracked = (workingTreeTracking.get(key) ?? Promise.resolve()).then(async () => {
+      const previous = resolvedWorkingTreeSelections.get(key);
+      resolvedWorkingTreeSelections.set(key, resolved);
+      if (previous) await carrySummaryToNewBase(previous, resolved, diffDigest);
+      revokeIfDiffChanged(resolved, diffDigest);
+    });
+    // This request receives a failure; the chain only orders the next move after it.
+    workingTreeTracking.set(
+      key,
+      tracked.catch(() => {}),
+    );
+    await tracked;
+  }
+
+  // A commit that moves HEAD gives a staged or . diff a new base, and so a new review.
+  // Its proposed message still describes the same pending work, so it follows, unless
+  // the proposal is what landed.
+  async function carrySummaryToNewBase(
+    previous: DiffSelection,
+    next: DiffSelection,
+    diffDigest: string,
+  ): Promise<void> {
+    if (diffSelectionsEqual(previous, next) || diffDigest === EMPTY_DIFF_DIGEST) return;
+    const summary = getReviewSummary(previous);
+    if (summary.version === 0) return;
+    const proposed = normalizeCommitMessage(summary.commitMessage);
+    const landed = await parser.getCommitMessages(previous.baseCommitish, next.baseCommitish);
+    // --signoff and commit-msg hooks append trailers after the proposed text.
+    if (
+      landed
+        .map(normalizeCommitMessage)
+        .some((message) => message === proposed || message.startsWith(`${proposed}\n`))
+    )
+      return;
+    seedSummary(next, summary.commitMessage, summary.rationale);
+  }
+
+  // An as-is approval covers the index or worktree diff the reviewer saw. After-comments
+  // approval with conditions permits the agent's changes, so the diff may move under it.
+  function revokeIfDiffChanged(selection: DiffSelection, diffDigest: string | undefined): void {
+    const approval =
+      conversation?.getApproval(selection) ?? approvals.get(getDiffSelectionKey(selection));
+    if (
+      !approval?.approved ||
+      approval.diffDigest === undefined ||
+      approval.diffDigest === diffDigest ||
+      (approval.mode === 'after-comments' && approval.conditions?.length)
+    )
+      return;
+    const revoked = conversation?.setApproval(selection, false, 'agent') ?? {
+      approved: false,
+      updatedAt: new Date().toISOString(),
+    };
+    approvals.set(getDiffSelectionKey(selection), revoked);
+    // Without a file watcher the cached diff is stale; drop it so a reload shows the change.
+    invalidateCache();
+    humanLog(`LGTM revoked because the diff changed: ${selection.targetCommitish}`);
+    fileWatcher.broadcast({ type: 'approvalChanged', timestamp: new Date().toISOString() });
+  }
+
+  async function getCurrentDiffDigest(selection: DiffSelection): Promise<string | undefined> {
+    // A resolved selection already names its base commit, so skip the merge-base lookup.
+    const diff = await parser.parseDiff(
+      createDiffSelection(selection.baseCommitish, selection.targetCommitish),
+      false,
+      options.contextLines,
+    );
+    return diff.diffDigest;
+  }
+
+  async function revokeApprovalIfDiffChanged(selection: DiffSelection): Promise<void> {
+    const approval =
+      conversation?.getApproval(selection) ?? approvals.get(getDiffSelectionKey(selection));
+    if (!approval?.approved || approval.diffDigest === undefined) return;
+    revokeIfDiffChanged(selection, await getCurrentDiffDigest(selection));
   }
 
   app.get('/api/review-summary', (req, res) => {
@@ -1526,8 +1646,9 @@ export async function startServer(options: ServerOptions): Promise<{
   if (options.shipIt) {
     // Separate endpoint: an older server must reject toggle requests, not treat
     // them as the legacy approve-and-exit action below.
-    app.get('/api/approval', (req, res) => {
+    app.get('/api/approval', async (req, res) => {
       const selection = getCommentSelectionFromQuery(req.query as Record<string, unknown>);
+      await revokeApprovalIfDiffChanged(selection);
       res.setHeader('Cache-Control', 'no-store');
       res.json(
         conversation?.getApproval(selection) ??
@@ -1535,7 +1656,7 @@ export async function startServer(options: ServerOptions): Promise<{
       );
     });
 
-    app.post(['/api/approval', '/api/approval/conditional'], (req, res) => {
+    app.post(['/api/approval', '/api/approval/conditional'], async (req, res) => {
       if (!req.is('application/json')) {
         res.status(415).json({ error: 'Approval requires application/json' });
         return;
@@ -1546,6 +1667,7 @@ export async function startServer(options: ServerOptions): Promise<{
         summaryVersion?: unknown;
         captureVersion?: unknown;
         patchDigest?: unknown;
+        diffDigest?: unknown;
       } | null;
       if (!input || typeof input.approved !== 'boolean') {
         res.status(400).json({ error: 'Expected approved: true or false' });
@@ -1578,6 +1700,20 @@ export async function startServer(options: ServerOptions): Promise<{
         return;
       }
       const selection = getCommentSelectionFromQuery(req.query as Record<string, unknown>);
+      // Read Git first: a summary edit during the await must still fail the check below.
+      const diffDigest =
+        input.approved && isLiveWorkingTreeSelection(selection)
+          ? await getCurrentDiffDigest(selection)
+          : undefined;
+      if (diffDigest !== undefined && input.diffDigest !== diffDigest) {
+        // Without a file watcher the cached diff is stale; drop it so a reload shows the change.
+        invalidateCache();
+        res.status(409).json({
+          error: 'Diff changed; reload it before approving',
+          diffDigest,
+        });
+        return;
+      }
       const summary = getReviewSummary(selection);
       const capture = selection.reviewName
         ? namedReviews.get(selection.reviewName)?.metadata
@@ -1606,10 +1742,20 @@ export async function startServer(options: ServerOptions): Promise<{
       const key = getDiffSelectionKey(selection);
       const previous = conversation?.getApproval(selection) ?? approvals.get(key);
       const approval = conversation
-        ? conversation.setApproval(selection, input.approved, 'user', input.mode ?? 'as-is')
+        ? conversation.setApproval(
+            selection,
+            input.approved,
+            'user',
+            input.mode ?? 'as-is',
+            diffDigest,
+          )
         : previous?.approved === input.approved
           ? previous
-          : { approved: input.approved, updatedAt: new Date().toISOString() };
+          : {
+              approved: input.approved,
+              ...(diffDigest !== undefined ? { diffDigest } : {}),
+              updatedAt: new Date().toISOString(),
+            };
       approvals.set(key, approval);
       if (previous?.cursor !== approval.cursor || previous?.approved !== approval.approved) {
         humanLog(
@@ -1638,6 +1784,12 @@ export async function startServer(options: ServerOptions): Promise<{
         res
           .status(409)
           .json({ error: 'Named reviews require capture-bound approval through /api/approval' });
+        return;
+      }
+      if (isLiveWorkingTreeSelection(selection)) {
+        res.status(409).json({
+          error: 'Staged and worktree reviews require diff-bound approval through /api/approval',
+        });
         return;
       }
       res.on('finish', async () => {

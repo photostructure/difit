@@ -181,6 +181,7 @@ export class Conversation {
     approved: boolean,
     origin: 'user' | 'agent' = 'user',
     mode: ApprovalMode = 'as-is',
+    diffDigest?: string,
   ): ReviewApproval {
     const review = this.getReview(selection);
     if (!approved && !review.approval.approved && !review.approval.requested)
@@ -214,6 +215,7 @@ export class Conversation {
       {
         approved: approved && (mode === 'as-is' || conditions.length === 0),
         ...(approved ? { mode, requested: true, summaryVersion: review.summary.version } : {}),
+        ...(approved && diffDigest !== undefined ? { diffDigest } : {}),
         ...(approved && mode === 'after-comments'
           ? {
               conditions,
@@ -566,6 +568,7 @@ export function registerConversationRoutes(
   progressChanged: (selection: DiffSelection) => void,
   presence?: ReviewPresence,
   approvalChanged?: () => void,
+  beforeSnapshot?: () => Promise<void>,
 ): void {
   app.post('/api/conversation/address', (req, res) => {
     if (!req.is('application/json')) {
@@ -599,7 +602,8 @@ export function registerConversationRoutes(
       res.status(error.status).json({ error: error.message });
     }
   });
-  app.get('/api/conversation/snapshot', (_req, res) => {
+  app.get('/api/conversation/snapshot', async (_req, res) => {
+    await beforeSnapshot?.();
     res.json({
       ...conversation.snapshot(),
       ...(presence ? { presence: presence.snapshot() } : {}),

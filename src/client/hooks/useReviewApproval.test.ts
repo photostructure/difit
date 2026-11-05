@@ -36,6 +36,24 @@ describe('review approval', () => {
       ),
     ).toHaveLength(0);
   });
+  it('sends the digest of the displayed index or worktree diff with an approval', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response(false));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() =>
+      useReviewApproval('/api/approval?target=staged', undefined, 1, 'digest-shown'),
+    );
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    await act(async () => {
+      await result.current.setApproved(true, 1);
+    });
+    const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+      approved: true,
+      summaryVersion: 1,
+      diffDigest: 'digest-shown',
+    });
+  });
+
   it('restores server approval and preserves it when revocation fails', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response(true));
     vi.stubGlobal('fetch', fetchMock);
