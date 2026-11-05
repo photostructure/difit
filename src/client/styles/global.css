@@ -89,6 +89,16 @@ body {
   font-size: var(--app-font-size);
 }
 
+/* JetBrains Mono, the default code font, draws ligatures such as => and !==;
+   a diff must show each character as written. */
+.font-mono,
+code,
+kbd,
+samp,
+pre {
+  font-variant-ligatures: none;
+}
+
 /* Enable smooth transition from fixed width to auto (Chrome/Edge 129+ only) */
 :root {
   interpolate-size: allow-keywords;
