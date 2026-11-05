@@ -472,6 +472,14 @@ turns. It also specifies an external-controller approach for automatic delivery.
 Use an explicit `--host` for a server bound to a LAN interface; see
 [server addresses](docs/server-addresses.md).
 
+`difit idle` prints `{"idleMs": …, "source": …}`: milliseconds since the desktop
+user's last keyboard or mouse input, read over D-Bus on Linux (KDE's
+`org.freedesktop.ScreenSaver` on X11, or GNOME's `org.gnome.Mutter.IdleMonitor`), from
+`ioreg` on macOS, and from `GetLastInputInfo` on Windows. It exits 1 when no
+source answers, including on KDE under Wayland, where KDE refuses the call as
+not supported, and in a Windows ssh session, which has no input of its own.
+Agents run it before opening a review to tell whether the user is at the desk.
+
 ## HTTPS and remote browsers
 
 The browser's [Clipboard API](https://developer.mozilla.org/en-US/docs/Web/API/Clipboard/writeText)

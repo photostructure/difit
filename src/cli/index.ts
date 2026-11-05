@@ -22,6 +22,7 @@ import {
 } from './utils.js';
 import { detectAgentSession } from './agent-session.js';
 import { createCommentCommand } from './comment.js';
+import { createIdleCommand } from './idle.js';
 import { createSchemaCommand } from './schema.js';
 import { serverUrl } from './server-url.js';
 import { createWaitCommand } from './wait.js';
@@ -121,6 +122,7 @@ program
   .addCommand(createCommentCommand())
   .addCommand(createReviewCommand())
   .addCommand(createWaitCommand())
+  .addCommand(createIdleCommand())
   .argument(
     '[commit-ish]',
     'Git commit, tag, branch, HEAD~n reference, or "working"/"staged"/"."',

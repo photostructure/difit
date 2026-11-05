@@ -37,6 +37,18 @@ and `--no-lgtm` for read-only review. `pnpm run dev` does not support
 A viewer request grants no edit/commit permission; make requested, authorized
 fixes only in the owning checkout.
 
+Open a review you start on your own, such as a commit approval at the end of
+your work, only while the user is at the desk. Run `pnpm run build:cli` (it
+creates `dist/`, which `pnpm run dev` would otherwise build later; a build
+failure is a build problem to report, not an idle reading), then
+`node dist/cli/index.js idle`. If it exits non-zero or prints an `idleMs` of 600000 (10 minutes) or
+more, the user is away: do not launch. Finish everything else, including tests
+and second-opinion review, then end the turn with one line saying the change is
+ready for difit review, and launch when the user says to. Do not run `idle`
+again to see whether they came back; their next message tells you. Skip the
+check when the user's latest message asks for the review, since they may be
+reading it on another device.
+
 Use `node dist/cli/index.js schema [events|summary|reply|status|snapshot|comments|import|approval]` to discover
 JSON payloads before composing them; omit the selector for events. The Draft
 2020-12 bundle includes request/response definitions in `$defs`. Use command

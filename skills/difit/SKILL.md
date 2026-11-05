@@ -17,6 +17,16 @@ Decide what to show from the request:
   defects before launching, and pass `--no-lgtm` unless the user asked to
   approve it. Do not post PR findings to GitHub.
 
+Open a review you start on your own, such as a commit approval at the end of
+your work, only while the user is at the desk. Run `<difit-command> idle` first.
+If it exits non-zero or prints an `idleMs` of 600000 (10 minutes) or more, the
+user is away: do not launch. Finish everything else, including tests and
+second-opinion review, then end the turn with one line saying the change is
+ready for difit review, and launch when the user says to. Do not run `idle`
+again to see whether they came back; their next message tells you. Skip the
+check when the user's latest message asks for the review, since they may be
+reading it on another device.
+
 Use a source build of `@photostructure/difit` for `<difit-command>` until the
 next release: published 5.1.0 lacks named captures and the launch JSONL protocol.
 Check `--version` and `--help` for `--review` and `--jsonl`; use the same build for server and

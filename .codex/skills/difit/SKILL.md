@@ -37,6 +37,16 @@ only when setting up automatic delivery or diagnosing a host integration.
 
 ## Open the requested patch
 
+Open a review you start on your own, such as a commit approval at the end of
+your work, only while the user is at the desk. First run `idle` with the
+launcher step 1 names. If it exits non-zero or prints an `idleMs` of 600000
+(10 minutes) or more, the user is away: do not launch. Finish everything else,
+including tests and second-opinion review, then end the turn with one line
+saying the change is ready for difit review, and launch when the user says to.
+Do not run `idle` again to see whether they came back; their next message tells
+you. Skip the check when the user's latest message asks for the review, since
+they may be reading it on another device.
+
 1. Run from the reviewed repository's Git root. Use its prescribed difit launcher
    for every command; in Matthew's workspace this is `/home/mrm/.local/bin/difit`.
    On first use, check that `--help` has `--review`, `--background`, and `--jsonl`.

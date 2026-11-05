@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 
 - Discover launch events and agent JSON requests/responses through `difit schema` and command help.
 - Wait silently for human activity across review servers with `difit wait`; recover queued messages without implicit delivery receipts.
+- Print the desktop user's idle time with `difit idle` on Linux (KDE on X11, GNOME), macOS, and Windows, so agents can hold a review until the user is back.
 - Restore the conversation event endpoint with cursor replay of the latest 256 events per server process.
 
 ### Changed in the PhotoStructure fork
