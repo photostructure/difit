@@ -64,11 +64,11 @@ files before releasing; never publish the unscoped upstream package.
 - npm validates a staged package, which takes 5 to 20 minutes, then holds it
   until a maintainer approves it with 2FA.
 - `github-release.yaml` (**Publish GitHub Release after npm approval**) checks npm
-  in its `validate` job 10, 20, 35 and 55 minutes after it starts, then every 30
-  minutes, for up to 5 hours 25 minutes. Any npm error other than E404 ends the job
-  early. Once npm serves the version, its `release` job re-verifies the signed tag
-  and creates the immutable GitHub release. The release notes are the version's
-  `CHANGELOG.md` section, read at the tag, followed by GitHub's generated notes.
+  in its `validate` job every 5 minutes, for up to 5 hours 45 minutes. Any npm
+  error other than E404 ends the job early. Once npm serves the version, its
+  `release` job re-verifies the signed tag and creates the immutable GitHub
+  release. The release notes are the version's `CHANGELOG.md` section, read at
+  the tag, followed by GitHub's generated notes.
 
 ## Approve and record
 
