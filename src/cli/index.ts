@@ -522,8 +522,6 @@ Editor configuration (set before starting difit):
         console.error(`   Server is running at ${launchUrl} if you want to check manually.\n`);
       } else if (options.open) {
         console.error('🌐 Opening browser...\n');
-      } else {
-        console.error('💡 Use --open to automatically open browser\n');
       }
     } catch (error) {
       console.error('Error:', error instanceof Error ? error.message : 'Unknown error');
